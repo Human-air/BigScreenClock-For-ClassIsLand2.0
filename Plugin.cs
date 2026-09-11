@@ -59,6 +59,7 @@ public class Plugin : PluginBase
 
         services.AddHostedService<ServiceProviderCapture>();
         services.AddHostedService<AutoTriggerService>();
+        services.AddHostedService<TrayMenuService>();
 
         services.AddSettingsPage<EveningSelfStudyClock.Settings.SettingsPage>();
     }

@@ -1,13 +1,23 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="EveningSelfStudyClock.Views.FullScreenClockWindow"
+        xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
+        xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
         Title="{Binding WindowTitle}"
         WindowState="FullScreen"
         SystemDecorations="None"
-        ShowInTaskbar="False"
+        ShowInTaskbar="True"
         CanResize="False"
         Background="{Binding BackgroundColor}"
         FontFamily="Microsoft YaHei,SimHei,sans-serif">
+
+    <Window.Styles>
+        <!-- 矢量图标：用 CI 自带的 Lucide 图标字体（写死的用 {ci:LI 图标名}，
+             随数据变化的如天气/档位由 VM 算出字形绑定 Text） -->
+        <Style Selector="TextBlock.icon">
+            <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
+        </Style>
+    </Window.Styles>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -31,7 +41,7 @@
                     <!-- 天气块（含正下方颜文字） -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowWeatherInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="{Binding WeatherIcon}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{Binding WeatherIcon}" FontSize="20" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding WeatherText}" FontSize="19" FontWeight="Bold"
                                        Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
@@ -41,7 +51,7 @@
                     <!-- 降雨块（并入第一行时；含正下方颜文字） -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowRainMergedInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="☔" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
                                        Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
@@ -51,7 +61,7 @@
                     <!-- 倒计时块（并入第一行时；无天气时作主位；含正下方颜文字） -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowCountdownMergedInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="⏳" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
                                        Foreground="#FFFFDD" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
@@ -101,19 +111,22 @@
                 <StackPanel Spacing="8" Width="{Binding #ClockText.Bounds.Width, FallbackValue=640}"
                             HorizontalAlignment="Center"
                             IsVisible="{Binding ShowDecibelMeter}">
-                    <!-- 标题行：左「📢 教室音量」，右当前档位 emoji + 文字（档位色） -->
+                    <!-- 标题行：左「教室音量」，右当前档位文字（档位色；不配强度图标——
+                         安静时只有一格反而像颗像素点） -->
                     <Grid ColumnDefinitions="Auto,*">
-                        <TextBlock Text="📢 教室音量" FontSize="20" FontWeight="Bold"
-                                   Foreground="{Binding NoiseTitleColor}"/>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding NoiseLevelEmoji}" FontSize="20" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
-                                       Foreground="{Binding NoiseLevelFillBrush}" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="20"
+                                       Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
+                            <TextBlock Text="教室音量" FontSize="20" FontWeight="Bold"
+                                       Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
                         </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
+                                   Foreground="{Binding NoiseLevelFillBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
                     <!-- 轨道 + 分段刻度块（竖向实心矩形，略高于轨道、从轨道中突出） -->
                     <Grid ColumnDefinitions="1*,3,1*,3,1*,3,1*,3,1*" Height="16">
-                        <ProgressBar Grid.ColumnSpan="9" Minimum="0" Maximum="100" Value="{Binding NoiseLevelProgress}"
+                        <ProgressBar Grid.ColumnSpan="9" Minimum="0" Maximum="100" Value="{Binding AnimatedProgress}"
                                      VerticalAlignment="Center" Height="5"
                                      Foreground="{Binding NoiseLevelFillBrush}"
                                      Background="{Binding NoiseLevelTrackBrush}">
@@ -166,8 +179,16 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"
-                                               FontSize="24" FontWeight="Bold"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <!-- 图标（如 ⏳/✅ 位置）：无图标的片段自动不占位 -->
+                                        <TextBlock Classes="icon" Text="{Binding Icon}"
+                                                   IsVisible="{Binding HasIcon}"
+                                                   Foreground="{Binding Foreground}"
+                                                   FontSize="24" VerticalAlignment="Center"
+                                                   Margin="16,0,6,0"/>
+                                        <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"
+                                                   FontSize="24" FontWeight="Bold"/>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
@@ -177,27 +198,56 @@
                                    FontSize="24" FontWeight="Bold" Margin="16,0,0,0"/>
                     </StackPanel>
                 </Border>
-                <Button Grid.Column="1" Content="✕ 退出全屏时钟"
-                        FontSize="15" Foreground="#ffffff44"
-                        Background="#22ffffff" BorderThickness="0"
-                        CornerRadius="6" Padding="12,6"
-                        Cursor="Hand" Opacity="0.5"
-                        Click="ExitButton_Click">
-                    <Button.Styles>
-                        <Style Selector="Button:pointerover">
-                            <Setter Property="Opacity" Value="1"/>
-                            <Setter Property="Background" Value="#44ffffff"/>
-                        </Style>
-                    </Button.Styles>
-                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button
+                            FontSize="15" Foreground="#ffffff44"
+                            Background="#22ffffff" BorderThickness="0"
+                            CornerRadius="6" Padding="12,6"
+                            Cursor="Hand" Opacity="0.5"
+                            Click="MinimizeButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Classes="icon" Text="{ci:LI Minus}" FontSize="15"
+                                       Foreground="#ffffff44" VerticalAlignment="Center"/>
+                            <TextBlock Text="最小化" FontSize="15" Foreground="#ffffff44" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Button.Styles>
+                            <Style Selector="Button:pointerover">
+                                <Setter Property="Opacity" Value="1"/>
+                                <Setter Property="Background" Value="#44ffffff"/>
+                            </Style>
+                        </Button.Styles>
+                    </Button>
+                    <Button
+                            FontSize="15" Foreground="#ffffff44"
+                            Background="#22ffffff" BorderThickness="0"
+                            CornerRadius="6" Padding="12,6"
+                            Cursor="Hand" Opacity="0.5"
+                            Click="ExitButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Classes="icon" Text="{ci:LI X}" FontSize="15"
+                                       Foreground="#ffffff44" VerticalAlignment="Center"/>
+                            <TextBlock Text="退出全屏时钟" FontSize="15" Foreground="#ffffff44" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Button.Styles>
+                            <Style Selector="Button:pointerover">
+                                <Setter Property="Opacity" Value="1"/>
+                                <Setter Property="Background" Value="#44ffffff"/>
+                            </Style>
+                        </Button.Styles>
+                    </Button>
+                </StackPanel>
             </Grid>
 
             <!-- 免责声明（进度带已移至窗口最底部独立层） -->
             <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                <TextBlock Text="{Binding DisclaimerText}"
-                           FontSize="10" Foreground="#40ffffff"
-                           HorizontalAlignment="Center" TextAlignment="Center"
-                           TextWrapping="Wrap"/>
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" HorizontalAlignment="Center">
+                    <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="11"
+                               Foreground="#40ffffff" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding DisclaimerText}"
+                               FontSize="10" Foreground="#40ffffff"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+                </Grid>
             </StackPanel>
 
             <!-- 左上角提醒面板（无边框无背景纯文字：未并入第一行的 降雨/倒计时/文本 + 预警。天气在顶部行主位，预警始终单开） -->
@@ -209,7 +259,7 @@
                     <StackPanel Spacing="8">
                         <!-- 降雨提醒（未并入第一行才在面板显示）：☔ + 主标题 + 小字号副标题 -->
                         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowRainReminderPanel}">
-                            <TextBlock Text="☔" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
                                        Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding RainSubtitle}" FontSize="12" Foreground="#AAFFFFFF" VerticalAlignment="Center"
@@ -217,7 +267,7 @@
                         </StackPanel>
                         <!-- 倒计时（未并入第一行才在面板显示） -->
                         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowCountdownPanel}">
-                            <TextBlock Text="⏳" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
                                        Foreground="#FFFFDD" VerticalAlignment="Center" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding CountdownSubtitle}" FontSize="12" Foreground="#AAFFFFFF" VerticalAlignment="Center"
@@ -232,9 +282,14 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <!-- 悬停该条预警即在顶部弹幕带显示其详情；移开即消失 -->
-                                        <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Foreground}"
-                                                   FontSize="15" FontWeight="Bold" TextWrapping="Wrap" Cursor="Hand"
-                                                   PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="5"
+                                                    Cursor="Hand"
+                                                    PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited">
+                                            <TextBlock Classes="icon" Text="{Binding Icon}" FontSize="14"
+                                                       Foreground="{Binding Foreground}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Foreground}"
+                                                       FontSize="15" FontWeight="Bold" TextWrapping="Wrap"/>
+                                        </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

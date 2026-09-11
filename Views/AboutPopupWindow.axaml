@@ -1,5 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
+        xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
         x:Class="EveningSelfStudyClock.Views.AboutPopupWindow"
         Title="关于 大屏时钟"
         Width="460" Height="240"
@@ -11,9 +13,19 @@
         Background="#14141f"
         FontFamily="Microsoft YaHei,SimHei,sans-serif">
 
+    <Window.Styles>
+        <Style Selector="TextBlock.icon">
+            <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
+        </Style>
+    </Window.Styles>
+
     <StackPanel Margin="24,18" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <TextBlock Text="🎉 大屏时钟" FontSize="22" FontWeight="Bold" Foreground="#ffffff"
-                   HorizontalAlignment="Center"/>
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+            <TextBlock Classes="icon" Text="{ci:LI Clock}" FontSize="22" Foreground="#ffffff"
+                       VerticalAlignment="Center"/>
+            <TextBlock Text="大屏时钟" FontSize="22" FontWeight="Bold" Foreground="#ffffff"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
         <TextBlock Text="制作者：Human-air" FontSize="15" Foreground="#ccffffff"
                    HorizontalAlignment="Center"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">

@@ -34,9 +34,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     private double _currentRms;
     private int _displayLevel; // 0-100 正数显示
     private string _noiseLevelText = "等待检测...";
-    private string _noiseLevelEmoji = "🤫";
     private double _noiseLevelProgress;
-    private double _lastPostedProgress = -1;
     private bool _isMonitoring;
     private string _statusMessage = "";
     private NoiseLevel? _currentSegmentLevel;
@@ -74,12 +72,6 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     {
         get => _noiseLevelText;
         private set { _noiseLevelText = value; OnPropertyChanged(); }
-    }
-
-    public string NoiseLevelEmoji
-    {
-        get => _noiseLevelEmoji;
-        private set { _noiseLevelEmoji = value; OnPropertyChanged(); }
     }
 
     public double NoiseLevelProgress
@@ -131,16 +123,22 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             if (count == 0)
             {
                 NoiseLevelText = "未检测到麦克风";
-                NoiseLevelEmoji = "🔇";
                 return;
             }
 
-            // 固定用默认设备（0）；打开失败自动搜其他可用设备（如设备休眠失效后看门狗重启）
+            // 固定用默认设备（0）；打开失败自动搜其他可用设备（如设备休眠失效后看门狗重启）。
+            // 缓冲时长 = 采样间隔：块越大采样越稀，越省性能、越不拖日志与大屏时钟。
+            var bufferMs = (int)Math.Clamp(_settings.SamplingIntervalSeconds * 1000, 100, 1000);
             foreach (var idx in Enumerable.Range(0, count))
             {
                 try
                 {
-                    var wi = new WaveInEvent { DeviceNumber = idx, WaveFormat = new WaveFormat(44100, 16, 1) };
+                    var wi = new WaveInEvent
+                    {
+                        DeviceNumber = idx,
+                        WaveFormat = new WaveFormat(44100, 16, 1),
+                        BufferMilliseconds = bufferMs
+                    };
                     wi.DataAvailable += OnDataAvailable;
                     wi.RecordingStopped += OnRecordingStopped;
                     wi.StartRecording();
@@ -153,13 +151,11 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             }
 
             NoiseLevelText = "无法打开任何麦克风";
-            NoiseLevelEmoji = "🔇";
         }
         catch (Exception ex)
         {
             _isMonitoring = false;
             NoiseLevelText = $"麦克风错误: {ex.Message}";
-            NoiseLevelEmoji = "❌";
         }
     }
 
@@ -224,11 +220,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
         _isMonitoring = false;
         if (e.Exception != null)
         {
-            Dispatcher.UIThread.Post(() =>
-            {
-                StatusMessage = $"录音异常: {e.Exception.Message}";
-                NoiseLevelEmoji = "⚠️";
-            });
+            Dispatcher.UIThread.Post(() => StatusMessage = $"录音异常: {e.Exception.Message}");
         }
     }
 
@@ -268,20 +260,12 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
                 : 0.1;
             var result = _detector.Process(rawRms, dtSeconds);
 
-            // 显示：仅在等级变化或进度明显变化时通知 UI（避免 10Hz 全量刷新）
-            var (text, emoji, progress) = MapToDisplay(result.Level, result.SmoothedRms);
-            if (result.LevelChanged || Math.Abs(progress - _lastPostedProgress) > 1.0)
-            {
-                _lastPostedProgress = progress;
-                Dispatcher.UIThread.Post(() =>
-                {
-                    CurrentRms = result.SmoothedRms;
-                    DisplayLevel = (int)Math.Clamp(result.SmoothedRms * 200, 0, 100);
-                    NoiseLevelText = text;
-                    NoiseLevelEmoji = emoji;
-                    NoiseLevelProgress = progress;
-                });
-            }
+            // 显示：进度按 NoiseLevelDisplay 从检测器分级算出（与记录判定同源）。
+            // 采样频率已由缓冲时长控制（默认每秒 5 次），每次采样直接把目标进度发给界面，
+            // 条在两个采样点之间的滑动由 VM 的动画补平滑（这里不再节流，避免条看着一顿一顿）。
+            var progress = NoiseLevelDisplay.ProgressOf(result.Level, result.SmoothedRms,
+                _settings.DecibelGoodThreshold, _settings.DecibelNormalThreshold, _settings.DecibelNoisyThreshold);
+            Dispatcher.UIThread.Post(() => NoiseLevelProgress = progress);
 
             // 计数：段结束结算事件（事件等级已由探测器按段内占比判定）
             if (result.EventFired && result.EventLevel.HasValue)
@@ -301,31 +285,6 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             WriteDebugLog(rawRms, peak, result);
         }
         catch { }
-    }
-
-    /// <summary>
-    /// 平滑等级 → 显示文案/表情/进度。Noisy 等级按音量再细分为「吵闹/嘈杂」。
-    /// </summary>
-    private (string text, string emoji, double progress) MapToDisplay(NoiseLevel level, double smooth)
-    {
-        double quiet = _settings.DecibelQuietThreshold;
-        double good = _settings.DecibelGoodThreshold;
-        double normal = _settings.DecibelNormalThreshold;
-        double noisy = _settings.DecibelNoisyThreshold;
-
-        switch (level)
-        {
-            case NoiseLevel.Quiet:
-                return ("安静", "🙂", Math.Clamp(smooth / quiet * 25, 0, 25));
-            case NoiseLevel.Good:
-                return ("良好", "🤫", 25 + Math.Clamp((smooth - quiet) / (good - quiet) * 25, 0, 25));
-            case NoiseLevel.Normal:
-                return ("一般", "💬", 50 + Math.Clamp((smooth - good) / (normal - good) * 25, 0, 25));
-            default: // Noisy
-                if (smooth >= noisy * 1.3)
-                    return ("嘈杂", "📢", 95 + Math.Clamp((smooth - noisy) / 0.1 * 5, 0, 5));
-                return ("吵闹", "🗣️", 75 + Math.Clamp((smooth - normal) / (noisy - normal) * 20, 0, 20));
-        }
     }
 
     // ===== 调试日志（开发工具，设置项开关） =====

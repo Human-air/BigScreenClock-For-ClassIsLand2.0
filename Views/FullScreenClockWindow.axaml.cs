@@ -157,6 +157,11 @@ public partial class FullScreenClockWindow : Window
         (DataContext as FullScreenClockViewModel)?.ExitFullScreen();
     }
 
+    private void MinimizeButton_Click(object? sender, RoutedEventArgs e)
+    {
+        (DataContext as FullScreenClockViewModel)?.Minimize();
+    }
+
     /// <summary>鼠标进入计数区域：显示底部记录规则</summary>
     private void CounterArea_PointerEntered(object? sender, PointerEventArgs e)
     {

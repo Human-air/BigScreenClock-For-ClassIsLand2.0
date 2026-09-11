@@ -275,6 +275,19 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     }
     public string FallWindowSecondsText => $"{_settings.FallWindowSeconds:0.#} 秒";
 
+    /// <summary>音量采样间隔（秒）。</summary>
+    public double SamplingIntervalSeconds
+    {
+        get => _settings.SamplingIntervalSeconds;
+        set
+        {
+            _settings.SamplingIntervalSeconds = value;
+            OnPropertyChanged(nameof(SamplingIntervalSeconds));
+            OnPropertyChanged(nameof(SamplingIntervalSecondsText));
+        }
+    }
+    public string SamplingIntervalSecondsText => $"{_settings.SamplingIntervalSeconds:0.##} 秒";
+
     public bool SkipFirst3Min
     {
         get => _settings.SkipFirst3Min;
@@ -391,6 +404,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         get => _settings.ShowEmojiSubtitles;
         set { _settings.ShowEmojiSubtitles = value; OnPropertyChanged(nameof(ShowEmojiSubtitles)); }
+    }
+
+    /// <summary>是否在 CI 托盘右键菜单显示「进入大屏时钟」入口。</summary>
+    public bool ShowTrayMenuEntry
+    {
+        get => _settings.ShowTrayMenuEntry;
+        set { _settings.ShowTrayMenuEntry = value; OnPropertyChanged(nameof(ShowTrayMenuEntry)); }
     }
 
     // ===== 外观颜色（HSV 颜色选择器，Avalonia.Controls.ColorPicker 双向绑定） =====
@@ -521,11 +541,3 @@ public class CourseSelectionItem : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-internal class RelayCommand : ICommand
-{
-    private readonly Action _action;
-    public RelayCommand(Action action) => _action = action;
-    public bool CanExecute(object? parameter) => true;
-    public void Execute(object? parameter) => _action();
-    public event EventHandler? CanExecuteChanged;
-}

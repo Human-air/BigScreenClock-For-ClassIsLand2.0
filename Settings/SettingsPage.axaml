@@ -1,252 +1,411 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:cp="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
+             xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
+             xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
              x:Class="EveningSelfStudyClock.Settings.SettingsPage">
+    <UserControl.Styles>
+        <!-- 矢量图标：用 CI 自带的 Lucide 图标字体，{ci:LI 图标名} 取字形 -->
+        <Style Selector="TextBlock.icon">
+            <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Styles>
     <Grid ColumnDefinitions="*,280" Margin="12">
 
-        <!-- ===== 左栏：设置（可滚动） ===== -->
+        <!-- ===== 左栏：设置（可滚动） =====
+             整体透明无底：文字颜色绑 FluentAvalonia 主题键（CI 亮色=深字 / 暗色=白字），
+             不再写死卡片背景与白色前景，随 CI 主题自动切换。 -->
         <ScrollViewer Grid.Column="0" Padding="0,0,12,0">
-            <StackPanel Spacing="14" Margin="4,8,0,8">
+            <StackPanel Spacing="18" Margin="4,8,0,8">
 
                 <!-- 功能开关 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="⚙ 显示开关" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <CheckBox IsChecked="{Binding ShowDecibelMeter}" FontSize="14" Foreground="#ffffff">🎤 教室音量</CheckBox>
-                        <CheckBox IsChecked="{Binding ShowCourseInfo}" FontSize="14" Foreground="#ffffff">📋 课程信息</CheckBox>
-                        <CheckBox IsChecked="{Binding ShowNoisyCounter}" FontSize="14" Foreground="#ffffff">📊 吵闹计数</CheckBox>
-                        <CheckBox IsChecked="{Binding ShowReminderPanel}" FontSize="14" Foreground="#ffffff">🔔 提醒显示</CheckBox>
-                        <!-- 提醒子项：勾选「提醒显示」后出现 -->
-                        <StackPanel Spacing="6" Margin="20,2,0,0"
-                                    IsVisible="{Binding ShowReminderPanel}">
-                            <TextBlock Text="提醒面板要显示哪几类？倒计时/文本需先在 CI 主界面加了对应组件才有内容。" FontSize="11" Foreground="#88ffffff" TextWrapping="Wrap"/>
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="2"
-                                  RowDefinitions="Auto,Auto,Auto">
-                                <CheckBox Grid.Row="0" Grid.Column="0" IsChecked="{Binding ShowWeatherReminder}"
-                                          FontSize="14" Foreground="#ddffffff">☀ 天气</CheckBox>
-                                <CheckBox Grid.Row="0" Grid.Column="1" IsChecked="{Binding ShowAlertsReminder}"
-                                          FontSize="14" Foreground="#ddffffff">⚠ 预警</CheckBox>
-                                <CheckBox Grid.Row="1" Grid.Column="0" IsChecked="{Binding ShowCountdownReminder}"
-                                          FontSize="14" Foreground="#ddffffff">⏳ 倒计时</CheckBox>
-                                <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding ShowTextReminder}"
-                                          FontSize="14" Foreground="#ddffffff">📝 文本</CheckBox>
-                                <CheckBox Grid.Row="2" Grid.Column="0" IsChecked="{Binding ShowRainReminder}"
-                                          FontSize="14" Foreground="#ddffffff">☔ 降雨提醒</CheckBox>
-                                <CheckBox Grid.Row="2" Grid.Column="1" IsChecked="{Binding ShowEmojiSubtitles}"
-                                          FontSize="14" Foreground="#ddffffff">(ノω≦) 颜文字</CheckBox>
-                            </Grid>
-                        </StackPanel>
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Settings}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="显示开关" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <CheckBox IsChecked="{Binding ShowDecibelMeter}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Mic}" FontSize="13"/>
+                            <TextBlock Text="教室音量" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <CheckBox IsChecked="{Binding ShowCourseInfo}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI BookOpen}" FontSize="13"/>
+                            <TextBlock Text="课程信息" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <CheckBox IsChecked="{Binding ShowNoisyCounter}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI ChartColumn}" FontSize="13"/>
+                            <TextBlock Text="吵闹计数" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <CheckBox IsChecked="{Binding ShowReminderPanel}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Bell}" FontSize="13"/>
+                            <TextBlock Text="提醒显示" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <!-- 提醒子项：勾选「提醒显示」后出现 -->
+                    <StackPanel Spacing="6" Margin="20,2,0,0"
+                                IsVisible="{Binding ShowReminderPanel}">
+                        <TextBlock Text="提醒面板要显示哪几类？倒计时/文本需先在 CI 主界面加了对应组件才有内容。" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="2"
+                              RowDefinitions="Auto,Auto,Auto">
+                            <CheckBox Grid.Row="0" Grid.Column="0" IsChecked="{Binding ShowWeatherReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI Sun}" FontSize="13"/>
+                                    <TextBlock Text="天气" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox Grid.Row="0" Grid.Column="1" IsChecked="{Binding ShowAlertsReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="13"/>
+                                    <TextBlock Text="预警" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox Grid.Row="1" Grid.Column="0" IsChecked="{Binding ShowCountdownReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="13"/>
+                                    <TextBlock Text="倒计时" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding ShowTextReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="13"/>
+                                    <TextBlock Text="文本" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox Grid.Row="2" Grid.Column="0" IsChecked="{Binding ShowRainReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="13"/>
+                                    <TextBlock Text="降雨提醒" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                            <CheckBox Grid.Row="2" Grid.Column="1" IsChecked="{Binding ShowEmojiSubtitles}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI Smile}" FontSize="13"/>
+                                    <TextBlock Text="颜文字" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </Grid>
+                    </StackPanel>
+                    <!-- 托盘菜单入口开关 -->
+                    <CheckBox IsChecked="{Binding ShowTrayMenuEntry}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI SquareMenu}" FontSize="13"/>
+                            <TextBlock Text="托盘菜单显示「进入大屏时钟」" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <TextBlock Text="关闭后 CI 托盘右键菜单里不再出现该入口（下次打开菜单即生效）。" FontSize="11" Margin="20,0,0,0"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
 
                 <!-- 目标课程 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="📋 触发课程" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <TextBlock Text="选择要触发的课程，可添加多个。" FontSize="12" Foreground="#88ffffff" TextWrapping="Wrap"/>
-                        <ItemsControl ItemsSource="{Binding SelectedCourses}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid ColumnDefinitions="*,Auto" Margin="0,2" ColumnSpacing="6">
-                                        <ComboBox ItemsSource="{Binding AllCourses}"
-                                                  SelectedItem="{Binding SelectedName}"
-                                                  FontSize="13" Padding="6,3"/>
-                                        <Button Grid.Column="1" Content="✕" FontSize="13"
-                                                Foreground="#ff6666" Background="Transparent"
-                                                BorderThickness="0" Cursor="Hand" Padding="6,3"
-                                                Command="{Binding RemoveCommand}"/>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <Button Content="＋ 添加课程" FontSize="13"
-                                Foreground="#88ccff" Background="#22ffffff"
-                                CornerRadius="6" Padding="8,5"
-                                Cursor="Hand" Click="AddCourse_Click"/>
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI ListChecks}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="触发课程" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <TextBlock Text="选择要触发的课程，可添加多个。" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <ItemsControl ItemsSource="{Binding SelectedCourses}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,2" ColumnSpacing="6">
+                                    <ComboBox ItemsSource="{Binding AllCourses}"
+                                              SelectedItem="{Binding SelectedName}"
+                                              FontSize="13" Padding="6,3"/>
+                                    <Button Grid.Column="1" FontSize="13"
+                                            Foreground="#d9493f" Background="Transparent"
+                                            BorderThickness="0" Cursor="Hand" Padding="6,3"
+                                            Command="{Binding RemoveCommand}">
+                                        <TextBlock Classes="icon" Text="{ci:LI X}" FontSize="13"/>
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button FontSize="13"
+                            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            CornerRadius="6" Padding="8,5"
+                            Cursor="Hand" Click="AddCourse_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Plus}" FontSize="12"/>
+                            <TextBlock Text="添加课程" FontSize="13" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
 
                 <!-- 音量检测 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="🔊 音量检测" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <TextBlock Text="使用系统默认麦克风采集" FontSize="11" Foreground="#88ffffff"/>
-                        <TextBlock Text="等级阈值 (RMS)  —— 拖动滑块或直接填数字（范围 0.001~1.000）" FontSize="12" Foreground="#aaffffff" Margin="0,4,0,0"/>
-                        <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
-                              RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="安静" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="0" Grid.Column="1" Minimum="-3" Maximum="0" TickFrequency="0.1"
-                                    Value="{Binding DecibelQuietThresholdIndex}" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding DecibelQuietThresholdText}" FontSize="12" Padding="4" Width="70"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="良好" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="1" Grid.Column="1" Minimum="{Binding GoodThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
-                                    Value="{Binding DecibelGoodThresholdIndex}" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding DecibelGoodThresholdText}" FontSize="12" Padding="4" Width="70"/>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="一般" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="2" Grid.Column="1" Minimum="{Binding NormalThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
-                                    Value="{Binding DecibelNormalThresholdIndex}" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding DecibelNormalThresholdText}" FontSize="12" Padding="4" Width="70"/>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="吵闹" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="3" Grid.Column="1" Minimum="{Binding NoisyThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
-                                    Value="{Binding DecibelNoisyThresholdIndex}" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="3" Grid.Column="2" Text="{Binding DecibelNoisyThresholdText}" FontSize="12" Padding="4" Width="70"/>
-                            <TextBlock Grid.Row="4" Grid.ColumnSpan="3" Text="超过吵闹 = 「嘈杂」；建议从小到大填写" FontSize="11" Foreground="#66ffffff"/>
-                        </Grid>
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Volume2}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="音量检测" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <TextBlock Text="使用系统默认麦克风采集" FontSize="11"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    <TextBlock Text="等级阈值 (RMS)  —— 拖动滑块或直接填数字（范围 0.001~1.000）" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0"/>
+                    <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="安静" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="0" Grid.Column="1" Minimum="-3" Maximum="0" TickFrequency="0.1"
+                                Value="{Binding DecibelQuietThresholdIndex}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding DecibelQuietThresholdText}" FontSize="12" Padding="4" Width="70"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="良好" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="1" Grid.Column="1" Minimum="{Binding GoodThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
+                                Value="{Binding DecibelGoodThresholdIndex}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding DecibelGoodThresholdText}" FontSize="12" Padding="4" Width="70"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="一般" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="2" Grid.Column="1" Minimum="{Binding NormalThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
+                                Value="{Binding DecibelNormalThresholdIndex}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding DecibelNormalThresholdText}" FontSize="12" Padding="4" Width="70"/>
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="吵闹" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="3" Grid.Column="1" Minimum="{Binding NoisyThresholdSliderMin}" Maximum="0" TickFrequency="0.1"
+                                Value="{Binding DecibelNoisyThresholdIndex}" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="2" Text="{Binding DecibelNoisyThresholdText}" FontSize="12" Padding="4" Width="70"/>
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="采样间隔" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="4" Grid.Column="1" Value="{Binding SamplingIntervalSeconds}"
+                                Minimum="0.1" Maximum="1.0" TickFrequency="0.1" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SamplingIntervalSecondsText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="72" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="5" Grid.ColumnSpan="3"
+                                   Text="超过吵闹 = 「嘈杂」；建议从小到大填写。采样间隔：麦克风每采集多长一段音频算一次读数（0.2 秒 = 每秒 5 次），调大更省性能、更不拖日志和大屏时钟，条靠动画补平滑"
+                                   FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Grid>
+                </StackPanel>
 
                 <!-- 记录参数 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="🧮 记录参数" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
-                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="起算底线" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="0" Grid.Column="1" Value="{Binding NoisySustainSeconds}"
-                                    Minimum="0.5" Maximum="5" TickFrequency="0.1"/>
-                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding NoisySustainSecondsText}" FontSize="12"
-                                       Foreground="#ffffff" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="回落窗口" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="1" Grid.Column="1" Value="{Binding FallWindowSeconds}"
-                                    Minimum="0" Maximum="15" TickFrequency="0.5"/>
-                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FallWindowSecondsText}" FontSize="12"
-                                       Foreground="#ffffff" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="保护时长" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="2" Grid.Column="1" Value="{Binding SkipFirstMinutes}"
-                                    Minimum="0" Maximum="10" TickFrequency="1"
-                                    IsEnabled="{Binding SkipFirst3Min}"/>
-                            <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SkipFirstMinutesText}" FontSize="12"
-                                       Foreground="#ffffff" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
-                            <CheckBox Grid.Row="3" Grid.ColumnSpan="3" IsChecked="{Binding SkipFirst3Min}"
-                                      FontSize="13" Foreground="#ffffff">🛡 上课初期保护（上课开始后前 N 分钟不计数）</CheckBox>
-                            <CheckBox Grid.Row="4" Grid.ColumnSpan="3" IsChecked="{Binding EnableNoiseDebugLog}"
-                                      FontSize="13" Foreground="#ffffff">🛠 调试日志（输出 NoiseDebugLog.csv，用于收集真实数据校准阈值）</CheckBox>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="日志保留" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="5" Grid.Column="1" Value="{Binding LogRetentionDays}"
-                                    Minimum="1" Maximum="5" TickFrequency="1"/>
-                            <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding LogRetentionDaysText}" FontSize="12"
-                                       Foreground="#ffffff" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="单文件大小" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Row="6" Grid.Column="1" Value="{Binding LogSizeLimitKb}"
-                                    Minimum="500" Maximum="3072" TickFrequency="100"/>
-                            <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding LogSizeLimitKbText}" FontSize="12"
-                                       Foreground="#ffffff" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Row="7" Grid.ColumnSpan="3" Text="测试完记得关闭本开关；旧日志按天数自动清理，单个文件超大小自动换新文件"
-                                       FontSize="11" Foreground="#66ffffff" TextWrapping="Wrap"/>
-                        </Grid>
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Calculator}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="记录参数" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="起算底线" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="0" Grid.Column="1" Value="{Binding NoisySustainSeconds}"
+                                Minimum="0.5" Maximum="5" TickFrequency="0.1"/>
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding NoisySustainSecondsText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="回落窗口" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding FallWindowSeconds}"
+                                Minimum="0" Maximum="15" TickFrequency="0.5"/>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FallWindowSecondsText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="保护时长" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="2" Grid.Column="1" Value="{Binding SkipFirstMinutes}"
+                                Minimum="0" Maximum="10" TickFrequency="1"
+                                IsEnabled="{Binding SkipFirst3Min}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SkipFirstMinutesText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="3" Grid.ColumnSpan="3" IsChecked="{Binding SkipFirst3Min}"
+                                  FontSize="13">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <TextBlock Classes="icon" Text="{ci:LI ShieldCheck}" FontSize="12"/>
+                                <TextBlock Text="上课初期保护（上课开始后前 N 分钟不计数）" FontSize="13" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </CheckBox>
+                        <CheckBox Grid.Row="4" Grid.ColumnSpan="3" IsChecked="{Binding EnableNoiseDebugLog}"
+                                  FontSize="13">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <TextBlock Classes="icon" Text="{ci:LI Wrench}" FontSize="12"/>
+                                <TextBlock Text="调试日志（输出 NoiseDebugLog.csv，用于收集真实数据校准阈值）" FontSize="13" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </CheckBox>
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="日志保留" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="5" Grid.Column="1" Value="{Binding LogRetentionDays}"
+                                Minimum="1" Maximum="5" TickFrequency="1"/>
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding LogRetentionDaysText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="单文件大小" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="6" Grid.Column="1" Value="{Binding LogSizeLimitKb}"
+                                Minimum="500" Maximum="3072" TickFrequency="100"/>
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding LogSizeLimitKbText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="7" Grid.ColumnSpan="3" Text="测试完记得关闭本开关；旧日志按天数自动清理，单个文件超大小自动换新文件"
+                                   FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
+                    </Grid>
+                </StackPanel>
 
                 <!-- 外观 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="🎨 外观" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <TextBlock Text="颜色用 HSV 取色器调整：点击色块弹出色相条 + 色板，也可直接填 hex" FontSize="11" Foreground="#88ffffff" TextWrapping="Wrap"/>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                            <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <Slider Grid.Column="1" Value="{Binding ClockFontSize}" Minimum="60" Maximum="400"
-                                    TickFrequency="20" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="{Binding ClockFontSizeText}" FontSize="12"
-                                       Foreground="#ffffff" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
-                        </Grid>
-                        <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板 -->
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="背景颜色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding BackgroundColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding BackgroundColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding BackgroundColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="字体颜色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding FontColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding FontColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding FontColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="强调色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding AccentColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding AccentColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding AccentColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="进度条颜色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding ProgressColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding ProgressColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding ProgressColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="课程信息颜色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding CourseInfoColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding CourseInfoColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding CourseInfoColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <TextBlock Grid.Column="0" Text="音量条文字颜色" VerticalAlignment="Center" Foreground="#aaffffff" FontSize="13"/>
-                            <TextBlock Grid.Column="1" Text="{Binding NoiseTitleColorHex}" FontSize="12" Foreground="#99ffffff"
-                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                            <cp:ColorPicker Grid.Column="2" Color="{Binding NoiseTitleColorValue}"
-                                            IsAccentColorsVisible="False" Width="90" Height="28"
-                                            HorizontalAlignment="Right">
-                                <cp:ColorPicker.Content>
-                                    <Border Background="{Binding NoiseTitleColorBrush}" CornerRadius="3"
-                                            BorderBrush="#44ffffff" BorderThickness="1"/>
-                                </cp:ColorPicker.Content>
-                            </cp:ColorPicker>
-                        </Grid>
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Palette}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="外观" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <TextBlock Text="颜色用 HSV 取色器调整：点击色块弹出色相条 + 色板，也可直接填 hex" FontSize="11"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Column="1" Value="{Binding ClockFontSize}" Minimum="60" Maximum="400"
+                                TickFrequency="20" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding ClockFontSizeText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="背景颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding BackgroundColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding BackgroundColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding BackgroundColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="字体颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding FontColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding FontColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding FontColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="强调色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding AccentColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding AccentColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding AccentColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="进度条颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding ProgressColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding ProgressColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding ProgressColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="课程信息颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding CourseInfoColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding CourseInfoColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding CourseInfoColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="音量条文字颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding NoiseTitleColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding NoiseTitleColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding NoiseTitleColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
+                </StackPanel>
 
                 <!-- 规则说明 -->
-                <Border Background="#1e1e2e" CornerRadius="8" Padding="14,12">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="📝 记录规则" FontSize="17" FontWeight="Bold" Foreground="#ffffff"/>
-                        <TextBlock Text="• 一段噪音累计满「起算底线」秒才记一次（默认 1 秒），咳嗽、喷嚏等瞬时噪音不计数" FontSize="12" Foreground="#aaffffff" TextWrapping="Wrap"/>
-                        <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次" FontSize="12" Foreground="#aaffffff" TextWrapping="Wrap"/>
-                        <TextBlock Text="• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」" FontSize="12" Foreground="#aaffffff" TextWrapping="Wrap"/>
-                        <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数" FontSize="12" Foreground="#aaffffff" TextWrapping="Wrap"/>
-                        <TextBlock Text="⚠ 免责声明：分贝记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。" FontSize="12" Foreground="#ffaa44" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI ScrollText}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="记录规则" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </Border>
+                    <TextBlock Text="• 一段噪音累计满「起算底线」秒才记一次（默认 1 秒），咳嗽、喷嚏等瞬时噪音不计数"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" Margin="0,6,0,0">
+                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="13"
+                                   Foreground="#d97706"/>
+                        <TextBlock Grid.Column="1" Text="免责声明：分贝记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。"
+                                   FontSize="12" Foreground="#d97706" TextWrapping="Wrap"/>
+                    </Grid>
+                </StackPanel>
 
             </StackPanel>
         </ScrollViewer>
 
-        <!-- ===== 右栏：实时预览（置顶不滚动）+ 进入全屏时钟 ===== -->
+        <!-- ===== 右栏：实时预览（置顶不滚动）+ 进入全屏时钟 =====
+             预览黑底 = 模拟实际全屏时钟画面（该画面本身是深色 UI），故保持深色不随主题变。 -->
         <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Top" Margin="4,8,0,0">
             <Border Background="#000000" CornerRadius="12" Padding="12,10">
             <StackPanel Spacing="4" HorizontalAlignment="Center" Width="240">
@@ -265,23 +424,37 @@
                 <StackPanel IsVisible="{Binding ShowReminderPanel}" Spacing="2" Margin="0,2,0,2">
                     <!-- 顶部提醒行：天气 / 倒计时 / 日期 -->
                     <WrapPanel HorizontalAlignment="Center">
-                        <TextBlock Text="☀ 30° 多云" FontSize="9" Foreground="#ccffffff"
-                                   Margin="0,0,6,0" IsVisible="{Binding ShowWeatherReminder}"/>
-                        <TextBlock Text="⏳ 高考 还有 30 天" FontSize="9" Foreground="#ffffdd"
-                                   Margin="0,0,6,0" IsVisible="{Binding ShowCountdownReminder}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,6,0"
+                                    IsVisible="{Binding ShowWeatherReminder}">
+                            <TextBlock Classes="icon" Text="{ci:LI Sun}" FontSize="10" Foreground="#ccffffff"/>
+                            <TextBlock Text="30° 多云" FontSize="9" Foreground="#ccffffff" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,6,0"
+                                    IsVisible="{Binding ShowCountdownReminder}">
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="10" Foreground="#ffffdd"/>
+                            <TextBlock Text="高考 还有 30 天" FontSize="9" Foreground="#ffffdd" VerticalAlignment="Center"/>
+                        </StackPanel>
                         <TextBlock Text="8月29日 周五" FontSize="9" Foreground="#88ffffff"/>
                     </WrapPanel>
                     <!-- 降雨提醒 -->
-                    <TextBlock Text="☔ 20小时内当前地区有降雨 记得带伞哦 (ノω≦)"
-                               FontSize="9" Foreground="#aaffffff" HorizontalAlignment="Center"
-                               TextWrapping="Wrap" TextAlignment="Center"
-                               IsVisible="{Binding ShowRainReminder}"/>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="3"
+                          IsVisible="{Binding ShowRainReminder}">
+                        <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="10" Foreground="#aaffffff"/>
+                        <TextBlock Grid.Column="1" Text="20小时内当前地区有降雨 记得带伞哦 (ノω≦)"
+                                   FontSize="9" Foreground="#aaffffff" TextWrapping="Wrap"/>
+                    </Grid>
                     <!-- 预警 -->
-                    <TextBlock Text="⚠ 地质灾害气象风险预警" FontSize="9" Foreground="#ffdd44"
-                               HorizontalAlignment="Center" IsVisible="{Binding ShowAlertsReminder}"/>
+                    <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center"
+                                IsVisible="{Binding ShowAlertsReminder}">
+                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="10" Foreground="#ffdd44"/>
+                        <TextBlock Text="地质灾害气象风险预警" FontSize="9" Foreground="#ffdd44" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <!-- 文本框 -->
-                    <TextBlock Text="📝 自习课请保持安静" FontSize="9" Foreground="#ddffffff"
-                               HorizontalAlignment="Center" IsVisible="{Binding ShowTextReminder}"/>
+                    <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center"
+                                IsVisible="{Binding ShowTextReminder}">
+                        <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="10" Foreground="#ddffffff"/>
+                        <TextBlock Text="自习课请保持安静" FontSize="9" Foreground="#ddffffff" VerticalAlignment="Center"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <!-- 音量条（本版：标题+档位、分段刻度轨道、五档） -->
@@ -290,9 +463,12 @@
                         HorizontalAlignment="Center">
                     <StackPanel Spacing="3" Width="210">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Text="📢 教室音量" FontSize="9" Foreground="#bbffffff" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="🤫 良好" FontSize="9"
-                                       Foreground="#ffdd44" FontWeight="Bold" HorizontalAlignment="Right"/>
+                            <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="10" Foreground="#bbffffff"/>
+                                <TextBlock Text="教室音量" FontSize="9" Foreground="#bbffffff" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="良好" FontSize="9" Foreground="#ffdd44"
+                                       FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                         </Grid>
                         <!-- 轨道 + 分段刻度块 -->
                         <Grid ColumnDefinitions="1*,1,1*,1,1*,1,1*,1,1*" Height="10">
@@ -325,12 +501,17 @@
                 </Border>
             </StackPanel>
             </Border>
-            <Button Content="▶ 进入全屏时钟"
-                    FontSize="15" FontWeight="Bold"
-                    Foreground="#ffffff" Background="#4CAF50"
+            <Button FontSize="15" FontWeight="Bold"
+                    Foreground="#ffffff" Background="#2e7d32"
                     CornerRadius="8" Padding="10,8"
                     Cursor="Hand" Click="TestButton_Click"
-                    HorizontalAlignment="Stretch"/>
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                    <TextBlock Classes="icon" Text="{ci:LI Play}" FontSize="15" Foreground="#ffffff"/>
+                    <TextBlock Text="进入全屏时钟" FontSize="15" FontWeight="Bold" Foreground="#ffffff" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
         </StackPanel>
     </Grid>
 </UserControl>

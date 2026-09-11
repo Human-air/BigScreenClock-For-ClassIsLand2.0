@@ -25,6 +25,7 @@ public class PluginSettings : INotifyPropertyChanged
     private int _skipFirstMinutes = 3;
     private double _noisySustainSeconds = 1.0;
     private double _fallWindowSeconds = 5.0;
+    private double _samplingIntervalSeconds = 0.2;
     private bool _enableNoiseDebugLog;
     private int _logRetentionDays = 3;
     private int _logSizeLimitKb = 500;
@@ -37,6 +38,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showTextReminder = true;
     private bool _showRainReminder = true;
     private bool _showEmojiSubtitles = true;
+    private bool _showTrayMenuEntry = true;
 
     public PluginSettings()
     {
@@ -208,6 +210,17 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 音量采样间隔（秒）：麦克风每采集这么长一段音频才算一次读数（也是「记录阈值」的频率）。
+    /// 间隔越大采样越稀——越省性能、越不拖日志和大屏时钟，但读数越不跟手；条靠动画补平滑。
+    /// 默认 0.2 秒（每秒采样 5 次）。范围 0.1~1.0 秒。
+    /// </summary>
+    public double SamplingIntervalSeconds
+    {
+        get => _samplingIntervalSeconds;
+        set { _samplingIntervalSeconds = Math.Clamp(value, 0.1, 1.0); OnPropertyChanged(); }
+    }
+
+    /// <summary>
     /// 是否输出噪音调试日志（NoiseDebugLog.csv），用于收集真实数据校准阈值
     /// </summary>
     public bool EnableNoiseDebugLog
@@ -299,6 +312,13 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _showEmojiSubtitles;
         set { _showEmojiSubtitles = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否在 CI 托盘的右键菜单里显示「进入大屏时钟」入口（关闭则从菜单移除）。</summary>
+    public bool ShowTrayMenuEntry
+    {
+        get => _showTrayMenuEntry;
+        set { _showTrayMenuEntry = value; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

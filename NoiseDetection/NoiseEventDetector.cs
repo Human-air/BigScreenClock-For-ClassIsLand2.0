@@ -121,7 +121,10 @@ public sealed class NoiseEventDetector
         }
         else
         {
-            _smooth = _smooth * (1 - SmoothAlpha) + rawRms * SmoothAlpha;
+            // 平滑系数按块长折算：SmoothAlpha 是 100ms 块下的取值，块长变化时保持等效时间常数不变
+            // （否则把音频块改小会让平滑变弱、读数变毛刺）。
+            var alpha = SmoothAlpha >= 1 ? 1 : 1 - Math.Pow(1 - SmoothAlpha, dtSeconds / 0.1);
+            _smooth = _smooth * (1 - alpha) + rawRms * alpha;
         }
 
         var prev = _level;

@@ -12,8 +12,10 @@ using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Services;
+using ClassIsland.Core.Icons;
 using ClassIsland.Core.Models.Components;
 using ClassIsland.Shared.Enums;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.NoiseDetection;
 using EveningSelfStudyClock.Services;
@@ -41,10 +43,27 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private static readonly IBrush CountNormalBrush = new SolidColorBrush(Color.Parse("#ffff44"));
     private static readonly IBrush CountNoisyBrush = new SolidColorBrush(Color.Parse("#ff5555"));
 
-    // 音量条档位：档位名/表情 + 当前档位文字数据项（XAML 绑定）。
-    // 五档高亮、右侧状态、填充色全部以 NoiseLevelProgress 反推出的 CurrentSlot 为唯一源，避免不同步。
-    private static readonly string[] SlotNames = { "安静", "良好", "一般", "吵闹", "嘈杂" };
-    private static readonly string[] SlotEmojis = { "🙂", "🤫", "💬", "🗣️", "📢" };
+    // 计数区「暂未记录到吵闹」前的对勾图标字形（矢量）
+    private static readonly string CheckIcon = IconGlyph.Of(LucideIconKind.CircleCheck);
+
+    // 音量条档位：档位名来自 NoiseLevelDisplay（与检测器分级同源），
+    // 五档高亮、右侧状态、填充色全部以 AnimatedProgress 反推出的 CurrentSlot 为唯一源，避免不同步。
+    private static readonly string[] SlotNames = NoiseLevelDisplay.SlotNames;
+
+    /// <summary>五档画刷：静态缓存，避免每次刷新都新建 SolidColorBrush（会让控件反复失效重绘、观感发顿）。</summary>
+    private static readonly IBrush[] SlotBrushes = BuildSlotBrushes();
+
+    private static IBrush[] BuildSlotBrushes()
+    {
+        var brushes = new IBrush[LevelSlotCalculator.SlotColors.Length];
+        for (var i = 0; i < brushes.Length; i++)
+        {
+            var c = LevelSlotCalculator.SlotColors[i];
+            brushes[i] = new SolidColorBrush(Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c));
+        }
+        return brushes;
+    }
+
     private readonly ObservableCollection<NoiseLevelSlotItem> _noiseLevelSlots = new();
 
     private string _currentTime = "00:00:00";
@@ -87,11 +106,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _settings.PropertyChanged += OnSettingsPropertyChanged;
 
         for (var i = 0; i < SlotNames.Length; i++)
-        {
-            var c = LevelSlotCalculator.SlotColors[i];
-            var color = Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c);
-            _noiseLevelSlots.Add(new NoiseLevelSlotItem(SlotNames[i], new SolidColorBrush(color)));
-        }
+            _noiseLevelSlots.Add(new NoiseLevelSlotItem(SlotNames[i], SlotBrushes[i]));
         UpdateNoiseLevelSlots();
     }
 
@@ -142,18 +157,25 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     private void OnDecibelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName is nameof(DecibelMeterService.NoiseLevelText)
-            or nameof(DecibelMeterService.NoiseLevelEmoji)
-            or nameof(DecibelMeterService.NoiseLevelProgress))
+        switch (args.PropertyName)
         {
-            OnPropertyChanged(args.PropertyName!);
-            UpdateNoiseLevelSlots();   // 档位/进度变化 → 刷新档位高亮与轨道填充色
-        }
-        else if (args.PropertyName == nameof(DecibelMeterService.CurrentSegmentLevel))
-        {
-            UpdateRecording();
+            case nameof(DecibelMeterService.NoiseLevelProgress):
+                // 采样得到新的目标进度 → 交给动画平滑逼近（文字/高亮由动画帧在跨档位时刷新）
+                _targetProgress = _decibelService.NoiseLevelProgress;
+                StartProgressAnimation();
+                break;
+            case nameof(DecibelMeterService.IsMonitoring):
+            case nameof(DecibelMeterService.NoiseLevelText):
+                // 监测开关 / 错误提示文字变化 → 直接刷新右侧文字（如「未检测到麦克风」「等待检测…」）
+                OnPropertyChanged(nameof(NoiseLevelText));
+                OnPropertyChanged(nameof(NoiseLevelFillBrush));
+                break;
+            case nameof(DecibelMeterService.CurrentSegmentLevel):
+                UpdateRecording();
+                break;
         }
     }
+
 
     /// <summary>
     /// 持续事件（一般/吵闹）→ 计数。事件在音频线程引发，这里调度到 UI 线程。
@@ -208,7 +230,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public IBrush ProgressFillBrush => new SolidColorBrush(Color.Parse(_settings.ProgressColor));
 
     /// <summary>进度带「未进行」部分颜色（深蓝低饱和，固定，与音量条轨道同色系）。</summary>
-    public IBrush ProgressTrackBrush => new SolidColorBrush(Color.Parse("#B31C3047"));
+    public IBrush ProgressTrackBrush => TrackBrush;
 
     /// <summary>
     /// 触发所有外观属性变更通知，让窗口绑定重新求值。
@@ -227,44 +249,74 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(ClockFontSize));
         OnPropertyChanged(nameof(WindowTitle));
     }
-    public double NoiseLevelProgress => _decibelService.NoiseLevelProgress;
-    public int DisplayLevel => _decibelService.DisplayLevel;
+    /// <summary>音量条当前显示的进度（0-100）：由动画向采样得到的目标进度平滑逼近，绑到进度条 Value。</summary>
+    public double AnimatedProgress
+    {
+        get => _animatedProgress;
+        private set { _animatedProgress = value; OnPropertyChanged(); }
+    }
+    private double _animatedProgress;
+    private double _targetProgress;
+    private DispatcherTimer? _progressAnimTimer;
 
-    /// <summary>统一档位索引（0-4）：轨道位置、五档高亮、右侧状态共用 NoiseLevelProgress 反推，三处同源。</summary>
-    private int CurrentSlot => LevelSlotCalculator.SlotFromProgress(_decibelService.NoiseLevelProgress);
+    /// <summary>统一档位索引（0-4）：轨道位置、五档高亮、右侧状态文字全部由 AnimatedProgress 反推，条和字永远同源。</summary>
+    private int CurrentSlot => LevelSlotCalculator.SlotFromProgress(AnimatedProgress);
 
-    /// <summary>右侧状态文字（按统一档位查表，不再转发 Service 的迟滞分级，避免与轨道不同步）。</summary>
-    public string NoiseLevelText => SlotNames[CurrentSlot];
-
-    /// <summary>右侧状态表情（同上，按统一档位查表）。</summary>
-    public string NoiseLevelEmoji => SlotEmojis[CurrentSlot];
+    /// <summary>右侧状态文字：正常监测时按当前档位查表（与条同源）；无麦克风/出错时显示 Service 的提示文字。</summary>
+    public string NoiseLevelText => _decibelService.IsMonitoring ? SlotNames[CurrentSlot] : _decibelService.NoiseLevelText;
 
     /// <summary>音量条五档文字集合（安静/良好/一般/吵闹/嘈杂）。</summary>
     public ObservableCollection<NoiseLevelSlotItem> NoiseLevelSlots => _noiseLevelSlots;
 
-    /// <summary>音量条轨道填充色：随当前档位可变（绿→黄→红）。</summary>
-    public IBrush NoiseLevelFillBrush => new SolidColorBrush(CurrentSlotColor());
+    /// <summary>音量条轨道填充色：随当前档位可变（绿→黄→红），取缓存的画刷实例。</summary>
+    public IBrush NoiseLevelFillBrush => SlotBrushes[CurrentSlot];
 
-    /// <summary>音量条轨道底色（深蓝低饱和，与课程进度带 track 同色）。</summary>
-    public IBrush NoiseLevelTrackBrush => new SolidColorBrush(Color.Parse("#B31C3047"));
+    /// <summary>音量条轨道底色 / 课程进度带 track 底色（深蓝低饱和，共用同一实例）。</summary>
+    private static readonly IBrush TrackBrush = new SolidColorBrush(Color.Parse("#B31C3047"));
 
-    /// <summary>当前档位对应的 ARGB 颜色。</summary>
-    private Color CurrentSlotColor()
-    {
-        var slot = CurrentSlot;
-        var c = LevelSlotCalculator.SlotColors[Math.Clamp(slot, 0, LevelSlotCalculator.SlotColors.Length - 1)];
-        return Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c);
-    }
+    public IBrush NoiseLevelTrackBrush => TrackBrush;
 
-    /// <summary>档位变化时：刷新当前档位文字高亮 + 轨道填充色 + 右侧状态文字/表情（全部同一档位源）。</summary>
+    /// <summary>档位变化时：刷新当前档位文字高亮 + 轨道填充色 + 右侧状态文字（全部同一档位源）。</summary>
     private void UpdateNoiseLevelSlots()
     {
         var slot = CurrentSlot;
         for (var i = 0; i < _noiseLevelSlots.Count; i++)
             _noiseLevelSlots[i].IsCurrent = i == slot;
         OnPropertyChanged(nameof(NoiseLevelText));
-        OnPropertyChanged(nameof(NoiseLevelEmoji));
         OnPropertyChanged(nameof(NoiseLevelFillBrush));
+    }
+
+    /// <summary>收到新的采样目标进度：启动（或保持）动画，让条平滑逼近目标。</summary>
+    private void StartProgressAnimation()
+    {
+        if (_progressAnimTimer == null)
+        {
+            _progressAnimTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
+            _progressAnimTimer.Tick += OnProgressAnimTick;
+        }
+        if (!_progressAnimTimer.IsEnabled)
+            _progressAnimTimer.Start();
+    }
+
+    /// <summary>
+    /// 动画帧：把 AnimatedProgress 向目标指数逼近（无过冲），条在两个采样点之间平滑滑动；
+    /// 只在跨过档位边界时刷新文字/高亮/填充色，其余帧只动进度条。
+    /// </summary>
+    private void OnProgressAnimTick(object? sender, EventArgs e)
+    {
+        var prevSlot = CurrentSlot;
+        var delta = _targetProgress - AnimatedProgress;
+        if (Math.Abs(delta) < 0.2)
+        {
+            AnimatedProgress = _targetProgress;
+            _progressAnimTimer!.Stop();
+        }
+        else
+        {
+            AnimatedProgress += delta * 0.5;   // 指数平滑，视觉上匀速滑动
+        }
+        if (CurrentSlot != prevSlot)
+            UpdateNoiseLevelSlots();
     }
 
     /// <summary>
@@ -374,7 +426,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     // ===== 提醒面板（左上角）：天气 / 降雨 / 预警 / 倒计时 / 文本框，跟随 CI 配置 =====
 
-    public string WeatherIcon => _reminderData.WeatherIcon ?? "🌡️";
+    /// <summary>天气图标字形（无数据时用温度计兜底）。</summary>
+    public string WeatherIcon => _reminderData.WeatherIcon ?? IconGlyph.Of(LucideIconKind.Thermometer);
 
     private string _rainReminderTitle = "";
 
@@ -528,11 +581,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
         if (weather)
         {
-            var used = TextWidth(WeatherIcon, 20) + 6 + TextWidth(WeatherText, 19);
+            var used = IconWidth(20) + 6 + TextWidth(WeatherText, 19);
             // 合并优先级：降雨提醒 > 倒计时 > 文本
-            TryMerge(used, rain, rain ? TextWidth("☔", 20) + 6 + TextWidth(RainReminderTitle, 19) : 0,
+            TryMerge(used, rain, rain ? IconWidth(20) + 6 + TextWidth(RainReminderTitle, 19) : 0,
                 spacing, threshold, ref used, ref rainMerged);
-            TryMerge(used, countdown, countdown ? TextWidth("⏳", 20) + 6 + TextWidth(CountdownText, 19) : 0,
+            TryMerge(used, countdown, countdown ? IconWidth(20) + 6 + TextWidth(CountdownText, 19) : 0,
                 spacing, threshold, ref used, ref countdownMerged);
             TryMerge(used, text, text ? TextWidth(ReminderText, 16) : 0,
                 spacing, threshold, ref used, ref textMerged);
@@ -715,6 +768,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             : new TextLayout(s, new Typeface("Microsoft YaHei"), fontSize,
                 null, TextAlignment.Left, TextWrapping.NoWrap).Width;
 
+    /// <summary>
+    /// 矢量图标宽度：Lucide 图标为正方形，字宽≈字号（不能用 TextWidth 量——图标字形落在
+    /// 私有区，用中文字体量会得到错误的宽度，导致第一行合并判定失准）。
+    /// </summary>
+    private static double IconWidth(double fontSize) => fontSize;
+
     /// <summary>进入全屏时立即同步一次提醒数据（不等定时器）。</summary>
     private void RefreshRemindersNow()
     {
@@ -775,18 +834,28 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (!File.Exists(settingsPath)) return;
             var (code, temp, alerts) = CiWeatherReader.ReadLastWeather(settingsPath);
 
-            AlertItems.Clear();
-            ExpandedAlertDetail = null;   // 数据刷新后收起展开态（弹幕尺寸按旧文本算会错位）
-            foreach (var a in alerts)
-                AlertItems.Add(new AlertDisplayItem
-                {
-                    DisplayText = $"⚠ {a.Title}",
-                    Foreground = AlertBrush(a.Level),
-                    Detail = a.Detail,
-                });
+            // 预警内容与上次一致则不重建列表：重建会把正在悬停的预警项整链移除、
+            // 触发 PointerExited/Entered，导致顶部详情弹幕每 60 秒（天气刷新周期）重置重播一次。
+            var alertsChanged = alerts.Count != _reminderData.Alerts.Count
+                || !alerts.Zip(_reminderData.Alerts).All(p =>
+                    p.First.Title == p.Second.Title && p.First.Level == p.Second.Level
+                    && p.First.Detail == p.Second.Detail);
+            if (alertsChanged)
+            {
+                AlertItems.Clear();
+                ExpandedAlertDetail = null;   // 预警内容更新，收起旧展开态（弹幕尺寸按旧文本算会错位）
+                foreach (var a in alerts)
+                    AlertItems.Add(new AlertDisplayItem
+                    {
+                        DisplayText = a.Title,
+                        Icon = IconGlyph.Of(LucideIconKind.TriangleAlert),
+                        Foreground = AlertBrush(a.Level),
+                        Detail = a.Detail,
+                    });
 
-            _reminderData.Alerts.Clear();
-            _reminderData.Alerts.AddRange(alerts);
+                _reminderData.Alerts.Clear();
+                _reminderData.Alerts.AddRange(alerts);
+            }
 
             if (string.IsNullOrEmpty(code))
             {
@@ -798,10 +867,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 var desc = CiWeatherReader.GetWeatherDescription(code) ?? code;
                 _reminderData.WeatherText = string.IsNullOrEmpty(temp) ? desc : $"{temp}° {desc}";
 
-                // 天气图标：用 emoji（跟随天气码）。CI 的图标模板按小米天气码查图标，
-                // 映射表在 CI 运行时私有初始化，插件拿不到可靠码表，接出来只会显示占位图标。
-                _reminderData.WeatherIcon = CiWeatherReader.WeatherEmoji.TryGetValue(code, out var icon)
-                    ? icon : "🌡️";
+                // 天气图标：按天气码查 Lucide 图标名再转字形，用 CI 自带图标字体画成矢量图标。
+                // （CI 的天气图标模板按小米天气码查表、码表在 CI 内部私有初始化，插件接不到，
+                //   故这里自建 weathercn 码 → Lucide 图标映射。）
+                _reminderData.WeatherIcon = CiWeatherReader.WeatherIcons.TryGetValue(code, out var iconName)
+                    ? IconGlyph.Of(iconName)
+                    : IconGlyph.Of(LucideIconKind.Thermometer);
             }
 
             _weatherCode = string.IsNullOrEmpty(code) ? null : code;
@@ -871,10 +942,10 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 底部固定显示的免责声明。
+    /// 底部固定显示的免责声明（前面的警告图标由 XAML 用矢量图标画，不在文本里）。
     /// </summary>
     public string DisclaimerText
-        => "⚠ 分贝仅供参考，可能受风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况";
+        => "分贝仅供参考，可能受风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况";
 
     public void Show()
     {
@@ -901,9 +972,23 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     SetMainWindowVisible(true);
                     _window = null;
                 };
+                // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
+                // 若 OS 把全屏窗口恢复到 Normal 就在此兜底拉回全屏（守卫见 EnsureFullScreen，Minimized 态不打扰）。
+                _window.Activated += (_, _) => EnsureFullScreen();
             }
 
-            if (_window.IsVisible) { RefreshAll(); return; }
+            if (_window.IsVisible)
+            {
+                // 已最小化时再触发 Show（设置页按钮/托盘菜单）→ 先拉回全屏再刷新
+                if (_window.WindowState == WindowState.Minimized)
+                {
+                    _window.WindowState = WindowState.Normal;
+                    _window.Show();
+                    _window.WindowState = WindowState.FullScreen;
+                }
+                RefreshAll();
+                return;
+            }
 
             // 重置新一轮记录
             _counter.StartNewClass();
@@ -930,6 +1015,31 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             IsWindowVisible = true;
             SetMainWindowVisible(false);
         });
+    }
+
+    /// <summary>
+    /// 最小化到任务栏（收进任务栏可点回）。只收起画面，不停任何定时器/分贝/防休眠：
+    /// 收起 ≠ 退出，计时、计数全程持续，点回任务栏图标即恢复全屏。
+    /// </summary>
+    public void Minimize()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_window == null || !IsWindowVisible) return;
+            _window.WindowState = WindowState.Minimized;
+        });
+    }
+
+    /// <summary>
+    /// 兜底拉回全屏：窗口可见、非全屏、非最小化时（如任务栏点回落到 Normal），
+    /// Show() 后设回 FullScreen。最小化/不可见/退出流程一律短路，不打扰、不自激。
+    /// </summary>
+    private void EnsureFullScreen()
+    {
+        if (_window == null || !IsWindowVisible || !_window.IsVisible) return;
+        if (_window.WindowState is WindowState.FullScreen or WindowState.Minimized) return;
+        _window.Show();   // 幂等：窗口已可见时再次 Show 把后台/非活动窗口置前
+        _window.WindowState = WindowState.FullScreen;
     }
 
     public void Hide()
@@ -1280,13 +1390,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         {
             var remaining = _settings.SkipFirstMinutes * 60 - (int)(NowVirtual - _classStartTime).TotalSeconds;
             if (remaining > 0)
-                list.Add(new NoisyDisplaySegment { Text = $"  ⏳ 上课初期保护中（{remaining / 60}:{remaining % 60:D2} 后开始记录）" });
+                list.Add(new NoisyDisplaySegment
+                {
+                    Text = $"上课初期保护中（{remaining / 60}:{remaining % 60:D2} 后开始记录）",
+                    Icon = IconGlyph.Of(LucideIconKind.Hourglass),
+                });
             else
-                list.Add(new NoisyDisplaySegment { Text = "  ✅ 暂未记录到吵闹" });
+                list.Add(new NoisyDisplaySegment { Text = "暂未记录到吵闹", Icon = CheckIcon });
         }
         else
         {
-            list.Add(new NoisyDisplaySegment { Text = "  ✅ 暂未记录到吵闹" });
+            list.Add(new NoisyDisplaySegment { Text = "暂未记录到吵闹", Icon = CheckIcon });
         }
     }
 
@@ -1294,13 +1408,25 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         var segments = BuildNoisySegments();
         var signature = string.Join("|", segments.Select(s =>
-            s.Text + ":" + (ReferenceEquals(s.Foreground, CountNoisyBrush) ? "R"
+            s.Text + ":" + s.Icon + ":" + (ReferenceEquals(s.Foreground, CountNoisyBrush) ? "R"
                 : ReferenceEquals(s.Foreground, CountNormalBrush) ? "Y" : "P")));
         if (signature == _noisyDisplaySignature) return;
 
         _noisyDisplaySignature = signature;
-        NoisyDisplaySegments.Clear();
-        foreach (var s in segments) NoisyDisplaySegments.Add(s);
+
+        // 增量同步：复用现有片段只改文字/颜色/图标，不清空重建。
+        // 清空重建会把鼠标下的 TextBlock 整链移除重建、触发 PointerExited/Entered 循环，
+        // 导致上课初期保护期间每秒刷新时记录规则 Popup 一秒闪一次。
+        for (var i = 0; i < NoisyDisplaySegments.Count && i < segments.Count; i++)
+        {
+            NoisyDisplaySegments[i].Text = segments[i].Text;
+            NoisyDisplaySegments[i].Icon = segments[i].Icon;
+            NoisyDisplaySegments[i].Foreground = segments[i].Foreground;
+        }
+        while (NoisyDisplaySegments.Count < segments.Count)
+            NoisyDisplaySegments.Add(segments[NoisyDisplaySegments.Count]);
+        while (NoisyDisplaySegments.Count > segments.Count)
+            NoisyDisplaySegments.RemoveAt(NoisyDisplaySegments.Count - 1);
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
@@ -1355,17 +1481,54 @@ internal class ClassSummary
 
 /// <summary>
 /// 计数区域的单个显示片段（带颜色，用于一般/吵闹不同色）。
+/// 实现 INotifyPropertyChanged：UpdateNoisyDisplay 增量同步时只更新已存在项的文字/颜色，
+/// 不清空重建列表（重建会触发鼠标下元素的 PointerExited/Entered 循环）。
 /// </summary>
-public class NoisyDisplaySegment
+public class NoisyDisplaySegment : INotifyPropertyChanged
 {
-    public string Text { get; set; } = "";
-    public IBrush Foreground { get; set; } = new SolidColorBrush(Color.Parse("#ffff44"));
+    private string _text = "";
+    public string Text
+    {
+        get => _text;
+        set { if (_text != value) { _text = value; OnPropertyChanged(nameof(Text)); } }
+    }
+
+    private IBrush _foreground = new SolidColorBrush(Color.Parse("#ffff44"));
+    public IBrush Foreground
+    {
+        get => _foreground;
+        set { if (!ReferenceEquals(_foreground, value)) { _foreground = value; OnPropertyChanged(nameof(Foreground)); } }
+    }
+
+    /// <summary>图标矢量字形（空 = 该片段不带图标，如「一般 2 次」纯文字）。</summary>
+    private string _icon = "";
+    public string Icon
+    {
+        get => _icon;
+        set
+        {
+            if (_icon == value) return;
+            _icon = value;
+            OnPropertyChanged(nameof(Icon));
+            OnPropertyChanged(nameof(HasIcon));
+        }
+    }
+
+    public bool HasIcon => !string.IsNullOrEmpty(_icon);
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
 /// <summary>提醒面板中单条预警的显示项（等级着色 + 详情全文，鼠标悬停即在顶部弹幕带显示）。</summary>
 public class AlertDisplayItem
 {
     public required string DisplayText { get; init; }
+
+    /// <summary>图标矢量字形（警告三角，XAML 用 Lucide 字体渲染）。</summary>
+    public string? Icon { get; init; }
+
     public required IBrush Foreground { get; init; }
 
     /// <summary>预警详情全文（alerts[].detail），鼠标悬停该条时显示。</summary>

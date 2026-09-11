@@ -11,18 +11,21 @@ namespace EveningSelfStudyClock.Services;
 /// </summary>
 public static class CiWeatherReader
 {
-    /// <summary>中国天气网 weathercn 天气码 → emoji 图标（CI 图标模板不可用时兜底）。</summary>
-    public static readonly IReadOnlyDictionary<string, string> WeatherEmoji = new Dictionary<string, string>
+    /// <summary>
+    /// 中国天气网 weathercn 天气码 → 图标名（LucideIconKind 的成员名，由 VM 转成字形渲染成矢量图标）。
+    /// 这里只存图标名不直接存字形，是为了让本类保持零 CI 依赖、可被单元测试直接编译。
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> WeatherIcons = new Dictionary<string, string>
     {
-        ["00"] = "☀️", ["01"] = "🌤️", ["02"] = "☁️", ["03"] = "🌦️",
-        ["04"] = "⛈️", ["05"] = "⛈️", ["06"] = "🌨️", ["07"] = "🌧️",
-        ["08"] = "🌧️", ["09"] = "🌧️", ["10"] = "🌧️", ["11"] = "🌧️",
-        ["12"] = "🌧️", ["13"] = "❄️", ["14"] = "🌨️", ["15"] = "❄️",
-        ["16"] = "❄️", ["17"] = "🌧️", ["18"] = "🌧️", ["19"] = "🌫️",
-        ["20"] = "🌧️", ["21"] = "🌧️", ["22"] = "🌫️", ["23"] = "🌫️",
-        ["24"] = "💨", ["25"] = "🌨️", ["26"] = "❄️", ["27"] = "💧",
-        ["28"] = "💧", ["29"] = "💧", ["30"] = "🔥", ["31"] = "🔥",
-        ["32"] = "💨", ["33"] = "💨", ["53"] = "⏳",
+        ["00"] = "Sun", ["01"] = "CloudSun", ["02"] = "Cloud", ["03"] = "CloudDrizzle",
+        ["04"] = "CloudLightning", ["05"] = "CloudLightning", ["06"] = "CloudSnow", ["07"] = "CloudRain",
+        ["08"] = "CloudRain", ["09"] = "CloudRain", ["10"] = "CloudRain", ["11"] = "CloudRain",
+        ["12"] = "CloudRain", ["13"] = "Snowflake", ["14"] = "CloudSnow", ["15"] = "Snowflake",
+        ["16"] = "Snowflake", ["17"] = "CloudRain", ["18"] = "CloudRain", ["19"] = "CloudFog",
+        ["20"] = "CloudRain", ["21"] = "CloudRain", ["22"] = "CloudFog", ["23"] = "CloudFog",
+        ["24"] = "Wind", ["25"] = "CloudSnow", ["26"] = "Snowflake", ["27"] = "Droplets",
+        ["28"] = "Droplets", ["29"] = "Droplets", ["30"] = "Flame", ["31"] = "Flame",
+        ["32"] = "Wind", ["33"] = "Wind", ["34"] = "CloudSun", ["53"] = "Hourglass",
     };
 
     /// <summary>中国天气网 weathercn 天气码 → 中文天气描述（CI 的 GetWeatherTextByCode 对不同码体系会返回「未知」）。</summary>
@@ -169,7 +172,7 @@ public static class CiWeatherReader
             for (var i = 0; i < minutely.Count; i++)
             {
                 if (minutely[i] <= 0) continue;
-                return i == 0 ? "当前正在降雨" : $"当前地区{i / 60 + 1}小时内有降雨";
+                return i == 0 ? "当前正在降雨" : $"当前地区未来{i / 60 + 1}小时内有降雨";
             }
         }
 
@@ -178,7 +181,7 @@ public static class CiWeatherReader
             for (var h = 0; h < hourlyWeather.Count; h++)
             {
                 if (!RainCodes.Contains(hourlyWeather[h].ToString("D2"))) continue;
-                return h == 0 ? "当前正在降雨" : $"当前地区{h}小时内有降雨";
+                return h == 0 ? "当前正在降雨" : $"当前地区未来{h}小时内有降雨";
             }
         }
 
