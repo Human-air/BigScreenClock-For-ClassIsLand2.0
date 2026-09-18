@@ -281,10 +281,12 @@
                             <ItemsControl ItemsSource="{Binding AlertItems}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <!-- 悬停该条预警即在顶部弹幕带显示其详情；移开即消失 -->
+                                        <!-- 悬停该条预警即在顶部弹幕带循环滚动其详情、移开即消失；
+                                             点击则滚一整遍后自动收起（没滚完时重复点击不生效） -->
                                         <StackPanel Orientation="Horizontal" Spacing="5"
                                                     Cursor="Hand"
-                                                    PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited">
+                                                    PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited"
+                                                    PointerPressed="AlertPointerPressed">
                                             <TextBlock Classes="icon" Text="{Binding Icon}" FontSize="14"
                                                        Foreground="{Binding Foreground}" VerticalAlignment="Center"/>
                                             <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Foreground}"

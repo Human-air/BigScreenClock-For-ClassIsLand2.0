@@ -362,13 +362,15 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// 根据检测器的实时段归属刷新「正在记录」提示。
-    /// 仅在计数可见且上课时段显示；段起算前/段结束后隐藏。
+    /// 仅在计数可见、上课时段、且不在上课初期保护期内显示；段起算前/段结束后隐藏。
+    /// （保护期内本来就不计数，再挂个「正在记录」会误导同学）
     /// </summary>
     private void UpdateRecording()
     {
         var seg = _decibelService.CurrentSegmentLevel;
         bool show = seg.HasValue && _settings.ShowNoisyCounter
-            && !_isInBreak && !string.IsNullOrEmpty(_currentClassName);
+            && !_isInBreak && !string.IsNullOrEmpty(_currentClassName)
+            && !IsInProtection();
         IsRecordingVisible = show;
         if (!show) return;
         var noisy = seg == NoiseLevel.Noisy;
