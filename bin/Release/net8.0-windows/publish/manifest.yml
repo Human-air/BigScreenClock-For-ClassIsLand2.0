@@ -1,8 +1,0 @@
-id: com.bigscreen.clock
-name: 大屏时钟
-description: 自动全屏显示当前时间、教室分贝值（麦克风采集）和课程信息。支持连堂不退出，按课程分段统计吵闹次数。
-entranceAssembly: "EveningSelfStudyClock.dll"
-url: https://github.com/yourname/EveningSelfStudyClock
-version: 1.0.0.0
-apiVersion: 2.0.0.0
-author: 社区开发者
