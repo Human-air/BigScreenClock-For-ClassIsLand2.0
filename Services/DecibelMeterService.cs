@@ -31,6 +31,10 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     private WaveInEvent? _waveIn;
     private DateTime _lastDataReceived;
     private System.Timers.Timer? _watchdogTimer;
+    /// <summary>「应当正在监听」的意图标记：StartMonitoring/StopMonitoring 维护，
+    /// 不受设备自身 RecordingStopped 影响。系统睡眠唤醒后设备失效时，看门狗据此才能重启
+    /// （此前看门狗只看 _isMonitoring，而设备失效会把它置 false，于是永远不再重启）。</summary>
+    private bool _shouldMonitor;
     private double _currentRms;
     private int _displayLevel; // 0-100 正数显示
     private string _noiseLevelText = "等待检测...";
@@ -44,6 +48,15 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     private StreamWriter? _logWriter;
     private string? _logPath;
     private int _logLines;
+    /// <summary>本文件第一行/最后一行的时刻，用于「记录跨度不足 N 分钟就删」的判定。</summary>
+    private DateTime? _logFirstSample;
+    private DateTime? _logLastSample;
+    /// <summary>单个日志文件的硬上限（KB），超了就滚动新文件，防止一次开一晚上写出个巨无霸。
+    /// 「按大小」的保留线比它高时以保留线为准，否则滚出来的文件会被当成不达标当场删掉。</summary>
+    private const int LogRollSizeKb = 2048;
+
+    private int LogRollThresholdKb =>
+        _settings.LogKeepByDuration ? LogRollSizeKb : Math.Max(LogRollSizeKb, _settings.LogKeepMinKb);
 
     public DecibelMeterService(PluginSettings settings)
     {
@@ -107,6 +120,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     public void StartMonitoring()
     {
         if (_isMonitoring) return;
+        _shouldMonitor = true;
         _detector.Reset();
         _lastSegmentLevel = null;
         CurrentSegmentLevel = null;
@@ -143,7 +157,9 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
                     wi.RecordingStopped += OnRecordingStopped;
                     wi.StartRecording();
                     _waveIn = wi;
-                    _isMonitoring = true;
+                    // 走属性而不是字段：界面靠 IsMonitoring 的通知才把「等待检测...」
+                    // 换成实时档位文字（刚进大屏时钟一直显示等待检测就是漏了这个通知）
+                    IsMonitoring = true;
                     _lastDataReceived = DateTime.Now;
                     return;
                 }
@@ -154,13 +170,15 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
         }
         catch (Exception ex)
         {
-            _isMonitoring = false;
+            IsMonitoring = false;
             NoiseLevelText = $"麦克风错误: {ex.Message}";
         }
     }
 
     /// <summary>
-    /// 看门狗：如果超过 5 秒没收到音频数据（说明设备休眠后失效），自动重启
+    /// 看门狗：只要还处于「应当监听」状态，一旦超过 5 秒没收到音频数据就整条链路重启。
+    /// 睡眠唤醒后设备句柄失效是典型场景——此时必须重建 WaveInEvent，光对老实例
+    /// StartRecording 是救不回来的；重启失败（设备还没醒）就下一个周期继续试，直到有数据为止。
     /// </summary>
     private void StartWatchdog()
     {
@@ -168,16 +186,15 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
         _watchdogTimer = new System.Timers.Timer(5000);
         _watchdogTimer.Elapsed += (_, _) =>
         {
-            if (!_isMonitoring) return;
-            if ((DateTime.Now - _lastDataReceived).TotalSeconds > 5)
+            if (!_shouldMonitor) return;
+            if (_isMonitoring && (DateTime.Now - _lastDataReceived).TotalSeconds <= 5) return;
+
+            System.Diagnostics.Debug.WriteLine("[DecibelMeter] 看门狗检测到数据中断，重启音频");
+            Dispatcher.UIThread.Post(() =>
             {
-                System.Diagnostics.Debug.WriteLine("[DecibelMeter] 看门狗检测到数据中断，重启音频");
-                Dispatcher.UIThread.Post(() =>
-                {
-                    StopMonitoringInternal();
-                    StartMonitoringInternal();
-                });
-            }
+                StopMonitoringInternal();
+                StartMonitoringInternal();
+            });
         };
         _watchdogTimer.Start();
     }
@@ -191,6 +208,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
     public void StopMonitoring()
     {
+        _shouldMonitor = false;
         StopWatchdog();
         StopMonitoringInternal();
         CloseLogWriter();
@@ -198,26 +216,33 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
     private void StopMonitoringInternal()
     {
-        if (!_isMonitoring || _waveIn == null) return;
+        // 先把引用摘掉再停：这样本实例异步回来的 RecordingStopped 会被当成「过期事件」忽略掉
+        // （见 OnRecordingStopped 的判断），不会把紧接着新建的那次监听状态带坏。
+        var wi = _waveIn;
+        _waveIn = null;
+        IsMonitoring = false;
+        if (wi == null) return;
 
         try
         {
-            _waveIn.StopRecording();
-            _waveIn.DataAvailable -= OnDataAvailable;
-            _waveIn.RecordingStopped -= OnRecordingStopped;
-            _waveIn.Dispose();
-            _waveIn = null;
+            wi.StopRecording();
+            wi.DataAvailable -= OnDataAvailable;
+            wi.RecordingStopped -= OnRecordingStopped;
+            wi.Dispose();
         }
         catch { }
-        finally
-        {
-            _isMonitoring = false;
-        }
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
     {
-        _isMonitoring = false;
+        // 只认当前这个实例：重启时旧设备的 RecordingStopped 是异步回来的，
+        // 晚到时会把新设备的监听状态误置成「未在监听」，看门狗又据此不再重启——
+        // 这正是「睡眠唤醒后音量条短暂恢复一下再彻底哑掉」的原因。
+        if (!ReferenceEquals(sender, _waveIn)) return;
+
+        _isMonitoring = false;   // 字段直写：看门狗在别的线程上立刻要读它
+        // 音频线程不能直接发通知（绑定会在非 UI 线程上刷新），Post 回 UI 线程再发
+        Dispatcher.UIThread.Post(() => IsMonitoring = false);
         if (e.Exception != null)
         {
             Dispatcher.UIThread.Post(() => StatusMessage = $"录音异常: {e.Exception.Message}");
@@ -319,21 +344,74 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
             _logPath = path;
             _logWriter = new StreamWriter(path, append: false, System.Text.Encoding.UTF8);
-            _logWriter.WriteLine("Time,RawRMS,Peak,SmoothRMS,Level,EpisodeLevel,EventState,Fired");
             _logLines = 0;
+            _logFirstSample = null;
+            _logLastSample = null;
+            WriteLogHeader();
         }
         catch { }
     }
 
-    private void CloseLogWriter()
+    /// <summary>
+    /// 文件开头记下这一轮用的各项参数。日志是隔几天才回看的，
+    /// 没有这段就得回头猜当时阈值填的是多少，数据没法比对。
+    /// </summary>
+    private void WriteLogHeader()
+    {
+        if (_logWriter == null) return;
+        var s = _settings;
+        _logWriter.WriteLine($"# 记录开始,{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        _logWriter.WriteLine($"# 阈值 RMS,安静 {s.DecibelQuietThreshold:F4},良好 {s.DecibelGoodThreshold:F4}," +
+                             $"一般 {s.DecibelNormalThreshold:F4},吵闹 {s.DecibelNoisyThreshold:F4}");
+        _logWriter.WriteLine($"# 起算底线 {s.NoisySustainSeconds:F1}s,回落窗口 {s.FallWindowSeconds:F1}s," +
+                             $"采样间隔 {s.SamplingIntervalSeconds:F2}s,保护时长 {s.SkipFirstMinutes}分钟");
+        _logWriter.WriteLine("Time,RawRMS,Peak,SmoothRMS,Level,EpisodeLevel,EventState,Fired");
+    }
+
+    /// <summary>关闭当前日志文件。judge = true 时按保留规则决定去留（见 TryDeleteUnqualifiedLog）。</summary>
+    private void CloseLogWriter(bool judge = true)
     {
         try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
         _logWriter = null;
+        if (judge && _logPath != null) TryDeleteUnqualifiedLog(_logPath);
         _logPath = null;
+        _logFirstSample = null;
+        _logLastSample = null;
+    }
+
+    /// <summary>
+    /// 保留规则：按设置里的「记录时长」或「文件大小」判断这份记录够不够格。
+    /// 不够格（开着开关进出大屏时钟顺手录了几秒）就删掉，省得日志目录堆满废数据。
+    /// 一行数据都没采到的文件不删——那往往是麦克风本身出了问题，留着有线索价值。
+    /// </summary>
+    private void TryDeleteUnqualifiedLog(string path)
+    {
+        if (_logFirstSample == null) return;
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return;
+
+            bool tooShort;
+            if (_settings.LogKeepByDuration)
+            {
+                var span = (_logLastSample ?? _logFirstSample.Value) - _logFirstSample.Value;
+                tooShort = span.TotalMinutes < _settings.LogKeepMinutes;
+            }
+            else
+            {
+                tooShort = info.Length < _settings.LogKeepMinKb * 1024L;
+            }
+
+            if (tooShort) info.Delete();
+        }
+        catch { }
     }
 
     private void WriteDebugLog(double rawRms, double peak, SampleResult result)
     {
+        // 开关中途拨动也即时生效：刚打开就补建文件，刚关闭就把这份结算掉（不必重进大屏时钟）
+        if (_logWriter == null) EnsureLogWriter();
         if (_logWriter == null) return;
         if (!_settings.EnableNoiseDebugLog) { CloseLogWriter(); return; }
 
@@ -341,19 +419,23 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             : _detector.SegmentLevel.HasValue ? "已起算" : "记录中";
         string episodeLevel = _detector.SegmentLevel?.ToString() ?? "";
 
+        var now = DateTime.Now;
+        _logFirstSample ??= now;
+        _logLastSample = now;
+
         _logWriter.WriteLine(
-            $"{DateTime.Now:HH:mm:ss.fff},{rawRms:F4},{peak:F4},{result.SmoothedRms:F4}," +
+            $"{now:HH:mm:ss.fff},{rawRms:F4},{peak:F4},{result.SmoothedRms:F4}," +
             $"{result.Level},{episodeLevel},{eventState},{result.EventFired}");
         if (++_logLines >= 20)
         {
             _logWriter.Flush();
             _logLines = 0;
-            // 单文件达到大小上限（默认 500KB）后滚动新文件，防止无限增长
+            // 到这个硬上限就换新文件（换掉的这一份同样过一遍保留规则）
             if (_logPath != null)
             {
                 try
                 {
-                    if (new FileInfo(_logPath).Length > _settings.LogSizeLimitKb * 1024L)
+                    if (new FileInfo(_logPath).Length > LogRollThresholdKb * 1024L)
                     {
                         CloseLogWriter();
                         EnsureLogWriter();

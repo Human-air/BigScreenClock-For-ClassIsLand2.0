@@ -40,6 +40,12 @@
                             <TextBlock Text="课程信息" FontSize="14" VerticalAlignment="Center"/>
                         </StackPanel>
                     </CheckBox>
+                    <!-- 课程信息子项：勾选「课程信息」后出现 -->
+                    <CheckBox Margin="20,2,0,0" FontSize="13"
+                              IsChecked="{Binding ShowBellTime}"
+                              IsVisible="{Binding ShowCourseInfo}">
+                        <TextBlock Text="显示精确打铃时间" FontSize="13" VerticalAlignment="Center"/>
+                    </CheckBox>
                     <CheckBox IsChecked="{Binding ShowNoisyCounter}" FontSize="14">
                         <StackPanel Orientation="Horizontal" Spacing="5">
                             <TextBlock Classes="icon" Text="{ci:LI ChartColumn}" FontSize="13"/>
@@ -55,8 +61,6 @@
                     <!-- 提醒子项：勾选「提醒显示」后出现 -->
                     <StackPanel Spacing="6" Margin="20,2,0,0"
                                 IsVisible="{Binding ShowReminderPanel}">
-                        <TextBlock Text="提醒面板要显示哪几类？倒计时/文本需先在 CI 主界面加了对应组件才有内容。" FontSize="11"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="2"
                               RowDefinitions="Auto,Auto,Auto">
                             <CheckBox Grid.Row="0" Grid.Column="0" IsChecked="{Binding ShowWeatherReminder}"
@@ -166,7 +170,7 @@
                     </StackPanel>
                     <TextBlock Text="使用系统默认麦克风采集" FontSize="11"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                    <TextBlock Text="等级阈值 (RMS)  —— 拖动滑块或直接填数字（范围 0.001~1.000）" FontSize="12"
+                    <TextBlock Text="等级阈值 (RMS)（范围 0.001~1.000）" FontSize="12"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0"/>
                     <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
                           RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
@@ -197,7 +201,7 @@
                         <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding SamplingIntervalSecondsText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="72" TextAlignment="Center" VerticalAlignment="Center"/>
                         <TextBlock Grid.Row="5" Grid.ColumnSpan="3"
-                                   Text="超过吵闹 = 「嘈杂」；建议从小到大填写。采样间隔：麦克风每采集多长一段音频算一次读数（0.2 秒 = 每秒 5 次），调大更省性能、更不拖日志和大屏时钟，条靠动画补平滑"
+                                   Text="超过吵闹 = 「嘈杂」；建议从小到大填写。采样间隔：麦克风每采集多长一段音频算一次读数（0.2 秒 = 每秒 5 次）"
                                    FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                    TextWrapping="Wrap"/>
                     </Grid>
@@ -213,7 +217,7 @@
                                    VerticalAlignment="Center"/>
                     </StackPanel>
                     <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
-                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="起算底线" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                         <Slider Grid.Row="0" Grid.Column="1" Value="{Binding NoisySustainSeconds}"
@@ -253,13 +257,34 @@
                                 Minimum="1" Maximum="5" TickFrequency="1"/>
                         <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding LogRetentionDaysText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="6" Grid.Column="0" Text="单文件大小" VerticalAlignment="Center"
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="保留规则" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <Slider Grid.Row="6" Grid.Column="1" Value="{Binding LogSizeLimitKb}"
-                                Minimum="500" Maximum="3072" TickFrequency="100"/>
-                        <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding LogSizeLimitKbText}" FontSize="12"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="7" Grid.ColumnSpan="3" Text="测试完记得关闭本开关；旧日志按天数自动清理，单个文件超大小自动换新文件"
+                        <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="16">
+                            <RadioButton GroupName="LogKeepMode" Content="按记录时长" FontSize="13" VerticalAlignment="Center"
+                                         IsChecked="{Binding LogKeepByDuration}"/>
+                            <RadioButton GroupName="LogKeepMode" Content="按文件大小" FontSize="13" VerticalAlignment="Center"
+                                         IsChecked="{Binding LogKeepBySize}"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="{Binding LogKeepLabel}" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="7" Grid.Column="1" Value="{Binding LogKeepValue}"
+                                Minimum="{Binding LogKeepMinimum}" Maximum="{Binding LogKeepMaximum}"
+                                TickFrequency="{Binding LogKeepTick}"/>
+                        <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding LogKeepValueText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="64" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <Button Grid.Row="8" Grid.ColumnSpan="3" HorizontalAlignment="Left"
+                                FontSize="13" FontWeight="Normal" Cursor="Hand"
+                                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                CornerRadius="6" Padding="8,5" Click="OpenLogFolder_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <TextBlock Classes="icon" Text="{ci:LI FolderOpen}" FontSize="12"/>
+                                <TextBlock Text="打开调试数据文件目录" FontSize="13" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Grid.Row="9" Grid.ColumnSpan="3"
+                                   Text="测试完记得关闭本开关；记录时长/大小达不到上面设定的日志会在停止记录后自动删除，旧日志按天数清理"
                                    FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                     </Grid>
                 </StackPanel>
@@ -273,8 +298,6 @@
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="颜色用 HSV 取色器调整：点击色块弹出色相条 + 色板，也可直接填 hex" FontSize="11"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>

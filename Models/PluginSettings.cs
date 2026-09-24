@@ -20,6 +20,7 @@ public class PluginSettings : INotifyPropertyChanged
     private string _noiseTitleColor = "#bbffffff";
     private bool _showDecibelMeter = true;
     private bool _showCourseInfo = true;
+    private bool _showBellTime = true;
     private bool _showNoisyCounter = true;
     private bool _skipFirst3Min = true;
     private int _skipFirstMinutes = 3;
@@ -28,7 +29,9 @@ public class PluginSettings : INotifyPropertyChanged
     private double _samplingIntervalSeconds = 0.2;
     private bool _enableNoiseDebugLog;
     private int _logRetentionDays = 3;
-    private int _logSizeLimitKb = 500;
+    private bool _logKeepByDuration = true;
+    private int _logKeepMinutes = 10;
+    private int _logKeepMinKb = 100;
     private int _clockFontSize = 180;
     private string _windowTitle = "大屏时钟";
     private bool _showReminderPanel = true;
@@ -46,7 +49,7 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 触发全屏时钟的课程名称列表（支持模糊匹配，如"晚自习"可匹配"晚自习（语文）"）
+    /// 触发全屏时钟的课程名称列表（精确匹配：名称完全相同才触发，见 <see cref="CourseMatch"/>）
     /// </summary>
     public ObservableCollection<string> TargetCourseNames
     {
@@ -163,6 +166,16 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 课程信息里是否附带「实际打铃」时间（课表时间加时间偏移后的真实时间）。
+    /// 关掉则只显示课表时间那一行，字短些。
+    /// </summary>
+    public bool ShowBellTime
+    {
+        get => _showBellTime;
+        set { _showBellTime = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
     /// 是否显示吵闹计数
     /// </summary>
     public bool ShowNoisyCounter
@@ -239,12 +252,27 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 单个调试日志文件大小上限（KB）：超限后滚动新文件。默认 500KB，范围 500~3072。
+    /// 调试日志的保留规则：true = 按记录时长，false = 按文件大小。
+    /// 打开开关后又进进出出大屏时钟会留下一堆几秒钟的废记录，两种规则都是为了把它们删掉。
     /// </summary>
-    public int LogSizeLimitKb
+    public bool LogKeepByDuration
     {
-        get => _logSizeLimitKb;
-        set { _logSizeLimitKb = Math.Clamp(value, 500, 3072); OnPropertyChanged(); }
+        get => _logKeepByDuration;
+        set { _logKeepByDuration = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>按记录时长保留（分钟）：记录跨度不足该值的日志文件在停止记录时删除。默认 10 分钟，范围 1~120。</summary>
+    public int LogKeepMinutes
+    {
+        get => _logKeepMinutes;
+        set { _logKeepMinutes = Math.Clamp(value, 1, 120); OnPropertyChanged(); }
+    }
+
+    /// <summary>按文件大小保留（KB）：小于该值的日志文件在停止记录时删除。默认 100KB，范围 10~3072。</summary>
+    public int LogKeepMinKb
+    {
+        get => _logKeepMinKb;
+        set { _logKeepMinKb = Math.Clamp(value, 10, 3072); OnPropertyChanged(); }
     }
 
     /// <summary>
@@ -329,14 +357,8 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 检查课程名是否在目标列表中
+    /// 检查课程名是否在目标列表中（精确匹配，规则见 <see cref="CourseMatch"/>）
     /// </summary>
     public bool IsTargetCourse(string? courseName)
-    {
-        if (string.IsNullOrWhiteSpace(courseName))
-            return false;
-
-        return TargetCourseNames.Any(target =>
-            courseName.Contains(target, StringComparison.OrdinalIgnoreCase));
-    }
+        => CourseMatch.IsMatch(courseName, TargetCourseNames);
 }

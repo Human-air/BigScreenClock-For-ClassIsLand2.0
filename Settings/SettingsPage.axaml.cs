@@ -333,17 +333,78 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     }
     public string LogRetentionDaysText => $"{_settings.LogRetentionDays} 天";
 
-    public int LogSizeLimitKb
+    // 保留规则：两个单选按钮写同一个设置的两种取值（Avalonia 的 RadioButton 只能双向绑 bool，
+    // 所以把「按大小」做成「非按时长」的取反视图，点未选中的那个才真正生效）
+    public bool LogKeepByDuration
     {
-        get => _settings.LogSizeLimitKb;
+        get => _settings.LogKeepByDuration;
         set
         {
-            _settings.LogSizeLimitKb = value;
-            OnPropertyChanged(nameof(LogSizeLimitKb));
-            OnPropertyChanged(nameof(LogSizeLimitKbText));
+            if (!value) return;
+            _settings.LogKeepByDuration = true;
+            NotifyLogKeepChanged();
         }
     }
-    public string LogSizeLimitKbText => $"{_settings.LogSizeLimitKb} KB";
+
+    public bool LogKeepBySize
+    {
+        get => !_settings.LogKeepByDuration;
+        set
+        {
+            if (!value) return;
+            _settings.LogKeepByDuration = false;
+            NotifyLogKeepChanged();
+        }
+    }
+
+    private void NotifyLogKeepChanged()
+    {
+        OnPropertyChanged(nameof(LogKeepByDuration));
+        OnPropertyChanged(nameof(LogKeepBySize));
+        OnPropertyChanged(nameof(LogKeepLabel));
+        OnPropertyChanged(nameof(LogKeepValue));
+        OnPropertyChanged(nameof(LogKeepMinimum));
+        OnPropertyChanged(nameof(LogKeepMaximum));
+        OnPropertyChanged(nameof(LogKeepTick));
+        OnPropertyChanged(nameof(LogKeepValueText));
+    }
+
+    /// <summary>两种规则共用一个滑块，滑的分别是「分钟」或「KB」。</summary>
+    public double LogKeepValue
+    {
+        get => _settings.LogKeepByDuration ? _settings.LogKeepMinutes : _settings.LogKeepMinKb;
+        set
+        {
+            if (_settings.LogKeepByDuration) _settings.LogKeepMinutes = (int)value;
+            else _settings.LogKeepMinKb = (int)value;
+            OnPropertyChanged(nameof(LogKeepValue));
+            OnPropertyChanged(nameof(LogKeepValueText));
+        }
+    }
+
+    public string LogKeepLabel => _settings.LogKeepByDuration ? "不足（分钟）" : "小于（KB）";
+    public double LogKeepMinimum => _settings.LogKeepByDuration ? 1 : 10;
+    public double LogKeepMaximum => _settings.LogKeepByDuration ? 120 : 3072;
+    public double LogKeepTick => _settings.LogKeepByDuration ? 1 : 16;
+    public string LogKeepValueText => _settings.LogKeepByDuration
+        ? $"{_settings.LogKeepMinutes} 分钟" : $"{_settings.LogKeepMinKb} KB";
+
+    /// <summary>打开存放调试日志的目录（就是插件配置目录）。</summary>
+    public void OpenLogFolder_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            var dir = Plugin.ConfigFolder;
+            if (string.IsNullOrEmpty(dir)) return;
+            Directory.CreateDirectory(dir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = dir,
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
 
     public bool ShowDecibelMeter
     {
@@ -355,6 +416,12 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         get => _settings.ShowCourseInfo;
         set { _settings.ShowCourseInfo = value; OnPropertyChanged(nameof(ShowCourseInfo)); }
+    }
+
+    public bool ShowBellTime
+    {
+        get => _settings.ShowBellTime;
+        set { _settings.ShowBellTime = value; OnPropertyChanged(nameof(ShowBellTime)); }
     }
 
     public bool ShowNoisyCounter

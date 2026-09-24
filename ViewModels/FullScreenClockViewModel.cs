@@ -150,6 +150,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             UpdateDateSubtitle();
             UpdateCountdownSubtitle();
         }
+        else if (args.PropertyName is nameof(PluginSettings.ShowBellTime))
+        {
+            // 「显示精确打铃时间」子项：即时把末尾那段加减回去/去掉
+            UpdateCourseInfo(NowVirtual);
+        }
     }
 
     /// <summary>
@@ -1231,11 +1236,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// 把课表时间换算成实际打铃时间（北京真实时间）的说明文字。
-    /// 实际打铃时间 = 课表时间 - TimeOffsetSeconds。无偏移时返回空串。
+    /// 实际打铃时间 = 课表时间 - TimeOffsetSeconds。无偏移或用户关掉该子项时返回空串。
     /// </summary>
     private string FormatBellTime(TimeSlot slot)
     {
-        if (_timeOffsetSeconds == 0) return "";
+        if (!_settings.ShowBellTime || _timeOffsetSeconds == 0) return "";
         var offset = TimeSpan.FromSeconds(_timeOffsetSeconds);
         var bellStart = slot.Start - offset;
         var bellEnd = slot.End - offset;
