@@ -41,6 +41,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
         LoadAllCourseNames();
         RestoreSelectedCourses();
+        LoadCameraDevices();
         StartPreviewTimer();
 
         // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
@@ -255,6 +256,81 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         foreach (var n in names) _settings.TargetCourseNames.Add(n);
         Plugin.SaveSettings(); // 强制写盘
     }
+
+    // ===== 摄像头占用 =====
+
+    /// <summary>已枚举到的摄像头（勾选状态写回设置，见 <see cref="SaveCameraSelection"/>）。</summary>
+    public ObservableCollection<CameraDeviceItem> CameraDevices { get; } = new();
+
+    private string _cameraHint = "";
+
+    /// <summary>设备列表下方的提示（枚举出错/没找到设备时才有内容）。</summary>
+    public string CameraHint
+    {
+        get => _cameraHint;
+        private set
+        {
+            _cameraHint = value;
+            OnPropertyChanged(nameof(CameraHint));
+            OnPropertyChanged(nameof(HasCameraHint));
+        }
+    }
+
+    public bool HasCameraHint => _cameraHint.Length > 0;
+
+    private CameraActivityService? CameraService
+    {
+        get
+        {
+            try { return Plugin.ServiceProvider?.GetService<CameraActivityService>(); }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>
+    /// 枚举本机摄像头填进列表。首次使用（还没填过默认值）时全部勾上——开箱即用，
+    /// 用户之后取消勾选就真的不再提醒。
+    /// </summary>
+    private void LoadCameraDevices()
+    {
+        var service = CameraService;
+        var devices = service?.EnumerateDevices() ?? new List<CameraDevice>();
+
+        CameraDevices.Clear();
+        if (devices.Count == 0)
+        {
+            CameraHint = "没有找到摄像头设备（外接摄像头插上后点「刷新设备列表」）。";
+            return;
+        }
+
+        if (!_settings.CameraListFilled)
+        {
+            _settings.MonitoredCameras.Clear();
+            foreach (var d in devices) _settings.MonitoredCameras.Add(d.Name);
+            _settings.CameraListFilled = true;
+            Plugin.SaveSettings();
+        }
+
+        foreach (var d in devices)
+            CameraDevices.Add(new CameraDeviceItem(d.Name, IsMonitored(d.Name), this));
+
+        CameraHint = service?.LastError ?? "";
+    }
+
+    private bool IsMonitored(string name)
+        => _settings.MonitoredCameras.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>勾选/取消勾选设备后，把当前勾选写回设置（供 <see cref="CameraDeviceItem"/> 调用）。</summary>
+    internal void SaveCameraSelection()
+    {
+        _settings.MonitoredCameras.Clear();
+        foreach (var d in CameraDevices.Where(d => d.IsSelected)) _settings.MonitoredCameras.Add(d.Name);
+        _settings.CameraListFilled = true;
+        Plugin.SaveSettings(); // 强制写盘
+    }
+
+    public void RefreshCameras_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => LoadCameraDevices();
 
     public void TestButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -597,6 +673,12 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set { _settings.ShowRainReminder = value; OnPropertyChanged(nameof(ShowRainReminder)); }
     }
 
+    public bool ShowCameraReminder
+    {
+        get => _settings.ShowCameraReminder;
+        set { _settings.ShowCameraReminder = value; OnPropertyChanged(nameof(ShowCameraReminder)); }
+    }
+
     public bool ShowEmojiSubtitles
     {
         get => _settings.ShowEmojiSubtitles;
@@ -715,6 +797,36 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+/// <summary>设置页里一个摄像头的勾选项。勾选变化立刻写回设置（大屏时钟那边每秒会重算提醒）。</summary>
+public class CameraDeviceItem : INotifyPropertyChanged
+{
+    private readonly SettingsPage _parent;
+    private bool _isSelected;
+
+    public string Name { get; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            _parent.SaveCameraSelection();
+        }
+    }
+
+    public CameraDeviceItem(string name, bool isSelected, SettingsPage parent)
+    {
+        Name = name;
+        _isSelected = isSelected;
+        _parent = parent;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 public class CourseSelectionItem : INotifyPropertyChanged

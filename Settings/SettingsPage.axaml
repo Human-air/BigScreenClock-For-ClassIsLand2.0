@@ -62,7 +62,7 @@
                     <StackPanel Spacing="6" Margin="20,2,0,0"
                                 IsVisible="{Binding ShowReminderPanel}">
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="2"
-                              RowDefinitions="Auto,Auto,Auto">
+                              RowDefinitions="Auto,Auto,Auto,Auto">
                             <CheckBox Grid.Row="0" Grid.Column="0" IsChecked="{Binding ShowWeatherReminder}"
                                       FontSize="14">
                                 <StackPanel Orientation="Horizontal" Spacing="5">
@@ -105,7 +105,33 @@
                                     <TextBlock Text="颜文字" FontSize="14" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </CheckBox>
+                            <CheckBox Grid.Row="3" Grid.Column="0" IsChecked="{Binding ShowCameraReminder}"
+                                      FontSize="14">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Classes="icon" Text="{ci:LI Webcam}" FontSize="13"/>
+                                    <TextBlock Text="摄像头占用" FontSize="14" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </CheckBox>
                         </Grid>
+
+                        <!-- 摄像头占用子项：勾选「摄像头占用」后出现 -->
+                        <StackPanel Spacing="6" Margin="0,4,0,0" IsVisible="{Binding ShowCameraReminder}">
+                            <TextBlock Text="勾选要提醒的摄像头，不勾选的不提醒。" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                            <ItemsControl ItemsSource="{Binding CameraDevices}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected}" FontSize="14"
+                                                  Content="{Binding Name}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="刷新设备列表" Click="RefreshCameras_Click"
+                                    FontSize="13" HorizontalAlignment="Left"/>
+                            <TextBlock Text="{Binding CameraHint}" FontSize="11" TextWrapping="Wrap"
+                                       IsVisible="{Binding HasCameraHint}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        </StackPanel>
                     </StackPanel>
                     <!-- 托盘菜单入口开关 -->
                     <CheckBox IsChecked="{Binding ShowTrayMenuEntry}" FontSize="14">

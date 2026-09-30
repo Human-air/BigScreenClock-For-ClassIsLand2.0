@@ -47,11 +47,16 @@ public partial class FullScreenClockWindow : Window
     /// 只在弹幕真的在滚时非空；null 表示没在播或已经在收尾状态。</summary>
     private Action? _marqueeStopAfterThisPass;
 
+    /// <summary>触屏/触控笔按住中：这段时间按悬停算（一直循环），抬手才当「点了一下」收尾。</summary>
+    private bool _touchPressActive;
+
     /// <summary>鼠标悬停某条预警：在顶部弹幕带显示其详情并循环滚动（自动切换，不需要先收起旧条）。</summary>
     private void AlertPointerEntered(object? sender, PointerEventArgs e)
     {
         if (sender is not Control c || c.DataContext is not AlertDisplayItem item) return;
         if (DataContext is not FullScreenClockViewModel vm) return;
+
+        if (e.Pointer.Type == PointerType.Mouse) _touchPressActive = false;   // 换成鼠标了，清掉触屏状态
 
         vm.ExpandedAlertDetail = item.Detail;
         // 顶部只有一个弹幕 ScrollViewer。先停旧弹幕再重新启动：悬停另一条时 Text 已变，
@@ -64,9 +69,18 @@ public partial class FullScreenClockWindow : Window
     /// 一遍没滚完时重复点击不生效。</summary>
     private void AlertPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_alertMarqueeOncePlaying) return;   // 已经在收尾的那一遍里，忽略
         if (sender is not Control c || c.DataContext is not AlertDisplayItem item) return;
+        if (_alertMarqueeOncePlaying) return;   // 已经在收尾的那一遍里，忽略
         if (DataContext is not FullScreenClockViewModel vm) return;
+
+        // 触屏/触控笔按下不是「点击」：按下时也会触发 PointerEntered，那是「手指/笔尖放在上面」，
+        // 该按悬停处理（一直循环滚）。若当成点击，就会变成「按住不动只滚一遍」——
+        // 教室大屏正是触屏，抬手时（PointerExited）再按点击收尾。
+        if (e.Pointer.Type != PointerType.Mouse)
+        {
+            _touchPressActive = true;
+            return;
+        }
 
         vm.ExpandedAlertDetail = item.Detail;
 
@@ -89,6 +103,23 @@ public partial class FullScreenClockWindow : Window
     private void AlertPointerExited(object? sender, PointerEventArgs e)
     {
         if (_alertMarqueeOncePlaying) return;
+
+        // 触屏抬手 = 轻点了一下：别在抬手瞬间把弹幕掐掉，让它滚完当前这一遍再收（等同鼠标点击）。
+        if (_touchPressActive)
+        {
+            _touchPressActive = false;
+            if (_marqueeStopAfterThisPass is { } stopAfterThisPass)
+            {
+                _alertMarqueeOncePlaying = true;
+                stopAfterThisPass();
+                return;
+            }
+
+            StopMarquee(AlertDetailScroll);
+            StartMarquee(AlertDetailScroll, once: true);
+            return;
+        }
+
         if (DataContext is not FullScreenClockViewModel vm) return;
         vm.ExpandedAlertDetail = null;
         StopMarquee(AlertDetailScroll);
@@ -133,24 +164,31 @@ public partial class FullScreenClockWindow : Window
         {
             if (!ReferenceEquals(sv.Tag, translate)) return;   // 鼠标已移开被 StopMarquee 取消
 
-            // 不用手动测量文字宽度：ScrollViewer 的 Extent 是框架根据 NoWrap 内容算出的真实宽度，
-            // 绝不会像 TextBlock 那样被容器压成视口宽（此前 textWidth≈0 导致只滚窗口宽度就循环）。
-            var extent = sv.Extent.Width;      // 文字真实宽度（框架测量）
+            // 文字宽度取 TextBlock 在无限宽约束下量出的 DesiredSize（NoWrap → 就是文字真实宽度）。
+            // 不能用 sv.Extent：ScrollViewer 的 Extent 有「不小于视口宽」的下限，短文字会被抬到视口宽，
+            // 按它算一遍的行程就会在文字离场后多空跑 (视口宽 − 文字宽)/speed 秒——
+            // 天气预警详情长（超过视口）所以看不出来，摄像头那条详情短，正好暴露出这个空档。
+            var extent = sv.Extent.Width;
             var viewport = sv.Viewport.Width;  // 可见区宽度
-            var hasText = sv.Content is TextBlock tb && !string.IsNullOrEmpty(tb.Text);
+            var tb = sv.Content as TextBlock;
+            var hasText = tb != null && !string.IsNullOrEmpty(tb.Text);
+            var desired = tb?.DesiredSize.Width ?? 0;   // 无限宽约束下量出的文字自然宽度
+            var textWidth = desired > 0
+                ? Math.Min(desired, extent)            // 兜底：量不出或量得比 Extent 还大就用 Extent
+                : extent;
 
-            // 文本已设但 Extent 还没更新 → 布局尚未完成，下一帧再试（最多 5 次）。
-            if (extent <= 0 && hasText && attempt < 5)
+            // 文本已设但宽度还没量出来 → 布局尚未完成，下一帧再试（最多 5 次）。
+            // Extent 有「不小于视口宽」的下限，短文字时它一上来就非 0，所以这里必须看 DesiredSize。
+            if (hasText && (extent <= 0 || desired <= 0) && attempt < 5)
             {
                 StartMarqueeWhenReady(sv, translate, attempt + 1, once);
                 return;
             }
 
             // 经典弹幕（和 B 站一样）：文字整体从「视口右侧外」进场，一路匀速向左，滚出左侧后
-            // 再从右侧重新进场，中途不停顿。不管文字长短一律这么滚——短预警（如高温预警全文没占
-            // 满一屏）以前会退化成「整段直接显示」，与弹幕的观感不一致。
-            const double speed = 100.0;                       // 像素/秒
-            var total = (extent + viewport) / speed;          // 滚一整遍的时长
+            // 再从右侧重新进场，中途不停顿（行程 = 视口宽 + 文字宽，尾部一离场就立刻循环重播）。
+            const double speed = 100.0;                        // 像素/秒
+            var total = (textWidth + viewport) / speed;        // 滚一整遍的时长
 
             translate.X = viewport;                           // 起步位置：视口右侧外
             var start = DateTime.UtcNow;

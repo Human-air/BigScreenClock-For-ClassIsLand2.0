@@ -31,6 +31,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 {
     private readonly PluginSettings _settings;
     private readonly DecibelMeterService _decibelService;
+    private readonly CameraActivityService _cameraService;
     private readonly IServiceProvider _serviceProvider;
     private readonly NoiseCounter _counter = new();
     private readonly Lazy<IExactTimeService?> _exactTimeService;
@@ -112,18 +113,22 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private string _noisyDisplaySignature = "";
     private bool _showCountRules;
 
-    // ===== 提醒面板数据（跟随 CI 组件配置 + CI 天气缓存） =====
+    // ===== 提醒面板数据（跟随 CI 组件配置 + CI 天气缓存 + 摄像头占用） =====
     private readonly ReminderData _reminderData = new();
+    /// <summary>天气预警（CI 缓存读来的，60 秒刷新一次）。</summary>
+    private readonly List<AlertInfo> _weatherAlerts = new();
     private int _reminderTick;
     private DateTime _lastWeatherRead = DateTime.MinValue;
 
     public FullScreenClockViewModel(
         PluginSettings settings,
         DecibelMeterService decibelService,
+        CameraActivityService cameraService,
         IServiceProvider serviceProvider)
     {
         _settings = settings;
         _decibelService = decibelService;
+        _cameraService = cameraService;
         _serviceProvider = serviceProvider;
 
         // 惰性缓存 IExactTimeService，避免每次调用查服务
@@ -167,12 +172,24 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         }
         else if (args.PropertyName is nameof(PluginSettings.ShowReminderPanel)
             or nameof(PluginSettings.ShowWeatherReminder)
-            or nameof(PluginSettings.ShowAlertsReminder)
             or nameof(PluginSettings.ShowCountdownReminder)
             or nameof(PluginSettings.ShowTextReminder)
             or nameof(PluginSettings.ShowRainReminder))
         {
             NotifyReminderChanged();
+        }
+        else if (args.PropertyName is nameof(PluginSettings.ShowAlertsReminder)
+            or nameof(PluginSettings.ShowCameraReminder)
+            or nameof(PluginSettings.MonitoredCameras))
+        {
+            // 预警/摄像头开关或勾选的设备变了 → 立刻重算条目（集合内容变化不会走上面那支）
+            if (args.PropertyName is nameof(PluginSettings.ShowCameraReminder))
+            {
+                // 大屏正开着时改开关：立即开始/停止监视（没开大屏则等 Show() 时再起）
+                if (_settings.ShowCameraReminder && IsWindowVisible) _cameraService.StartMonitoring();
+                else if (!_settings.ShowCameraReminder) _cameraService.StopMonitoring();
+            }
+            UpdateAlertItems();
         }
         else if (args.PropertyName is nameof(PluginSettings.ShowEmojiSubtitles))
         {
@@ -665,7 +682,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     // 组合可见性：子开关 && 有数据
     public bool ShowWeatherRow => _settings.ShowWeatherReminder && _reminderData.HasWeather;
-    public bool ShowAlertsRow => _settings.ShowAlertsReminder && _reminderData.HasAlerts;
+    // 预警开关的过滤在 UpdateAlertItems() 里做（摄像头占用那条不受天气「预警」开关影响）
+    public bool ShowAlertsRow => _reminderData.HasAlerts;
     public bool ShowCountdownRow => _settings.ShowCountdownReminder && _reminderData.HasCountdown;
     public bool ShowTextRow => _settings.ShowTextReminder && _reminderData.HasText;
 
@@ -1035,29 +1053,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (!File.Exists(settingsPath)) return;
             var (code, temp, alerts) = CiWeatherReader.ReadLastWeather(settingsPath);
 
-            // 预警内容与上次一致则不重建列表：重建会把正在悬停的预警项整链移除、
-            // 触发 PointerExited/Entered，导致顶部详情弹幕每 60 秒（天气刷新周期）重置重播一次。
-            var alertsChanged = alerts.Count != _reminderData.Alerts.Count
-                || !alerts.Zip(_reminderData.Alerts).All(p =>
-                    p.First.Title == p.Second.Title && p.First.Level == p.Second.Level
-                    && p.First.Detail == p.Second.Detail);
-            if (alertsChanged)
-            {
-                AlertItems.Clear();
-                ExpandedAlertDetail = null;   // 预警内容更新，收起旧展开态（弹幕尺寸按旧文本算会错位）
-                foreach (var a in alerts)
-                    AlertItems.Add(new AlertDisplayItem
-                    {
-                        DisplayText = a.Title,
-                        Icon = IconGlyph.Of(LucideIconKind.TriangleAlert),
-                        Level = a.Level,
-                        Foreground = AlertBrush(a.Level, Chrome.IsLight),
-                        Detail = a.Detail,
-                    });
-
-                _reminderData.Alerts.Clear();
-                _reminderData.Alerts.AddRange(alerts);
-            }
+            _weatherAlerts.Clear();
+            _weatherAlerts.AddRange(alerts);
+            UpdateAlertItems();
 
             if (string.IsNullOrEmpty(code))
             {
@@ -1084,6 +1082,45 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             NotifyReminderChanged();
         }
         catch { }
+    }
+
+    /// <summary>
+    /// 合成预警列表并显示：天气预警（按「预警」开关过滤）+ 摄像头占用提醒（按「摄像头占用」开关过滤）。
+    /// 内容与上次一致就不重建——重建会把正在悬停的条目整链移除、触发 PointerExited/Entered，
+    /// 导致顶部详情弹幕（天气 60 秒一刷、摄像头每秒一算）重置重播一次。
+    /// </summary>
+    private void UpdateAlertItems()
+    {
+        // 摄像头占用快照由 CameraActivityService 在后台更新，这里取当前快照重算条目
+        var cameraAlerts = _settings.ShowCameraReminder
+            ? CameraAlertBuilder.Build(_settings.MonitoredCameras, _cameraService.Occupancy)
+            : new List<AlertInfo>();
+
+        var merged = new List<AlertInfo>();
+        if (_settings.ShowAlertsReminder) merged.AddRange(_weatherAlerts);
+        merged.AddRange(cameraAlerts);
+
+        var changed = merged.Count != _reminderData.Alerts.Count
+            || !merged.Zip(_reminderData.Alerts).All(p =>
+                p.First.Title == p.Second.Title && p.First.Level == p.Second.Level
+                && p.First.Detail == p.Second.Detail);
+        if (!changed) return;
+
+        AlertItems.Clear();
+        ExpandedAlertDetail = null;   // 预警内容更新，收起旧展开态（弹幕尺寸按旧文本算会错位）
+        foreach (var a in merged)
+            AlertItems.Add(new AlertDisplayItem
+            {
+                DisplayText = a.Title,
+                Icon = IconGlyph.Of(a.IconName),
+                Level = a.Level,
+                Foreground = AlertBrush(a.Level, Chrome.IsLight),
+                Detail = a.Detail,
+            });
+
+        _reminderData.Alerts.Clear();
+        _reminderData.Alerts.AddRange(merged);
+        NotifyReminderChanged();   // 条目增减会影响面板/第一行的可见性
     }
 
     /// <summary>预警等级 → 显示颜色（蓝/黄/橙/红，浅底上取压暗版）。等级缺失时用主题正文色。</summary>
@@ -1169,6 +1206,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     IsWindowVisible = false;
                     StopUpdateTimer();
                     _decibelService.StopMonitoring();
+                    _cameraService.StopMonitoring();
                     UnsubscribeToClassEvents();
                     SetMainWindowVisible(true);
                     _window = null;
@@ -1211,6 +1249,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             StartUpdateTimer();
             StartAntiScreensaver();
             _decibelService.StartMonitoring();
+            // 摄像头占用检测：跟着大屏时钟的显示周期开关（用不上时不占系统资源）
+            if (_settings.ShowCameraReminder) _cameraService.StartMonitoring();
             RefreshAll();
 
             _window.WindowState = WindowState.FullScreen;
@@ -1266,6 +1306,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             StopUpdateTimer();
             StopAntiScreensaver();
             _decibelService.StopMonitoring();
+            _cameraService.StopMonitoring();
             UnsubscribeToClassEvents();
             IsWindowVisible = false;
             SetMainWindowVisible(true);
@@ -1308,6 +1349,10 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
         // 刷新计数区域（脏标记：内容未变不重建；保护倒计时需要每秒刷新）
         UpdateNoisyDisplay();
+
+        // 摄像头占用：占用快照由后台监视器事件驱动更新，这里每秒取一次并合成提醒条目
+        // （内容没变时 UpdateAlertItems 直接返回，不会打断正在看的预警详情弹幕）
+        UpdateAlertItems();
 
         // 提醒面板：组件配置每 3 秒同步一次（用户改 CI 组件自动跟随），天气缓存每 60 秒读一次
         _reminderTick++;

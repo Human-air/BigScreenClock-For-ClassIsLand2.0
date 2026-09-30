@@ -46,10 +46,14 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showRainReminder = true;
     private bool _showEmojiSubtitles = true;
     private bool _showTrayMenuEntry = true;
+    private bool _showCameraReminder = true;
+    private bool _cameraListFilled;
+    private ObservableCollection<string> _monitoredCameras = new();
 
     public PluginSettings()
     {
         _targetCourseNames.CollectionChanged += (_, _) => OnPropertyChanged(nameof(TargetCourseNames));
+        _monitoredCameras.CollectionChanged += (_, _) => OnPropertyChanged(nameof(MonitoredCameras));
     }
 
     /// <summary>
@@ -401,6 +405,32 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _showTrayMenuEntry;
         set { _showTrayMenuEntry = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否显示「摄像头使用中」提醒（设备被程序占用时，在预警那一行出一条）。</summary>
+    public bool ShowCameraReminder
+    {
+        get => _showCameraReminder;
+        set { _showCameraReminder = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 要提醒的摄像头设备名（设置页里勾的，见 <see cref="CameraAlertBuilder"/>）。空 = 不提醒。
+    /// </summary>
+    public ObservableCollection<string> MonitoredCameras
+    {
+        get => _monitoredCameras;
+        set { _monitoredCameras = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 设备列表是否已经按本机摄像头「填过默认勾选」。首次打开设置页时把枚举到的设备全部勾上，
+    /// 之后用户取消全部勾选就真的不提醒了（不再把空列表当成「还没选过」）。
+    /// </summary>
+    public bool CameraListFilled
+    {
+        get => _cameraListFilled;
+        set { _cameraListFilled = value; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

@@ -41,4 +41,10 @@ public class AlertInfo
 
     /// <summary>预警详情全文（如「…省自然资源厅、省气象局联合发布…应加强对…防范…」）。</summary>
     public string? Detail { get; init; }
+
+    /// <summary>
+    /// 条目图标（LucideIconKind 成员名）。不填 = 预警三角（天气预警用）；
+    /// 摄像头占用那条填自己的图标（见 <see cref="CameraAlertBuilder.AlertIcon"/>）。
+    /// </summary>
+    public string? IconName { get; init; }
 }

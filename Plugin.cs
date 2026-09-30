@@ -60,6 +60,7 @@ public class Plugin : PluginBase
         services.AddSingleton(Settings);
 
         services.AddSingleton<DecibelMeterService>();
+        services.AddSingleton<CameraActivityService>();
         services.AddSingleton<FullScreenClockViewModel>();
         services.AddSingleton<AutoTriggerService>();
 

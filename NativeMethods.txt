@@ -1,0 +1,19 @@
+// 摄像头占用检测（CameraActivityService）用到的 Windows API。
+// CsWin32 按这个清单生成 P/Invoke 与 COM 接口声明（仅编译期，不会打进插件包）。
+MFStartup
+MFShutdown
+MFCreateAttributes
+MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME
+MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE
+MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID
+MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK
+IMFAttributes
+IMFActivate
+MFCreateSensorActivityMonitor
+IMFSensorActivityMonitor
+IMFSensorActivitiesReport
+IMFSensorActivityReport
+IMFSensorProcessActivity
+IMFSensorActivitiesReportCallback
+MFSensorDeviceMode
+CoTaskMemFree
