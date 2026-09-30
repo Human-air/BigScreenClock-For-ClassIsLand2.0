@@ -299,11 +299,40 @@
                                    VerticalAlignment="Center"/>
                     </StackPanel>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="主题" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <ComboBox Grid.Column="1" SelectedIndex="{Binding ThemeModeIndex}" FontSize="13"
+                                  MinWidth="150" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="跟随 ClassIsland"/>
+                            <ComboBoxItem Content="明亮"/>
+                            <ComboBoxItem Content="黑暗"/>
+                        </ComboBox>
+                        <TextBlock Grid.Column="2" Text="明亮/黑暗各记一套颜色" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                         <Slider Grid.Column="1" Value="{Binding ClockFontSize}" Minimum="60" Maximum="400"
                                 TickFrequency="20" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding ClockFontSizeText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="课程信息字号" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Column="1" Value="{Binding CourseInfoFontSize}" Minimum="14" Maximum="72"
+                                TickFrequency="2" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding CourseInfoFontSizeText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="计数字号" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Column="1" Value="{Binding CountFontSize}" Minimum="12" Maximum="72"
+                                TickFrequency="2" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding CountFontSizeText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板 -->
@@ -323,7 +352,7 @@
                         </cp:ColorPicker>
                     </Grid>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                        <TextBlock Grid.Column="0" Text="字体颜色" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="0" Text="时钟字体颜色" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                         <TextBlock Grid.Column="1" Text="{Binding FontColorHex}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
@@ -333,21 +362,6 @@
                                         HorizontalAlignment="Right">
                             <cp:ColorPicker.Content>
                                 <Border Background="{Binding FontColorBrush}" CornerRadius="3"
-                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
-                            </cp:ColorPicker.Content>
-                        </cp:ColorPicker>
-                    </Grid>
-                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                        <TextBlock Grid.Column="0" Text="强调色" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <TextBlock Grid.Column="1" Text="{Binding AccentColorHex}" FontSize="12"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        <cp:ColorPicker Grid.Column="2" Color="{Binding AccentColorValue}"
-                                        IsAccentColorsVisible="False" Width="90" Height="28"
-                                        HorizontalAlignment="Right">
-                            <cp:ColorPicker.Content>
-                                <Border Background="{Binding AccentColorBrush}" CornerRadius="3"
                                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
                             </cp:ColorPicker.Content>
                         </cp:ColorPicker>
@@ -397,6 +411,21 @@
                             </cp:ColorPicker.Content>
                         </cp:ColorPicker>
                     </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="降水提醒颜色" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <TextBlock Grid.Column="1" Text="{Binding RainColorHex}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        <cp:ColorPicker Grid.Column="2" Color="{Binding RainColorValue}"
+                                        IsAccentColorsVisible="False" Width="90" Height="28"
+                                        HorizontalAlignment="Right">
+                            <cp:ColorPicker.Content>
+                                <Border Background="{Binding RainColorBrush}" CornerRadius="3"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
+                            </cp:ColorPicker.Content>
+                        </cp:ColorPicker>
+                    </Grid>
                 </StackPanel>
 
                 <!-- 规则说明 -->
@@ -428,19 +457,21 @@
         </ScrollViewer>
 
         <!-- ===== 右栏：实时预览（置顶不滚动）+ 进入全屏时钟 =====
-             预览黑底 = 模拟实际全屏时钟画面（该画面本身是深色 UI），故保持深色不随主题变。 -->
+             预览按当前主题呈现：底色/文字用 PreviewChrome（随主题整批翻转），
+             时钟/课程信息/音量标题/进度用上面 5 个颜色设置，与全屏时钟一一对应。 -->
         <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Top" Margin="4,8,0,0">
-            <Border Background="#000000" CornerRadius="12" Padding="12,10">
+            <Border Background="{Binding BackgroundColorBrush}" CornerRadius="12" Padding="12,10">
             <StackPanel Spacing="4" HorizontalAlignment="Center" Width="240">
-                <TextBlock Text="预览" FontSize="11" Foreground="#55ffffff"
+                <TextBlock Text="预览" FontSize="11" Foreground="{Binding PreviewChrome.TextMuted}"
                            HorizontalAlignment="Center" Margin="0,0,0,4"/>
                 <TextBlock Text="{Binding PreviewTime}"
                            FontSize="{Binding PreviewFontSize}"
-                           FontWeight="Bold" Foreground="#ffffff"
-                           FontFamily="Consolas,monospace"
+                           FontWeight="Bold" Foreground="{Binding FontColorBrush}"
+                           FontFamily="{Binding PreviewClockFontFamily}"
+                           FontFeatures="{Binding PreviewClockFontFeatures}"
                            HorizontalAlignment="Center"/>
                 <TextBlock Text="{Binding PreviewCourseText}" IsVisible="{Binding ShowCourseInfo}"
-                           FontSize="11" FontWeight="Bold" Foreground="#88ccff"
+                           FontSize="11" FontWeight="Bold" Foreground="{Binding CourseInfoColorBrush}"
                            HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
 
                 <!-- 提醒区（跟随「提醒显示」总开关；子项各自开关控制对应内容） -->
@@ -449,78 +480,78 @@
                     <WrapPanel HorizontalAlignment="Center">
                         <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,6,0"
                                     IsVisible="{Binding ShowWeatherReminder}">
-                            <TextBlock Classes="icon" Text="{ci:LI Sun}" FontSize="10" Foreground="#ccffffff"/>
-                            <TextBlock Text="30° 多云" FontSize="9" Foreground="#ccffffff" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Sun}" FontSize="10" Foreground="{Binding PreviewChrome.TextBody}"/>
+                            <TextBlock Text="30° 多云" FontSize="9" Foreground="{Binding PreviewChrome.TextBody}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,0,6,0"
                                     IsVisible="{Binding ShowCountdownReminder}">
-                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="10" Foreground="#ffffdd"/>
-                            <TextBlock Text="高考 还有 30 天" FontSize="9" Foreground="#ffffdd" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="10" Foreground="{Binding PreviewChrome.Countdown}"/>
+                            <TextBlock Text="高考 还有 30 天" FontSize="9" Foreground="{Binding PreviewChrome.Countdown}" VerticalAlignment="Center"/>
                         </StackPanel>
-                        <TextBlock Text="8月29日 周五" FontSize="9" Foreground="#88ffffff"/>
+                        <TextBlock Text="8月29日 周五" FontSize="9" Foreground="{Binding PreviewChrome.TextSecondary}"/>
                     </WrapPanel>
-                    <!-- 降雨提醒 -->
+                    <!-- 降雨提醒（用降水色） -->
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="3"
                           IsVisible="{Binding ShowRainReminder}">
-                        <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="10" Foreground="#aaffffff"/>
+                        <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="10" Foreground="{Binding RainColorBrush}"/>
                         <TextBlock Grid.Column="1" Text="20小时内当前地区有降雨 记得带伞哦 (ノω≦)"
-                                   FontSize="9" Foreground="#aaffffff" TextWrapping="Wrap"/>
+                                   FontSize="9" Foreground="{Binding RainColorBrush}" TextWrapping="Wrap"/>
                     </Grid>
                     <!-- 预警 -->
                     <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center"
                                 IsVisible="{Binding ShowAlertsReminder}">
-                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="10" Foreground="#ffdd44"/>
-                        <TextBlock Text="地质灾害气象风险预警" FontSize="9" Foreground="#ffdd44" VerticalAlignment="Center"/>
+                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="10" Foreground="{Binding PreviewAlertBrush}"/>
+                        <TextBlock Text="地质灾害气象风险预警" FontSize="9" Foreground="{Binding PreviewAlertBrush}" VerticalAlignment="Center"/>
                     </StackPanel>
                     <!-- 文本框 -->
                     <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center"
                                 IsVisible="{Binding ShowTextReminder}">
-                        <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="10" Foreground="#ddffffff"/>
-                        <TextBlock Text="自习课请保持安静" FontSize="9" Foreground="#ddffffff" VerticalAlignment="Center"/>
+                        <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="10" Foreground="{Binding PreviewChrome.TextBody}"/>
+                        <TextBlock Text="自习课请保持安静" FontSize="9" Foreground="{Binding PreviewChrome.TextBody}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
 
-                <!-- 音量条（本版：标题+档位、分段刻度轨道、五档） -->
-                <Border Background="#1a1a2e" CornerRadius="6" Padding="8,6"
+                <!-- 音量条（标题+档位、分段刻度轨道、五档） -->
+                <Border Background="{Binding PreviewChrome.PanelBackground}" CornerRadius="6" Padding="8,6"
                         IsVisible="{Binding ShowDecibelMeter}"
                         HorizontalAlignment="Center">
                     <StackPanel Spacing="3" Width="210">
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="10" Foreground="#bbffffff"/>
-                                <TextBlock Text="教室音量" FontSize="9" Foreground="#bbffffff" VerticalAlignment="Center"/>
+                                <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="10" Foreground="{Binding NoiseTitleColorBrush}"/>
+                                <TextBlock Text="教室音量" FontSize="9" Foreground="{Binding NoiseTitleColorBrush}" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="良好" FontSize="9" Foreground="#ffdd44"
+                            <TextBlock Grid.Column="1" Text="良好" FontSize="9" Foreground="{Binding PreviewSlotTextBrush}"
                                        FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                         </Grid>
                         <!-- 轨道 + 分段刻度块 -->
                         <Grid ColumnDefinitions="1*,1,1*,1,1*,1,1*,1,1*" Height="10">
-                            <Border Grid.ColumnSpan="9" Background="#33ffffff" CornerRadius="2"
+                            <Border Grid.ColumnSpan="9" Background="{Binding PreviewChrome.VolumeTrack}" CornerRadius="2"
                                     Height="3" VerticalAlignment="Center"/>
-                            <Rectangle Grid.Column="1" Width="1.5" Height="7" Fill="#66ffffff" VerticalAlignment="Center"/>
-                            <Rectangle Grid.Column="3" Width="1.5" Height="7" Fill="#66ffffff" VerticalAlignment="Center"/>
-                            <Rectangle Grid.Column="5" Width="1.5" Height="7" Fill="#66ffffff" VerticalAlignment="Center"/>
-                            <Rectangle Grid.Column="7" Width="1.5" Height="7" Fill="#66ffffff" VerticalAlignment="Center"/>
+                            <Rectangle Grid.Column="1" Width="1.5" Height="7" Fill="{Binding PreviewChrome.Divider}" VerticalAlignment="Center"/>
+                            <Rectangle Grid.Column="3" Width="1.5" Height="7" Fill="{Binding PreviewChrome.Divider}" VerticalAlignment="Center"/>
+                            <Rectangle Grid.Column="5" Width="1.5" Height="7" Fill="{Binding PreviewChrome.Divider}" VerticalAlignment="Center"/>
+                            <Rectangle Grid.Column="7" Width="1.5" Height="7" Fill="{Binding PreviewChrome.Divider}" VerticalAlignment="Center"/>
                         </Grid>
                         <!-- 五档文字 -->
                         <Grid ColumnDefinitions="*,*,*,*,*">
-                            <TextBlock Grid.Column="0" Text="安静" FontSize="8" Foreground="#88ffffff" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="良好" FontSize="8" Foreground="#88ffffff" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Column="2" Text="一般" FontSize="8" Foreground="#88ffffff" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Column="3" Text="吵闹" FontSize="8" Foreground="#88ffffff" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Column="4" Text="嘈杂" FontSize="8" Foreground="#88ffffff" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="安静" FontSize="8" Foreground="{Binding PreviewSlotLabelBrushes[0]}" Opacity="{Binding PreviewSlotFadeOpacity}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="良好" FontSize="8" Foreground="{Binding PreviewSlotLabelBrushes[1]}" Opacity="{Binding PreviewSlotFadeOpacity}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="一般" FontSize="8" Foreground="{Binding PreviewSlotLabelBrushes[2]}" Opacity="{Binding PreviewSlotFadeOpacity}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="吵闹" FontSize="8" Foreground="{Binding PreviewSlotLabelBrushes[3]}" Opacity="{Binding PreviewSlotFadeOpacity}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Column="4" Text="嘈杂" FontSize="8" Foreground="{Binding PreviewSlotLabelBrushes[4]}" Opacity="{Binding PreviewSlotFadeOpacity}" HorizontalAlignment="Center"/>
                         </Grid>
                     </StackPanel>
                 </Border>
 
                 <TextBlock Text="晚自习  吵闹 2 次" IsVisible="{Binding ShowNoisyCounter}"
-                           FontSize="10" Foreground="#ffff44" HorizontalAlignment="Center"
+                           FontSize="10" Foreground="{Binding PreviewCountBrush}" HorizontalAlignment="Center"
                            FontWeight="Bold"/>
 
-                <!-- 课程进度条（底部双色条：亮色已完成 + 深色剩余） -->
-                <Border Background="#1a1a2e" CornerRadius="3" Height="5" Width="220"
+                <!-- 课程进度条（底部双色条：已完成 + 剩余） -->
+                <Border Background="{Binding PreviewChrome.PanelBackground}" CornerRadius="3" Height="5" Width="220"
                         HorizontalAlignment="Center" Margin="0,3,0,0">
-                    <Border Width="120" Background="#4FC3F7" CornerRadius="3" HorizontalAlignment="Left"/>
+                    <Border Width="120" Background="{Binding ProgressColorBrush}" CornerRadius="3" HorizontalAlignment="Left"/>
                 </Border>
             </StackPanel>
             </Border>

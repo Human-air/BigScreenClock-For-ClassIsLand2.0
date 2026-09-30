@@ -23,16 +23,21 @@ public partial class FullScreenClockWindow : Window
         KeyDown += OnKeyDown;
         PointerMoved += OnPointerMoved;
         RulesPopup.PlacementTarget = CounterAreaBorder; // 规则浮层锚定在计数区域上方
-        SizeChanged += (_, _) => UpdateReminderPanelWidth();
-        DataContextChanged += (_, _) => UpdateReminderPanelWidth();
+        SizeChanged += (_, _) => UpdateSizeDependentLayout();
+        DataContextChanged += (_, _) => UpdateSizeDependentLayout();
     }
 
-    /// <summary>提醒面板最大宽 = 屏幕宽 × 2/3；第一行提醒合并阈值 = 屏幕宽 × 1/3。</summary>
-    private void UpdateReminderPanelWidth()
+    /// <summary>
+    /// 随窗口尺寸变化的几个宽度：提醒面板最大宽 = 屏幕宽 × 2/3；第一行提醒合并阈值 = 屏幕宽 × 1/3；
+    /// 底部课程信息最大宽 = 整行宽（去掉页面左右各 40 的边距）× 1/2，超了由 Viewbox 缩字而不是裁掉。
+    /// </summary>
+    private void UpdateSizeDependentLayout()
     {
         if (DataContext is not FullScreenClockViewModel vm) return;
+        if (Bounds.Width <= 0) return;  // 还没量出尺寸，别把课程信息压成 0 宽
         vm.ReminderPanelMaxWidth = Bounds.Width * 2.0 / 3.0;
         vm.MergeThreshold = Bounds.Width / 3.0;
+        vm.CourseInfoMaxWidth = Math.Max(160, (Bounds.Width - 80) / 2.0);
     }
 
     /// <summary>「点击后滚完这一遍就收」已生效：这期间重复点击不生效。</summary>

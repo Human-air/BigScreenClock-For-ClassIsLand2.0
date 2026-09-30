@@ -14,10 +14,10 @@ public class PluginSettings : INotifyPropertyChanged
     private double _decibelNoisyThreshold = 0.08;
     private string _backgroundColor = "#000000";
     private string _fontColor = "#ffffff";
-    private string _accentColor = "#4CAF50";
     private string _progressColor = "#4FC3F7";
     private string _courseInfoColor = "#88ccff";
     private string _noiseTitleColor = "#bbffffff";
+    private string _rainColor = "#7FD4FF";
     private bool _showDecibelMeter = true;
     private bool _showCourseInfo = true;
     private bool _showBellTime = true;
@@ -33,6 +33,10 @@ public class PluginSettings : INotifyPropertyChanged
     private int _logKeepMinutes = 10;
     private int _logKeepMinKb = 100;
     private int _clockFontSize = 180;
+    private int _courseInfoFontSize = 28;
+    private int _countFontSize = 24;
+    private int _themeMode;
+    private int _appliedPaletteVariant = ClockTheme.VariantUnknown;
     private string _windowTitle = "大屏时钟";
     private bool _showReminderPanel = true;
     private bool _showWeatherReminder = true;
@@ -112,12 +116,25 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 强调色 (HEX)，用于分贝条和高亮
+    /// 主题：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗（见 <see cref="ClockThemeMode"/>）。
+    /// 切换主题会把颜色换成该主题那套（见 <see cref="LightColors"/> / <see cref="DarkColors"/>）。
     /// </summary>
-    public string AccentColor
+    public int ThemeMode
     {
-        get => _accentColor;
-        set { _accentColor = value; OnPropertyChanged(); }
+        get => _themeMode;
+        set { _themeMode = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 上面 6 个颜色当前是哪个主题那一套（<see cref="ClockTheme.VariantLight"/> / <see cref="ClockTheme.VariantDark"/>）。
+    /// 用来判断「生效主题变了没有」：只有变了才换色，否则用户手改的颜色会被反复覆盖。
+    /// 初值取「未知」——老配置里没有这个字段，正好用它认出「还没进过主题系统」的配置来做升级迁移
+    /// （见 <see cref="EveningSelfStudyClock.Helpers.ClockThemeApplier.MigrateLegacySettings"/>）。
+    /// </summary>
+    public int AppliedPaletteVariant
+    {
+        get => _appliedPaletteVariant;
+        set { _appliedPaletteVariant = value; OnPropertyChanged(); }
     }
 
     /// <summary>
@@ -146,6 +163,25 @@ public class PluginSettings : INotifyPropertyChanged
         get => _noiseTitleColor;
         set { _noiseTitleColor = value; OnPropertyChanged(); }
     }
+
+    /// <summary>
+    /// 降水提醒颜色 (HEX)：有降雨提醒、或当前天气是雨雪时，相应文字与图标用这个色（默认蓝）。
+    /// </summary>
+    public string RainColor
+    {
+        get => _rainColor;
+        set { _rainColor = value; OnPropertyChanged(); }
+    }
+
+    // ===== 两套主题各记一套颜色 =====
+    // 切主题时上面这 6 个颜色会被换掉，所以换之前先把当前这套存回它自己的槽位、再读另一套
+    // （见 ClockThemeApplier），这样切回来还是你调过的色，而不是又被打回该主题默认值。
+
+    /// <summary>明亮主题那一套颜色（用户调过就记在这里，切回明亮时恢复）。</summary>
+    public ThemeColorSet LightColors { get; set; } = ThemeColorSet.FromPalette(ClockTheme.Light);
+
+    /// <summary>黑暗主题那一套颜色。</summary>
+    public ThemeColorSet DarkColors { get; set; } = ThemeColorSet.FromPalette(ClockTheme.Dark);
 
     /// <summary>
     /// 是否显示教室分贝
@@ -282,6 +318,24 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _clockFontSize;
         set { _clockFontSize = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 课程信息字号 (px)：底部居中的「当前课程为 …」那行
+    /// </summary>
+    public int CourseInfoFontSize
+    {
+        get => _courseInfoFontSize;
+        set { _courseInfoFontSize = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 计数字号 (px)：左下角吵闹计数与「正在记录」提示
+    /// </summary>
+    public int CountFontSize
+    {
+        get => _countFontSize;
+        set { _countFontSize = value; OnPropertyChanged(); }
     }
 
     /// <summary>

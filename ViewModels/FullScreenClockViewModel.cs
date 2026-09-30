@@ -6,11 +6,14 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Timers;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Styling;
 using Avalonia.Threading;
+using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Icons;
 using ClassIsland.Core.Models.Components;
@@ -39,9 +42,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     private int _timeOffsetSeconds;
 
-    // 计数显示颜色：一般 = 黄，吵闹 = 红
-    private static readonly IBrush CountNormalBrush = new SolidColorBrush(Color.Parse("#ffff44"));
-    private static readonly IBrush CountNoisyBrush = new SolidColorBrush(Color.Parse("#ff5555"));
+    // 计数显示颜色：一般 = 黄，吵闹 = 红。两套主题各一版（浅底上原色太亮看不清）
+    private static readonly IBrush CountNormalBrush = new SolidColorBrush(Color.Parse(SemanticColors.CountNormalHex(false)));
+    private static readonly IBrush CountNoisyBrush = new SolidColorBrush(Color.Parse(SemanticColors.CountNoisyHex(false)));
+    private static readonly IBrush CountNormalLightBrush = new SolidColorBrush(Color.Parse(SemanticColors.CountNormalHex(true)));
+    private static readonly IBrush CountNoisyLightBrush = new SolidColorBrush(Color.Parse(SemanticColors.CountNoisyHex(true)));
+
+    /// <summary>当前主题下「一般」计数色。</summary>
+    private IBrush CountNormal => Chrome.IsLight ? CountNormalLightBrush : CountNormalBrush;
+
+    /// <summary>当前主题下「吵闹」计数色。</summary>
+    private IBrush CountNoisy => Chrome.IsLight ? CountNoisyLightBrush : CountNoisyBrush;
 
     // 计数区「暂未记录到吵闹」前的对勾图标字形（矢量）
     private static readonly string CheckIcon = IconGlyph.Of(LucideIconKind.CircleCheck);
@@ -50,15 +61,36 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     // 五档高亮、右侧状态、填充色全部以 AnimatedProgress 反推出的 CurrentSlot 为唯一源，避免不同步。
     private static readonly string[] SlotNames = NoiseLevelDisplay.SlotNames;
 
-    /// <summary>五档画刷：静态缓存，避免每次刷新都新建 SolidColorBrush（会让控件反复失效重绘、观感发顿）。</summary>
-    private static readonly IBrush[] SlotBrushes = BuildSlotBrushes();
+    /// <summary>五档轨道填充色：静态缓存，避免每次刷新都新建 SolidColorBrush（会让控件反复失效重绘、观感发顿）。</summary>
+    private static readonly IBrush[] SlotBrushes = BuildSlotBrushes(LevelSlotCalculator.SlotColors);
 
-    private static IBrush[] BuildSlotBrushes()
+    /// <summary>五档文字色（未达到该档）：深色 / 明亮两套（明亮用压暗版，白底上才看得清）。</summary>
+    private static readonly IBrush[] SlotTextBrushesDark = BuildSlotBrushes(LevelSlotCalculator.SlotTextColors(false));
+    private static readonly IBrush[] SlotTextBrushesLight = BuildSlotBrushes(LevelSlotCalculator.SlotTextColors(true));
+
+    /// <summary>五档文字色（已到达该档）：只有「一般」与未达到时不同（亮黄 vs 压暗琥珀）。</summary>
+    private static readonly IBrush[] SlotReachedBrushesDark = BuildReachedBrushes(false);
+    private static readonly IBrush[] SlotReachedBrushesLight = BuildReachedBrushes(true);
+
+    /// <summary>非当前档位文字的淡化程度：浅底上要比深底淡得少，否则整排字糊在背景里。</summary>
+    private const double SlotFadeDark = 0.35;
+    private const double SlotFadeLight = 0.5;
+
+    /// <summary>逐档取「已达到」色（<see cref="LevelSlotCalculator.ReachedColorOf"/>）。</summary>
+    private static IBrush[] BuildReachedBrushes(bool light)
     {
-        var brushes = new IBrush[LevelSlotCalculator.SlotColors.Length];
+        var colors = new uint[SlotNames.Length];
+        for (var i = 0; i < colors.Length; i++)
+            colors[i] = LevelSlotCalculator.ReachedColorOf(i, light);
+        return BuildSlotBrushes(colors);
+    }
+
+    private static IBrush[] BuildSlotBrushes(uint[] colors)
+    {
+        var brushes = new IBrush[colors.Length];
         for (var i = 0; i < brushes.Length; i++)
         {
-            var c = LevelSlotCalculator.SlotColors[i];
+            var c = colors[i];
             brushes[i] = new SolidColorBrush(Color.FromArgb((byte)(c >> 24), (byte)(c >> 16), (byte)(c >> 8), (byte)c));
         }
         return brushes;
@@ -106,7 +138,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _settings.PropertyChanged += OnSettingsPropertyChanged;
 
         for (var i = 0; i < SlotNames.Length; i++)
-            _noiseLevelSlots.Add(new NoiseLevelSlotItem(SlotNames[i], SlotBrushes[i]));
+            _noiseLevelSlots.Add(new NoiseLevelSlotItem(SlotNames[i], SlotTextBrushesDark[i], SlotReachedBrushesDark[i]));
+        ApplySlotTheme();
         UpdateNoiseLevelSlots();
     }
 
@@ -155,6 +188,15 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             // 「显示精确打铃时间」子项：即时把末尾那段加减回去/去掉
             UpdateCourseInfo(NowVirtual);
         }
+        else if (args.PropertyName is nameof(PluginSettings.ThemeMode))
+        {
+            // 设置页里切了主题（颜色已被设置页改写）→ 大屏时钟正开着也立刻换配色
+            Dispatcher.UIThread.Post(() =>
+            {
+                ApplyThemePalette();
+                RefreshAppearanceBindings();
+            });
+        }
     }
 
     /// <summary>
@@ -174,6 +216,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 // 监测开关 / 错误提示文字变化 → 直接刷新右侧文字（如「未检测到麦克风」「等待检测…」）
                 OnPropertyChanged(nameof(NoiseLevelText));
                 OnPropertyChanged(nameof(NoiseLevelFillBrush));
+                OnPropertyChanged(nameof(NoiseLevelTextBrush));
                 break;
             case nameof(DecibelMeterService.CurrentSegmentLevel):
                 UpdateRecording();
@@ -226,16 +269,44 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     public string BackgroundColor => _settings.BackgroundColor;
     public string FontColor => _settings.FontColor;
-    public string AccentColor => _settings.AccentColor;
     public string ProgressColor => _settings.ProgressColor;
     public string CourseInfoColor => _settings.CourseInfoColor;
     public string NoiseTitleColor => _settings.NoiseTitleColor;
+    public string RainColor => _settings.RainColor;
+
+    /// <summary>
+    /// 当前主题的界面「底色 / 文字」画刷（背景白/黑时整批翻转）。
+    /// 界面绑 Chrome.Xxx，换主题只需通知这一个属性。
+    /// </summary>
+    public ClockBrushes Chrome { get; private set; } = ClockBrushes.From(ClockTheme.Dark);
+
+    /// <summary>
+    /// 时钟数字字体：跟随 CI 主界面字体（CI 里选什么字体，大屏时钟就用什么），
+    /// 换掉原来的 Consolas（数字 0 中间带斜杠）。
+    /// </summary>
+    public FontFamily ClockFontFamily { get; private set; } = FontFamily.Parse(DefaultClockFont);
+
+    /// <summary>数字用表格宽度（tnum）：秒数跳动时整行不左右抖。</summary>
+    public FontFeatureCollection ClockFontFeatures { get; } =
+        new FontFeatureCollection { FontFeature.Parse("tnum") };
+
+    /// <summary>读不到 CI 字体设置时的回退（原来的窗口字体）。</summary>
+    private const string DefaultClockFont = "Microsoft YaHei UI, SimHei, sans-serif";
 
     /// <summary>进度条「已进行」部分颜色（深色，不透明）。</summary>
     public IBrush ProgressFillBrush => new SolidColorBrush(Color.Parse(_settings.ProgressColor));
 
-    /// <summary>进度带「未进行」部分颜色（深蓝低饱和，固定，与音量条轨道同色系）。</summary>
-    public IBrush ProgressTrackBrush => TrackBrush;
+    /// <summary>进度带「未进行」部分颜色（随主题：深色底上的低饱和深蓝 / 浅色底上的浅灰蓝）。</summary>
+    public IBrush ProgressTrackBrush => Chrome.VolumeTrack;
+
+    /// <summary>降水提醒色（设置项，默认蓝）：降雨提醒块用它，颜色可在设置里调。</summary>
+    public IBrush RainColorBrush => new SolidColorBrush(Color.Parse(_settings.RainColor));
+
+    /// <summary>当前天气是不是降水类（按 CI 天气码判断；雾/霾/沙尘不算）。</summary>
+    private bool IsPrecipitationWeather => _weatherCode is { } code && CiWeatherReader.RainCodes.Contains(code);
+
+    /// <summary>天气块的颜色：当前在下雨/下雪时用降水色（蓝），否则用主题正文色。</summary>
+    public IBrush WeatherBrush => IsPrecipitationWeather ? RainColorBrush : Chrome.TextPrimary;
 
     /// <summary>
     /// 触发所有外观属性变更通知，让窗口绑定重新求值。
@@ -245,15 +316,89 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(BackgroundColor));
         OnPropertyChanged(nameof(FontColor));
-        OnPropertyChanged(nameof(AccentColor));
         OnPropertyChanged(nameof(ProgressColor));
         OnPropertyChanged(nameof(ProgressFillBrush));
         OnPropertyChanged(nameof(ProgressTrackBrush));
         OnPropertyChanged(nameof(CourseInfoColor));
         OnPropertyChanged(nameof(NoiseTitleColor));
+        OnPropertyChanged(nameof(RainColor));
+        OnPropertyChanged(nameof(RainColorBrush));
+        OnPropertyChanged(nameof(WeatherBrush));
         OnPropertyChanged(nameof(ClockFontSize));
+        OnPropertyChanged(nameof(CourseInfoFontSize));
+        OnPropertyChanged(nameof(CountFontSize));
         OnPropertyChanged(nameof(WindowTitle));
     }
+
+    /// <summary>CI 当前是不是深色主题。取 Application 的生效变体 —— CI 的主题设置改的就是它。</summary>
+    private static bool CiIsDark => Application.Current?.ActualThemeVariant != ThemeVariant.Light;
+
+    /// <summary>按设置里的主题档位 + CI 当前亮暗刷新界面画刷与语义色（不改动颜色设置）。</summary>
+    private void RefreshChrome()
+    {
+        Chrome = ClockBrushes.From(ClockTheme.Resolve((ClockThemeMode)_settings.ThemeMode, CiIsDark));
+        OnPropertyChanged(nameof(Chrome));
+        OnPropertyChanged(nameof(NoiseLevelTrackBrush));
+        OnPropertyChanged(nameof(ProgressTrackBrush));
+        OnPropertyChanged(nameof(WeatherBrush));   // 非降水天气的天气块用主题正文色，换主题要跟着变
+        RefreshSemanticColors();
+    }
+
+    /// <summary>
+    /// 语义色（五档文字、预警等级、吵闹计数）随底色深浅换一版：
+    /// 浅底上黄绿/黄的原始档位色和预警黄几乎看不见，改用同色相的压暗版。
+    /// </summary>
+    private void RefreshSemanticColors()
+    {
+        ApplySlotTheme();
+
+        // 预警列表：就地改色，不重建列表（重建会把正在悬停的那条弹幕重置重播）
+        var light = Chrome.IsLight;
+        foreach (var a in AlertItems)
+            a.Foreground = AlertBrush(a.Level, light);
+
+        // 计数片段：签名只记 黄/红/其它，换主题后签名不变会被判成「没变化」而不刷新，
+        // 故清掉签名强制重建一次（下面会各自填回新颜色）
+        _noisyDisplaySignature = "";
+        UpdateNoisyDisplay();
+        RefreshRecordingColor();
+    }
+
+    /// <summary>档位文字：换主题时同时换「未达到/已达到」两色与淡化程度（浅底要淡得少些）。</summary>
+    private void ApplySlotTheme()
+    {
+        var light = Chrome.IsLight;
+        var brushes = light ? SlotTextBrushesLight : SlotTextBrushesDark;
+        var reached = light ? SlotReachedBrushesLight : SlotReachedBrushesDark;
+        var fade = light ? SlotFadeLight : SlotFadeDark;
+        for (var i = 0; i < _noiseLevelSlots.Count; i++)
+            _noiseLevelSlots[i].SetStyle(brushes[i], reached[i], fade);
+        OnPropertyChanged(nameof(NoiseLevelTextBrush));
+    }
+
+    private static bool IsCountNormal(IBrush b) => ReferenceEquals(b, CountNormalBrush) || ReferenceEquals(b, CountNormalLightBrush);
+    private static bool IsCountNoisy(IBrush b) => ReferenceEquals(b, CountNoisyBrush) || ReferenceEquals(b, CountNoisyLightBrush);
+
+    /// <summary>
+    /// 应用主题：生效主题变了就把 5 个颜色写成该主题的默认值（见 <see cref="ClockThemeApplier"/>），
+    /// 再刷新画刷。进入大屏时钟时、以及跟随档下 CI 主题变化时调用。
+    /// </summary>
+    private void ApplyThemePalette()
+    {
+        var colorsChanged = ClockThemeApplier.Apply(_settings, CiIsDark);
+        RefreshChrome();
+        if (colorsChanged) RefreshAppearanceBindings();
+    }
+
+    /// <summary>刷新时钟字体：重新读 CI 设置里的主界面字体（用户可能在 CI 里改过）。</summary>
+    private void RefreshClockFont()
+    {
+        var font = CiMainFont.ReadFontString(CiDataDir) ?? DefaultClockFont;
+        try { ClockFontFamily = FontFamily.Parse(font); }
+        catch { ClockFontFamily = FontFamily.Parse(DefaultClockFont); }
+        OnPropertyChanged(nameof(ClockFontFamily));
+    }
+
     /// <summary>音量条当前显示的进度（0-100）：由动画向采样得到的目标进度平滑逼近，绑到进度条 Value。</summary>
     public double AnimatedProgress
     {
@@ -270,16 +415,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>右侧状态文字：正常监测时按当前档位查表（与条同源）；无麦克风/出错时显示 Service 的提示文字。</summary>
     public string NoiseLevelText => _decibelService.IsMonitoring ? SlotNames[CurrentSlot] : _decibelService.NoiseLevelText;
 
+    /// <summary>右侧状态文字的颜色：按当前档位取「已达到」色（随主题换），与下方五档文字同源。</summary>
+    public IBrush NoiseLevelTextBrush => (Chrome.IsLight ? SlotReachedBrushesLight : SlotReachedBrushesDark)[CurrentSlot];
+
     /// <summary>音量条五档文字集合（安静/良好/一般/吵闹/嘈杂）。</summary>
     public ObservableCollection<NoiseLevelSlotItem> NoiseLevelSlots => _noiseLevelSlots;
 
     /// <summary>音量条轨道填充色：随当前档位可变（绿→黄→红），取缓存的画刷实例。</summary>
     public IBrush NoiseLevelFillBrush => SlotBrushes[CurrentSlot];
 
-    /// <summary>音量条轨道底色 / 课程进度带 track 底色（深蓝低饱和，共用同一实例）。</summary>
-    private static readonly IBrush TrackBrush = new SolidColorBrush(Color.Parse("#B31C3047"));
-
-    public IBrush NoiseLevelTrackBrush => TrackBrush;
+    /// <summary>音量条轨道底色 / 课程进度带 track 底色（随主题翻转，与进度带共用同一画刷实例）。</summary>
+    public IBrush NoiseLevelTrackBrush => Chrome.VolumeTrack;
 
     /// <summary>档位变化时：刷新当前档位文字高亮 + 轨道填充色 + 右侧状态文字（全部同一档位源）。</summary>
     private void UpdateNoiseLevelSlots()
@@ -289,6 +435,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             _noiseLevelSlots[i].IsCurrent = i == slot;
         OnPropertyChanged(nameof(NoiseLevelText));
         OnPropertyChanged(nameof(NoiseLevelFillBrush));
+        OnPropertyChanged(nameof(NoiseLevelTextBrush));
     }
 
     /// <summary>收到新的采样目标进度：启动（或保持）动画，让条平滑逼近目标。</summary>
@@ -344,11 +491,25 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private string _recordingText = "";
     private IBrush _recordingForeground = CountNormalBrush;
 
+    /// <summary>当前主题下的「正在记录」提示色（换主题时由 <see cref="RefreshSemanticColors"/> 重算）。</summary>
+    private void RefreshRecordingColor()
+    {
+        if (!IsRecordingVisible) return;
+        RecordingForeground = RecordingText.Contains("吵闹") ? CountNoisy : CountNormal;
+    }
+
     /// <summary>是否显示「正在记录」提示（有段且已起算、上课中）。</summary>
     public bool IsRecordingVisible
     {
         get => _isRecordingVisible;
-        set { _isRecordingVisible = value; OnPropertyChanged(); }
+        set
+        {
+            if (_isRecordingVisible == value) return;
+            _isRecordingVisible = value;
+            OnPropertyChanged();
+            // 它一亮，「暂未记录到吵闹」就得让位（见 AddIdleSegment），左边计数片段要跟着重算
+            UpdateNoisyDisplay();
+        }
     }
 
     /// <summary>「正在记录：一般」/「正在记录：吵闹」。</summary>
@@ -380,12 +541,14 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (!show) return;
         var noisy = seg == NoiseLevel.Noisy;
         RecordingText = noisy ? "正在记录：吵闹" : "正在记录：一般";
-        RecordingForeground = noisy ? CountNoisyBrush : CountNormalBrush;
+        RecordingForeground = noisy ? CountNoisy : CountNormal;
     }
 
     private bool _showDecibelMeter = true;
     private bool _showCourseInfo = true;
     private int _clockFontSize = 180;
+    private int _courseInfoFontSize = 28;
+    private int _countFontSize = 24;
 
     public bool ShowDecibelMeter
     {
@@ -427,6 +590,20 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         get => _clockFontSize;
         set { _clockFontSize = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>底部居中的课程信息字号（设置项，改完进大屏时钟时生效）。</summary>
+    public int CourseInfoFontSize
+    {
+        get => _courseInfoFontSize;
+        set { _courseInfoFontSize = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>左下角计数与「正在记录」提示的字号（设置项）。</summary>
+    public int CountFontSize
+    {
+        get => _countFontSize;
+        set { _countFontSize = value; OnPropertyChanged(); }
     }
 
     public string WindowTitle => _settings.WindowTitle;
@@ -643,6 +820,23 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
     private double _reminderPanelMaxWidth = 520;
 
+    /// <summary>
+    /// 底部课程信息的最大宽（窗口按「整行宽 × 1/2」设置）。超过这个宽就交给 Viewbox 等比缩字，
+    /// 不再被列宽裁掉——开了「显示精确打铃时间」后这行会明显变长，正中那列又不好压缩。
+    /// 默认无穷大：窗口还没量出尺寸前不设限，免得一上来被压成 0 宽。
+    /// </summary>
+    public double CourseInfoMaxWidth
+    {
+        get => _courseInfoMaxWidth;
+        set
+        {
+            if (Math.Abs(_courseInfoMaxWidth - value) < 0.5) return;
+            _courseInfoMaxWidth = value;
+            OnPropertyChanged();
+        }
+    }
+    private double _courseInfoMaxWidth = double.PositiveInfinity;
+
 
     // ===== 颜文字副标题（趣味提醒）：气温/天气旁、日期旁、倒计时旁、降雨旁的小字号副标题 =====
     // 由「颜文字提醒」开关统一控制；关闭时全部清空、保留正文字幕。固定文本不轮换。
@@ -856,7 +1050,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     {
                         DisplayText = a.Title,
                         Icon = IconGlyph.Of(LucideIconKind.TriangleAlert),
-                        Foreground = AlertBrush(a.Level),
+                        Level = a.Level,
+                        Foreground = AlertBrush(a.Level, Chrome.IsLight),
                         Detail = a.Detail,
                     });
 
@@ -891,18 +1086,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         catch { }
     }
 
-    /// <summary>预警等级 → 显示颜色（蓝/黄/橙/红）。</summary>
-    private static IBrush AlertBrush(string? level)
+    /// <summary>预警等级 → 显示颜色（蓝/黄/橙/红，浅底上取压暗版）。等级缺失时用主题正文色。</summary>
+    private IBrush AlertBrush(string? level, bool light)
     {
-        var color = level switch
-        {
-            "蓝色" => "#55aaff",
-            "黄色" => "#ffdd44",
-            "橙色" => "#ff9933",
-            "红色" => "#ff5555",
-            _ => "#ffffff",
-        };
-        return new SolidColorBrush(Color.Parse(color));
+        var hex = SemanticColors.AlertHex(level, light);
+        return hex is null ? Chrome.TextPrimary : new SolidColorBrush(Color.Parse(hex));
     }
 
     /// <summary>触发所有提醒相关属性变更通知（数据或开关变化后调用）。</summary>
@@ -910,6 +1098,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(WeatherIcon));
         OnPropertyChanged(nameof(WeatherText));
+        OnPropertyChanged(nameof(WeatherBrush));
         OnPropertyChanged(nameof(RainReminderTitle));
         OnPropertyChanged(nameof(ShowRainReminder));
         OnPropertyChanged(nameof(ReminderText));
@@ -962,6 +1151,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             ShowDecibelMeter = _settings.ShowDecibelMeter;
             ShowCourseInfo = _settings.ShowCourseInfo;
             ClockFontSize = _settings.ClockFontSize;
+            CourseInfoFontSize = _settings.CourseInfoFontSize;
+            CountFontSize = _settings.CountFontSize;
+            // 主题：跟随档下 CI 主题可能在别处被改过 → 先按当前生效主题写好颜色，再刷新外观绑定
+            ApplyThemePalette();
+            RefreshClockFont();
             // 外观颜色属性是直接读 _settings 的 getter，窗口从 Hide 退出后复用不自动刷新，
             // 主动触发通知让绑定重新求值（修复：改完颜色后要重启 CI 才生效的问题）
             RefreshAppearanceBindings();
@@ -982,6 +1176,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
                 // 若 OS 把全屏窗口恢复到 Normal 就在此兜底拉回全屏（守卫见 EnsureFullScreen，Minimized 态不打扰）。
                 _window.Activated += (_, _) => EnsureFullScreen();
+                // 跟随档：CI 主题在明亮/黑暗间切换时，大屏正开着也即时换配色
+                _window.ActualThemeVariantChanged += (_, _) => ApplyThemePalette();
             }
 
             if (_window.IsVisible)
@@ -1034,7 +1230,20 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         {
             if (_window == null || !IsWindowVisible) return;
             _window.WindowState = WindowState.Minimized;
+            ShowCiMainWindow();
         });
+    }
+
+    /// <summary>
+    /// 收起大屏时钟后把 ClassIsland 主界面拉出来。以前只最小化自己，屏幕一片空，
+    /// 得自己去托盘里把主界面点回来。主界面若被隐藏/最小化就显示并还原，再提到最前。
+    /// </summary>
+    private static void ShowCiMainWindow()
+    {
+        if (AppBase.Current?.MainWindow is not { } main) return;
+        main.Show();
+        main.WindowState = WindowState.Normal;
+        main.Activate();
     }
 
     /// <summary>
@@ -1378,7 +1587,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (_isInBreak) return list;
         if (string.IsNullOrEmpty(_currentClassName)) return list;
 
-        list.Add(new NoisyDisplaySegment { Text = _currentClassName });
+        // 课程名不是「数据」而是标签，用主题正文色（白/黑）。
+        // 着色只留给一般/吵闹的计数，否则一整行都是荧光黄，浅底上整行读不出来。
+        // 课程信息正显示着时就不再重复写一遍课名：正中那行已经写着「当前课程为 X」，
+        // 左边再来一遍既啰嗦，又把大半列宽占掉（课程信息一长，计数就被列宽裁掉）。
+        if (!ShowCourseInfo)
+            list.Add(new NoisyDisplaySegment { Text = _currentClassName, Foreground = Chrome.TextPrimary });
         AddNoisyCountSegments(list);
         return list;
     }
@@ -1389,9 +1603,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (_counter.NormalCount > 0 || _counter.NoisyCount > 0)
         {
             if (_counter.NormalCount > 0)
-                list.Add(new NoisyDisplaySegment { Text = $"  一般 {_counter.NormalCount} 次", Foreground = CountNormalBrush });
+                list.Add(new NoisyDisplaySegment { Text = $"  一般 {_counter.NormalCount} 次", Foreground = CountNormal });
             if (_counter.NoisyCount > 0)
-                list.Add(new NoisyDisplaySegment { Text = $"  吵闹 {_counter.NoisyCount} 次", Foreground = CountNoisyBrush });
+                list.Add(new NoisyDisplaySegment { Text = $"  吵闹 {_counter.NoisyCount} 次", Foreground = CountNoisy });
         }
         else if (_settings.SkipFirst3Min)
         {
@@ -1401,22 +1615,33 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 {
                     Text = $"上课初期保护中（{remaining / 60}:{remaining % 60:D2} 后开始记录）",
                     Icon = IconGlyph.Of(LucideIconKind.Hourglass),
+                    Foreground = Chrome.TextPrimary,
                 });
             else
-                list.Add(new NoisyDisplaySegment { Text = "暂未记录到吵闹", Icon = CheckIcon });
+                AddIdleSegment(list);
         }
         else
         {
-            list.Add(new NoisyDisplaySegment { Text = "暂未记录到吵闹", Icon = CheckIcon });
+            AddIdleSegment(list);
         }
+    }
+
+    /// <summary>
+    /// 「暂未记录到吵闹」那一段。右边的「正在记录」已经亮着时不再显示：
+    /// 正记着还说「没记录到」自相矛盾，两句叠一行又把左边的课程名挤到列外被裁掉。
+    /// </summary>
+    private void AddIdleSegment(List<NoisyDisplaySegment> list)
+    {
+        if (IsRecordingVisible) return;
+        list.Add(new NoisyDisplaySegment { Text = "暂未记录到吵闹", Icon = CheckIcon, Foreground = Chrome.TextPrimary });
     }
 
     private void UpdateNoisyDisplay()
     {
         var segments = BuildNoisySegments();
         var signature = string.Join("|", segments.Select(s =>
-            s.Text + ":" + s.Icon + ":" + (ReferenceEquals(s.Foreground, CountNoisyBrush) ? "R"
-                : ReferenceEquals(s.Foreground, CountNormalBrush) ? "Y" : "P")));
+            s.Text + ":" + s.Icon + ":" + (IsCountNoisy(s.Foreground) ? "R"
+                : IsCountNormal(s.Foreground) ? "Y" : "P")));
         if (signature == _noisyDisplaySignature) return;
 
         _noisyDisplaySignature = signature;
@@ -1500,7 +1725,10 @@ public class NoisyDisplaySegment : INotifyPropertyChanged
         set { if (_text != value) { _text = value; OnPropertyChanged(nameof(Text)); } }
     }
 
-    private IBrush _foreground = new SolidColorBrush(Color.Parse("#ffff44"));
+    // 兜底值：实际每个片段都由 VM 按主题显式给色（见 BuildNoisySegments）。
+    // 这里以前是写死的荧光黄 #ffff44，浅底主题下漏改一处就是一整行看不见。
+    private IBrush _foreground = Brushes.White;
+
     public IBrush Foreground
     {
         get => _foreground;
@@ -1529,15 +1757,31 @@ public class NoisyDisplaySegment : INotifyPropertyChanged
 }
 
 /// <summary>提醒面板中单条预警的显示项（等级着色 + 详情全文，鼠标悬停即在顶部弹幕带显示）。</summary>
-public class AlertDisplayItem
+public class AlertDisplayItem : INotifyPropertyChanged
 {
     public required string DisplayText { get; init; }
 
     /// <summary>图标矢量字形（警告三角，XAML 用 Lucide 字体渲染）。</summary>
     public string? Icon { get; init; }
 
-    public required IBrush Foreground { get; init; }
+    /// <summary>预警等级（蓝/黄/橙/红），换主题时据此重算颜色。</summary>
+    public string? Level { get; init; }
+
+    private IBrush _foreground = Brushes.White;
+
+    /// <summary>等级色（可写：切主题时就地换压暗版，不重建列表）。</summary>
+    public required IBrush Foreground
+    {
+        get => _foreground;
+        set
+        {
+            _foreground = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Foreground)));
+        }
+    }
 
     /// <summary>预警详情全文（alerts[].detail），鼠标悬停该条时显示。</summary>
     public string? Detail { get; init; }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

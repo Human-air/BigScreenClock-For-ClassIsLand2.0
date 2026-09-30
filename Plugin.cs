@@ -3,6 +3,7 @@ using ClassIsland.Core.Abstractions;
 using ClassIsland.Core.Attributes;
 using ClassIsland.Core.Extensions.Registry;
 using ClassIsland.Shared.Helpers;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.Services;
 using EveningSelfStudyClock.ViewModels;
@@ -37,8 +38,13 @@ public class Plugin : PluginBase
     {
         ConfigFolder = PluginConfigFolder;
 
-        Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(
-            Path.Combine(ConfigFolder, "Settings.json"));
+        var settingsPath = Path.Combine(ConfigFolder, "Settings.json");
+        Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(settingsPath);
+
+        // 已经有配置文件 = 老版本升级上来：把原有那套颜色原样留在黑暗主题下，
+        // 别让「跟随 ClassIsland」在首次启动时就把外观换成另一套（新装用户没有这个问题，默认跟随）
+        if (File.Exists(settingsPath))
+            ClockThemeApplier.MigrateLegacySettings(Settings);
 
         // 设置保存防抖：拖滑条/连续修改不会狂写盘，停顿 400ms 后统一保存
         SettingsSaveDebouncer.Elapsed += (_, _) =>

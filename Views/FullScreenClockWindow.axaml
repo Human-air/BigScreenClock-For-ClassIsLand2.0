@@ -38,40 +38,43 @@
                  - 天气预警始终单开一行/多行（面板），不在顶部行。 -->
             <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="24" VerticalAlignment="Center">
-                    <!-- 天气块（含正下方颜文字） -->
+                    <!-- 天气块（含正下方颜文字）：当前天气是雨雪时整块转成降水色（默认蓝） -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowWeatherInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Classes="icon" Text="{Binding WeatherIcon}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{Binding WeatherIcon}" FontSize="20" VerticalAlignment="Center"
+                                       Foreground="{Binding WeatherBrush}"/>
                             <TextBlock Text="{Binding WeatherText}" FontSize="19" FontWeight="Bold"
-                                       Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                                       Foreground="{Binding WeatherBrush}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
-                        <TextBlock Text="{Binding WeatherSubtitle}" FontSize="11" Foreground="#AAFFFFFF"
+                        <TextBlock Text="{Binding WeatherSubtitle}" FontSize="11" Foreground="{Binding Chrome.TextSecondary}"
                                    IsVisible="{Binding HasWeatherSubtitle}" Margin="2,0,0,0"/>
                     </StackPanel>
-                    <!-- 降雨块（并入第一行时；含正下方颜文字） -->
+                    <!-- 降雨块（并入第一行时；含正下方颜文字）：用降水色 -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowRainMergedInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"
+                                       Foreground="{Binding RainColorBrush}"/>
                             <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
-                                       Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                                       Foreground="{Binding RainColorBrush}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
-                        <TextBlock Text="{Binding RainSubtitle}" FontSize="11" Foreground="#AAFFFFFF"
+                        <TextBlock Text="{Binding RainSubtitle}" FontSize="11" Foreground="{Binding Chrome.TextSecondary}"
                                    IsVisible="{Binding HasRainSubtitle}" Margin="2,0,0,0"/>
                     </StackPanel>
                     <!-- 倒计时块（并入第一行时；无天气时作主位；含正下方颜文字） -->
                     <StackPanel Spacing="2" IsVisible="{Binding ShowCountdownMergedInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"
+                                       Foreground="{Binding Chrome.TextPrimary}"/>
                             <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
-                                       Foreground="#FFFFDD" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                                       Foreground="{Binding Chrome.Countdown}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                         </StackPanel>
-                        <TextBlock Text="{Binding CountdownSubtitle}" FontSize="11" Foreground="#AAFFFFFF"
+                        <TextBlock Text="{Binding CountdownSubtitle}" FontSize="11" Foreground="{Binding Chrome.TextSecondary}"
                                    IsVisible="{Binding HasCountdownSubtitle}" Margin="2,0,0,0"/>
                     </StackPanel>
                     <!-- 文本块（并入第一行时；无天气且无倒计时时作主位） -->
                     <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowTextMergedInFirstRow}">
                         <TextBlock Text="{Binding ReminderText}" FontSize="16" FontWeight="Bold"
-                                   Foreground="#DDFFFFFF" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                                   Foreground="{Binding Chrome.TextBody}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                     </StackPanel>
                 </StackPanel>
                 <ScrollViewer x:Name="AlertDetailScroll" Grid.Column="1"
@@ -79,33 +82,27 @@
                               Margin="28,0,0,0" VerticalAlignment="Center"
                               IsVisible="{Binding HasExpandedAlert}"
                               SizeChanged="DetailScroll_SizeChanged">
-                    <TextBlock Text="{Binding ExpandedAlertDetail}" FontSize="16" Foreground="#BBFFFFFF"
+                    <TextBlock Text="{Binding ExpandedAlertDetail}" FontSize="16" Foreground="{Binding Chrome.TextBody}"
                                TextWrapping="NoWrap" VerticalAlignment="Center"/>
                 </ScrollViewer>
                 <StackPanel Grid.Column="2" Margin="28,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding CurrentDate}" FontSize="22" Foreground="#66ffffff"
+                    <TextBlock Text="{Binding CurrentDate}" FontSize="22" Foreground="{Binding Chrome.TextMuted}"
                                HorizontalAlignment="Right" PointerPressed="DateText_PointerPressed"/>
-                    <TextBlock Text="{Binding DateSubtitle}" FontSize="11" Foreground="#AAFFFFFF"
+                    <TextBlock Text="{Binding DateSubtitle}" FontSize="11" Foreground="{Binding Chrome.TextSecondary}"
                                HorizontalAlignment="Right" IsVisible="{Binding HasDateSubtitle}"/>
                 </StackPanel>
             </Grid>
 
-            <!-- 主体 -->
-            <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="20">
-                <!-- 时间 -->
+            <!-- 主体：只有时钟与音量条两件，课程时间已挪到底部（见 Grid.Row=4），中间不再挤 -->
+            <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="28">
+                <!-- 时间：字体跟随 CI 主界面字体，数字用表格宽度（tnum）免得秒数跳动时整行抖 -->
                 <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
                            FontSize="{Binding ClockFontSize}"
                            FontWeight="Bold"
                            Foreground="{Binding FontColor}"
-                           FontFamily="Consolas,monospace"
+                           FontFamily="{Binding ClockFontFamily}"
+                           FontFeatures="{Binding ClockFontFeatures}"
                            HorizontalAlignment="Center"/>
-
-                <!-- 课程时间信息 -->
-                <TextBlock Text="{Binding CourseInfoText}"
-                           FontSize="28" FontWeight="Bold"
-                           Foreground="{Binding CourseInfoColor}"
-                           HorizontalAlignment="Center"
-                           IsVisible="{Binding ShowCourseInfo}"/>
 
                 <!-- 教室音量：无背景「横向轨道 + 分段刻度」仪表盘式条（宽度跟随时间字体） -->
                 <StackPanel Spacing="8" Width="{Binding #ClockText.Bounds.Width, FallbackValue=640}"
@@ -121,7 +118,7 @@
                                        Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
-                                   Foreground="{Binding NoiseLevelFillBrush}"
+                                   Foreground="{Binding NoiseLevelTextBrush}"
                                    HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
                     <!-- 轨道 + 分段刻度块（竖向实心矩形，略高于轨道、从轨道中突出） -->
@@ -139,10 +136,10 @@
                                 </ControlTemplate>
                             </ProgressBar.Template>
                         </ProgressBar>
-                        <Rectangle Grid.Column="1" Width="3" Height="13" Fill="#66ffffff" VerticalAlignment="Center" RadiusX="1.5"/>
-                        <Rectangle Grid.Column="3" Width="3" Height="13" Fill="#66ffffff" VerticalAlignment="Center" RadiusX="1.5"/>
-                        <Rectangle Grid.Column="5" Width="3" Height="13" Fill="#66ffffff" VerticalAlignment="Center" RadiusX="1.5"/>
-                        <Rectangle Grid.Column="7" Width="3" Height="13" Fill="#66ffffff" VerticalAlignment="Center" RadiusX="1.5"/>
+                        <Rectangle Grid.Column="1" Width="3" Height="13" Fill="{Binding Chrome.Divider}" VerticalAlignment="Center" RadiusX="1.5"/>
+                        <Rectangle Grid.Column="3" Width="3" Height="13" Fill="{Binding Chrome.Divider}" VerticalAlignment="Center" RadiusX="1.5"/>
+                        <Rectangle Grid.Column="5" Width="3" Height="13" Fill="{Binding Chrome.Divider}" VerticalAlignment="Center" RadiusX="1.5"/>
+                        <Rectangle Grid.Column="7" Width="3" Height="13" Fill="{Binding Chrome.Divider}" VerticalAlignment="Center" RadiusX="1.5"/>
                     </Grid>
                     <!-- 五档文字：当前档位高亮+放大+档位色，其余淡化 -->
                     <ItemsControl ItemsSource="{Binding NoiseLevelSlots}">
@@ -153,7 +150,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}" FontWeight="Bold"
+                                <TextBlock Text="{Binding Text}" Foreground="{Binding TextBrush}" FontWeight="Bold"
                                            HorizontalAlignment="Center"
                                            Opacity="{Binding TextOpacity}" FontSize="{Binding TextFontSize}"/>
                             </DataTemplate>
@@ -162,89 +159,110 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- 底部 -->
-            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,6,0,0">
-                <!-- 吵闹计数（分段着色：一般=黄，吵闹=红）+ 实时「正在记录」提示。
+            <!-- 底部：计数（左）/ 课程信息（正中）/ 按钮（右）同一行、同一高度。
+                 中间列 Auto、左右两列都是 * —— 两边星列平分剩余空间，课程信息才落在屏幕正中，
+                 否则会被更宽的左边计数推歪。两边星列放不下各自那份内容时，由 Viewbox 等比缩字
+                 （只缩不放大），既不越界压到邻居上，也不会被列宽裁掉。 -->
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,*" Margin="0,6,0,0">
+                <!-- 吵闹计数（分段着色：一般=琥珀，吵闹=红）+ 实时「正在记录」提示。
                      鼠标悬停上方时在计数区上方弹出记录规则 -->
-                <Border Grid.Column="0" VerticalAlignment="Center"
+                <Border Grid.Column="0" VerticalAlignment="Center" ClipToBounds="True"
+                        TextElement.FontSize="{Binding CountFontSize}"
                         x:Name="CounterAreaBorder"
                         PointerEntered="CounterArea_PointerEntered"
                         PointerExited="CounterArea_PointerExited">
-                    <StackPanel Orientation="Horizontal">
-                        <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <!-- 图标（如 ⏳/✅ 位置）：无图标的片段自动不占位 -->
-                                        <TextBlock Classes="icon" Text="{Binding Icon}"
-                                                   IsVisible="{Binding HasIcon}"
-                                                   Foreground="{Binding Foreground}"
-                                                   FontSize="24" VerticalAlignment="Center"
-                                                   Margin="16,0,6,0"/>
-                                        <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"
-                                                   FontSize="24" FontWeight="Bold"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <TextBlock Text="{Binding RecordingText}"
-                                   Foreground="{Binding RecordingForeground}"
-                                   IsVisible="{Binding IsRecordingVisible}"
-                                   FontSize="24" FontWeight="Bold" Margin="16,0,0,0"/>
-                    </StackPanel>
+                    <Viewbox HorizontalAlignment="Left" VerticalAlignment="Center"
+                             Stretch="Uniform" StretchDirection="DownOnly">
+                        <StackPanel Orientation="Horizontal">
+                            <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <!-- 图标（如 ⏳/✅ 位置）：无图标的片段自动不占位 -->
+                                            <TextBlock Classes="icon" Text="{Binding Icon}"
+                                                       IsVisible="{Binding HasIcon}"
+                                                       Foreground="{Binding Foreground}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="16,0,6,0"/>
+                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"
+                                                       FontWeight="Bold"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding RecordingText}"
+                                       Foreground="{Binding RecordingForeground}"
+                                       IsVisible="{Binding IsRecordingVisible}"
+                                       FontWeight="Bold" Margin="16,0,0,0"/>
+                        </StackPanel>
+                    </Viewbox>
                 </Border>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <!-- 课程信息：与计数、按钮同处一行，居中对齐到屏幕正中。
+                     最多占整行一半宽（CourseInfoMaxWidth，窗口按尺寸算），比这还长就由 Viewbox 等比缩字
+                     （只缩不放大）——开了「显示精确打铃时间」把文字拉长也不会被列宽裁掉。 -->
+                <Viewbox Grid.Column="1" Margin="24,0"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Stretch="Uniform" StretchDirection="DownOnly"
+                         MaxWidth="{Binding CourseInfoMaxWidth}"
+                         IsVisible="{Binding ShowCourseInfo}">
+                    <TextBlock Text="{Binding CourseInfoText}"
+                               FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
+                               Foreground="{Binding CourseInfoColor}"/>
+                </Viewbox>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                            HorizontalAlignment="Right">
                     <Button
-                            FontSize="15" Foreground="#ffffff44"
-                            Background="#22ffffff" BorderThickness="0"
+                            FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
+                            Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
                             CornerRadius="6" Padding="12,6"
                             Cursor="Hand" Opacity="0.5"
                             Click="MinimizeButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Classes="icon" Text="{ci:LI Minus}" FontSize="15"
-                                       Foreground="#ffffff44" VerticalAlignment="Center"/>
-                            <TextBlock Text="最小化" FontSize="15" Foreground="#ffffff44" VerticalAlignment="Center"/>
+                                       Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
+                            <TextBlock Text="最小化" FontSize="15" Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Button.Styles>
                             <Style Selector="Button:pointerover">
                                 <Setter Property="Opacity" Value="1"/>
-                                <Setter Property="Background" Value="#44ffffff"/>
+                                <Setter Property="Background" Value="{Binding Chrome.ButtonHover}"/>
                             </Style>
                         </Button.Styles>
                     </Button>
                     <Button
-                            FontSize="15" Foreground="#ffffff44"
-                            Background="#22ffffff" BorderThickness="0"
+                            FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
+                            Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
                             CornerRadius="6" Padding="12,6"
                             Cursor="Hand" Opacity="0.5"
                             Click="ExitButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Classes="icon" Text="{ci:LI X}" FontSize="15"
-                                       Foreground="#ffffff44" VerticalAlignment="Center"/>
-                            <TextBlock Text="退出全屏时钟" FontSize="15" Foreground="#ffffff44" VerticalAlignment="Center"/>
+                                       Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
+                            <TextBlock Text="退出" FontSize="15" Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Button.Styles>
                             <Style Selector="Button:pointerover">
                                 <Setter Property="Opacity" Value="1"/>
-                                <Setter Property="Background" Value="#44ffffff"/>
+                                <Setter Property="Background" Value="{Binding Chrome.ButtonHover}"/>
                             </Style>
                         </Button.Styles>
                     </Button>
                 </StackPanel>
             </Grid>
 
-            <!-- 免责声明（进度带已移至窗口最底部独立层） -->
+            <!-- 免责声明（进度带已移至窗口最底部独立层；课程信息已并入上面的底部行） -->
             <StackPanel Grid.Row="3" Margin="0,10,0,0">
                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" HorizontalAlignment="Center">
                     <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="11"
-                               Foreground="#40ffffff" VerticalAlignment="Center"/>
+                               Foreground="{Binding Chrome.TextFaint}" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="{Binding DisclaimerText}"
-                               FontSize="10" Foreground="#40ffffff"
+                               FontSize="10" Foreground="{Binding Chrome.TextFaint}"
                                TextAlignment="Center"
                                TextWrapping="Wrap"/>
                 </Grid>
@@ -257,24 +275,26 @@
                     IsVisible="{Binding ShowReminderPanel}">
                 <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8">
-                        <!-- 降雨提醒（未并入第一行才在面板显示）：☔ + 主标题 + 小字号副标题 -->
+                        <!-- 降雨提醒（未并入第一行才在面板显示）：☔ + 主标题 + 小字号副标题，用降水色 -->
                         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowRainReminderPanel}">
-                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"
+                                       Foreground="{Binding RainColorBrush}"/>
                             <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
-                                       Foreground="#FFFFFF" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding RainSubtitle}" FontSize="12" Foreground="#AAFFFFFF" VerticalAlignment="Center"
+                                       Foreground="{Binding RainColorBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding RainSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
                                        IsVisible="{Binding HasRainSubtitle}"/>
                         </StackPanel>
                         <!-- 倒计时（未并入第一行才在面板显示） -->
                         <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowCountdownPanel}">
-                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"/>
+                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"
+                                       Foreground="{Binding Chrome.TextPrimary}"/>
                             <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
-                                       Foreground="#FFFFDD" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding CountdownSubtitle}" FontSize="12" Foreground="#AAFFFFFF" VerticalAlignment="Center"
+                                       Foreground="{Binding Chrome.Countdown}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding CountdownSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
                                        IsVisible="{Binding HasCountdownSubtitle}"/>
                         </StackPanel>
                         <!-- 文本（未并入第一行才在面板显示；跟随 CI 主界面文本组件） -->
-                        <TextBlock Text="{Binding ReminderText}" FontSize="16" Foreground="#DDFFFFFF"
+                        <TextBlock Text="{Binding ReminderText}" FontSize="16" Foreground="{Binding Chrome.TextBody}"
                                    TextWrapping="Wrap" IsVisible="{Binding ShowTextPanel}"/>
                         <!-- 预警（排最下，区级统一发布按等级着色；点击标题右侧「>」在标题同一行右侧横向展开详情全文） -->
                         <StackPanel Spacing="3" IsVisible="{Binding ShowAlertsRow}">
@@ -307,10 +327,10 @@
                    VerticalOffset="-8"
                    IsOpen="{Binding ShowCountRules}"
                    IsLightDismissEnabled="False">
-                <Border Background="#14141f" CornerRadius="10" Padding="16,10"
-                        BorderBrush="#44ffffff" BorderThickness="1" MaxWidth="720">
+                <Border Background="{Binding Chrome.PopupBackground}" CornerRadius="10" Padding="16,10"
+                        BorderBrush="{Binding Chrome.PopupBorder}" BorderThickness="1" MaxWidth="720">
                     <TextBlock Text="{Binding CountRulesText}"
-                               FontSize="13" Foreground="#ddffffff"
+                               FontSize="13" Foreground="{Binding Chrome.PopupText}"
                                TextAlignment="Center" TextWrapping="Wrap"/>
                 </Border>
             </Popup>

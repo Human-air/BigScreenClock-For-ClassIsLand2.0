@@ -4,10 +4,12 @@ using System.Text.Json;
 using System.Timers;
 using System.Windows.Input;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Controls;
 using ClassIsland.Core.Attributes;
 using ClassIsland.Core.Enums.SettingsWindow;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.Services;
 using EveningSelfStudyClock.ViewModels;
@@ -32,9 +34,17 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         InitializeComponent();
         _settings = Plugin.Settings!;
         DataContext = this;
+
+        // 预览按当前生效主题呈现：跟随档下 CI 的亮暗就是这里的亮暗
+        ClockThemeApplier.Apply(_settings, CiIsDark);
+        ApplyThemeFromSettings();
+
         LoadAllCourseNames();
         RestoreSelectedCourses();
         StartPreviewTimer();
+
+        // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
+        ActualThemeVariantChanged += (_, _) => ApplyThemeFromSettings();
     }
 
     private void StartPreviewTimer()
@@ -61,6 +71,112 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public int PreviewFontSize => Math.Max(12, _settings.ClockFontSize / 5);
 
+    // ===== 主题 =====
+
+    /// <summary>CI 当前是不是深色主题。设置页就在 CI 的窗口里，自身生效变体即 CI 的。</summary>
+    private bool CiIsDark => ActualThemeVariant != ThemeVariant.Light;
+
+    /// <summary>CI 数据目录（data\），插件配置目录往上三级。</summary>
+    private string CiDataDir => Path.GetFullPath(Path.Combine(Plugin.ConfigFolder!, "..", "..", ".."));
+
+    /// <summary>主题档位：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗。</summary>
+    public int ThemeModeIndex
+    {
+        get => _settings.ThemeMode;
+        set
+        {
+            if (_settings.ThemeMode == value) return;
+            _settings.ThemeMode = value;
+            // 切主题即套用该主题的颜色默认值（之后仍可手动微调），预览立刻跟着变
+            ClockThemeApplier.Apply(_settings, CiIsDark);
+            OnPropertyChanged(nameof(ThemeModeIndex));
+            NotifyAllColorsChanged();
+            ApplyThemeFromSettings();
+        }
+    }
+
+    /// <summary>预览用的界面画刷（整批随主题替换；界面绑 PreviewChrome.Xxx）。</summary>
+    public ClockBrushes PreviewChrome { get; private set; } = ClockBrushes.From(ClockTheme.Dark);
+
+    /// <summary>预览里时钟数字的字体（跟随 CI 主界面字体）。</summary>
+    public FontFamily PreviewClockFontFamily { get; private set; } = FontFamily.Parse(CiMainFont.Fallback);
+
+    /// <summary>与全屏时钟一致：数字用表格宽度（tnum）。</summary>
+    public FontFeatureCollection PreviewClockFontFeatures { get; } =
+        new FontFeatureCollection { FontFeature.Parse("tnum") };
+
+    /// <summary>预览里当前档位文字（良好）的档位色。</summary>
+    public IBrush PreviewSlotTextBrush { get; private set; } = Solid("#AED581");
+
+    /// <summary>预览里五档标签的档位色（索引 0–4），与全屏时钟同一套配色。</summary>
+    public IBrush[] PreviewSlotLabelBrushes { get; private set; } =
+        LevelSlotCalculator.SlotTextColors(false).Select(c => Solid("#" + c.ToString("X8"))).ToArray();
+
+    /// <summary>预览里五档标签非当前档位的淡化程度。</summary>
+    public double PreviewSlotFadeOpacity { get; private set; } = 0.35;
+
+    /// <summary>预览里「一般」计数与「正在记录」提示的黄色。</summary>
+    public IBrush PreviewCountBrush { get; private set; } = Solid("#FFFF44");
+
+    /// <summary>预览里预警条目的等级色（预览固定用黄色预警示例）。</summary>
+    public IBrush PreviewAlertBrush { get; private set; } = Solid("#FFDD44");
+
+    /// <summary>按当前设置重新解析主题：刷新预览画刷、语义色与时钟字体。</summary>
+    private void ApplyThemeFromSettings()
+    {
+        PreviewChrome = ClockBrushes.From(ClockTheme.Resolve((ClockThemeMode)_settings.ThemeMode, CiIsDark));
+        PreviewClockFontFamily = ReadCiClockFont();
+
+        // 语义色（档位文字/计数/预警）在两套主题下取值不同，预览要与全屏时钟一致
+        var light = PreviewChrome.IsLight;
+        var slotText = LevelSlotCalculator.SlotTextColors(light);
+        PreviewSlotTextBrush = Solid("#" + slotText[1].ToString("X8"));
+        PreviewSlotLabelBrushes = slotText.Select(c => Solid("#" + c.ToString("X8"))).ToArray();
+        PreviewSlotFadeOpacity = light ? 0.5 : 0.35;
+        PreviewCountBrush = Solid(SemanticColors.CountNormalHex(light));
+        PreviewAlertBrush = Solid(SemanticColors.AlertHex("黄色", light) ?? SemanticColors.CountNormalHex(light));
+
+        OnPropertyChanged(nameof(PreviewChrome));
+        OnPropertyChanged(nameof(PreviewClockFontFamily));
+        OnPropertyChanged(nameof(PreviewSlotTextBrush));
+        OnPropertyChanged(nameof(PreviewSlotLabelBrushes));
+        OnPropertyChanged(nameof(PreviewSlotFadeOpacity));
+        OnPropertyChanged(nameof(PreviewCountBrush));
+        OnPropertyChanged(nameof(PreviewAlertBrush));
+    }
+
+    private static IBrush Solid(string hex) => new SolidColorBrush(Color.Parse(hex));
+
+    private FontFamily ReadCiClockFont()
+    {
+        var font = CiMainFont.ReadFontString(CiDataDir) ?? CiMainFont.Fallback;
+        try { return FontFamily.Parse(font); }
+        catch { return FontFamily.Parse(CiMainFont.Fallback); }
+    }
+
+    /// <summary>5 个颜色设置的值/色块/hex 全部重新求值（主题切换、颜色被改写后调用）。</summary>
+    private void NotifyAllColorsChanged()
+    {
+        OnPropertyChanged(nameof(BackgroundColorValue));
+        OnPropertyChanged(nameof(BackgroundColorBrush));
+        OnPropertyChanged(nameof(BackgroundColorHex));
+        OnPropertyChanged(nameof(FontColorValue));
+        OnPropertyChanged(nameof(FontColorBrush));
+        OnPropertyChanged(nameof(FontColorHex));
+        OnPropertyChanged(nameof(ProgressColorValue));
+        OnPropertyChanged(nameof(ProgressColorBrush));
+        OnPropertyChanged(nameof(ProgressColorHex));
+        OnPropertyChanged(nameof(CourseInfoColorValue));
+        OnPropertyChanged(nameof(CourseInfoColorBrush));
+        OnPropertyChanged(nameof(CourseInfoColorHex));
+        OnPropertyChanged(nameof(NoiseTitleColorValue));
+        OnPropertyChanged(nameof(NoiseTitleColorBrush));
+        OnPropertyChanged(nameof(NoiseTitleColorHex));
+        OnPropertyChanged(nameof(RainColorValue));
+        OnPropertyChanged(nameof(RainColorBrush));
+        OnPropertyChanged(nameof(RainColorHex));
+    }
+
     // 滑块绑定需要 double
     public double ClockFontSize
     {
@@ -68,11 +184,25 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set { _settings.ClockFontSize = (int)value; OnPropertyChanged(nameof(ClockFontSize)); OnPropertyChanged(nameof(PreviewFontSize)); OnPropertyChanged(nameof(ClockFontSizeText)); }
     }
 
+    /// <summary>底部居中的课程信息字号（改完进大屏时钟生效）。</summary>
+    public double CourseInfoFontSize
+    {
+        get => _settings.CourseInfoFontSize;
+        set { _settings.CourseInfoFontSize = (int)value; OnPropertyChanged(nameof(CourseInfoFontSize)); OnPropertyChanged(nameof(CourseInfoFontSizeText)); }
+    }
+
+    /// <summary>左下角计数字号（改完进大屏时钟生效）。</summary>
+    public double CountFontSize
+    {
+        get => _settings.CountFontSize;
+        set { _settings.CountFontSize = (int)value; OnPropertyChanged(nameof(CountFontSize)); OnPropertyChanged(nameof(CountFontSizeText)); }
+    }
+
     private void LoadAllCourseNames()
     {
         try
         {
-            var dataDir = Path.GetFullPath(Path.Combine(Plugin.ConfigFolder!, "..", "..", ".."));
+            var dataDir = CiDataDir;
             var settingsPath = Path.Combine(dataDir, "Settings.json");
             var profileFileName = "7.json";
             if (File.Exists(settingsPath))
@@ -485,6 +615,18 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     // ColorPicker 的 Color 属性是 Avalonia.Media.Color（默认 TwoWay），
     // 这里把它与 PluginSettings 的 hex string 互相转换；Color.ToString() 输出 #AARRGGBB，Color.Parse 可读回。
 
+    public Color RainColorValue
+    {
+        get => Color.Parse(_settings.RainColor);
+        set
+        {
+            _settings.RainColor = value.ToString();
+            OnPropertyChanged(nameof(RainColorValue));
+            OnPropertyChanged(nameof(RainColorBrush));
+            OnPropertyChanged(nameof(RainColorHex));
+        }
+    }
+
     public Color BackgroundColorValue
     {
         get => Color.Parse(_settings.BackgroundColor);
@@ -506,18 +648,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             OnPropertyChanged(nameof(FontColorValue));
             OnPropertyChanged(nameof(FontColorBrush));
             OnPropertyChanged(nameof(FontColorHex));
-        }
-    }
-
-    public Color AccentColorValue
-    {
-        get => Color.Parse(_settings.AccentColor);
-        set
-        {
-            _settings.AccentColor = value.ToString();
-            OnPropertyChanged(nameof(AccentColorValue));
-            OnPropertyChanged(nameof(AccentColorBrush));
-            OnPropertyChanged(nameof(AccentColorHex));
         }
     }
 
@@ -562,8 +692,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public string BackgroundColorHex => ToHexRgb(BackgroundColorValue);
     public IBrush FontColorBrush => new SolidColorBrush(FontColorValue);
     public string FontColorHex => ToHexRgb(FontColorValue);
-    public IBrush AccentColorBrush => new SolidColorBrush(AccentColorValue);
-    public string AccentColorHex => ToHexRgb(AccentColorValue);
     public IBrush ProgressColorBrush => new SolidColorBrush(ProgressColorValue);
     public string ProgressColorHex => ToHexRgb(ProgressColorValue);
     public IBrush CourseInfoColorBrush => new SolidColorBrush(CourseInfoColorValue);
@@ -571,10 +699,18 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public IBrush NoiseTitleColorBrush => new SolidColorBrush(NoiseTitleColorValue);
     public string NoiseTitleColorHex => ToHexRgb(NoiseTitleColorValue);
 
+    /// <summary>降水提醒色：预览里的降雨行与设置页色块都用它。</summary>
+    public IBrush RainColorBrush => new SolidColorBrush(RainColorValue);
+    public string RainColorHex => ToHexRgb(RainColorValue);
+
     /// <summary>Color → #RRGGBB（去掉 alpha，设置界面显示友好）。</summary>
     private static string ToHexRgb(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 
     public string ClockFontSizeText => $"{_settings.ClockFontSize}px";
+
+    public string CourseInfoFontSizeText => $"{_settings.CourseInfoFontSize}px";
+
+    public string CountFontSizeText => $"{_settings.CountFontSize}px";
 
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)

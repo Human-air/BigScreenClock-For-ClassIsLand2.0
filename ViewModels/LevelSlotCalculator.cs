@@ -18,7 +18,34 @@ public static class LevelSlotCalculator
         _ => 4
     };
 
-    /// <summary>五档色（ARGB，按吵闹程度：绿→黄绿→黄→橙→红），与 XAML 档位文字/轨道填充共用。</summary>
+    /// <summary>五档色（ARGB，按吵闹程度：绿→黄绿→黄→橙→红），用于轨道填充（实心色块，两套主题共用）。</summary>
     public static readonly uint[] SlotColors =
-        { 0xFF4CAF50, 0xFFAED581, 0xFFFFDD44, 0xFFFF9933, 0xFFFF5555 };
+        { 0xFF4CAF50, 0xFFAED581, 0xFFFFDE02, 0xFFFF9933, 0xFFFF5555 };
+
+    /// <summary>
+    /// 「一般」未达到时的档位文字色（两套主题共用）：与达到时的亮黄同色相、压暗一档，
+    /// 让达到一般与未达到一般一眼能分开。
+    /// </summary>
+    public const uint NormalUnreachedColor = 0xFFB58900;
+
+    /// <summary>五档文字色（**未达到**该档时，黑暗主题）：沿用轨道填充色，只有「一般」换成压暗琥珀。</summary>
+    public static readonly uint[] SlotTextColorsDark =
+        { 0xFF4CAF50, 0xFFAED581, NormalUnreachedColor, 0xFFFF9933, 0xFFFF5555 };
+
+    /// <summary>
+    /// 五档文字色（**未达到**该档时，明亮主题）：原色里的黄绿/黄在白底上几乎看不见，同色相压暗一档。
+    /// </summary>
+    public static readonly uint[] SlotTextColorsLight =
+        { 0xFF2E7D32, 0xFF9E9D24, NormalUnreachedColor, 0xFFC2610A, 0xFFC62828 };
+
+    /// <summary>五档文字色（未达到）：按主题取一版。</summary>
+    public static uint[] SlotTextColors(bool light) => light ? SlotTextColorsLight : SlotTextColorsDark;
+
+    /// <summary>
+    /// 当前档位（**已达到**）的强调色。只有「一般」单独给一支亮黄，让达到一般与未达到一般
+    /// 一眼能分开（未达到是压暗的琥珀，达到是亮黄）；其余四档与未达到时同色，
+    /// 靠透明度与字号区分就够了。
+    /// </summary>
+    public static uint ReachedColorOf(int slot, bool light)
+        => slot == 2 ? SlotColors[2] : SlotTextColors(light)[slot];
 }
