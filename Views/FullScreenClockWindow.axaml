@@ -93,8 +93,38 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 主体：只有时钟与音量条两件，课程时间已挪到底部（见 Grid.Row=4），中间不再挤 -->
-            <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="28">
+            <!-- 主体：只有时钟与音量条两件，课程时间已挪到底部（见 Grid.Row=4）。
+                 两块叠在同一个格子里、各自按设置里的「时钟位置 / 音量条位置」上下摆
+                 （数值 = 该块中心在主体区高度的百分之几），像素值由 code-behind 按主体区实测高度算，
+                 见 FullScreenClockWindow.ApplyBodyPositions()。 -->
+            <Grid Grid.Row="1" x:Name="BodyArea">
+                <!-- 地震提醒：贴在主体区顶部弹出（内容读自「地震预警」插件，见 EarthquakeReader）。
+                     第一行是横波倒计时、第二行是震中和震级，两行都居中；等级色（本地烈度分档）
+                     同时用在文字、描边和底色上；字号随时钟字号缩放，再长由 Viewbox 等比缩，保证整屏塞得下。
+                     位置固定在主体区顶部、不随时钟移动（ApplyBodyPositions），主体区本就在顶部那行
+                     提醒（天气/日期/弹幕）下面，所以不会挡到弹幕；出现时横向绽开（OnEarthquakeAlertPropertyChanged）。 -->
+                <Border x:Name="EarthquakeAlertBlock"
+                        IsVisible="{Binding ShowEarthquakeAlert}"
+                        HorizontalAlignment="Center" VerticalAlignment="Top"
+                        Background="{Binding EarthquakeAlertBackground}"
+                        BorderBrush="{Binding EarthquakeAlertBorder}"
+                        BorderThickness="2" CornerRadius="14" Padding="30,18">
+                    <Viewbox Stretch="Uniform" StretchDirection="DownOnly"
+                             MaxWidth="{Binding EarthquakeAlertMaxWidth}"
+                             HorizontalAlignment="Center">
+                        <StackPanel Spacing="6" HorizontalAlignment="Center">
+                            <TextBlock Text="{Binding EarthquakeLine1}"
+                                       FontSize="{Binding EarthquakeLine1FontSize}" FontWeight="Bold"
+                                       Foreground="{Binding EarthquakeAlertBrush}"
+                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
+                            <TextBlock Text="{Binding EarthquakeLine2}"
+                                       FontSize="{Binding EarthquakeLine2FontSize}" FontWeight="Bold"
+                                       Foreground="{Binding EarthquakeAlertBrush}"
+                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
+                        </StackPanel>
+                    </Viewbox>
+                </Border>
+
                 <!-- 时间：字体跟随 CI 主界面字体，数字用表格宽度（tnum）免得秒数跳动时整行抖 -->
                 <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
                            FontSize="{Binding ClockFontSize}"
@@ -102,11 +132,11 @@
                            Foreground="{Binding FontColor}"
                            FontFamily="{Binding ClockFontFamily}"
                            FontFeatures="{Binding ClockFontFeatures}"
-                           HorizontalAlignment="Center"/>
+                           HorizontalAlignment="Center" VerticalAlignment="Top"/>
 
                 <!-- 教室音量：无背景「横向轨道 + 分段刻度」仪表盘式条（宽度跟随时间字体） -->
-                <StackPanel Spacing="8" Width="{Binding #ClockText.Bounds.Width, FallbackValue=640}"
-                            HorizontalAlignment="Center"
+                <StackPanel x:Name="VolumePanel" Spacing="8" Width="{Binding #ClockText.Bounds.Width, FallbackValue=640}"
+                            HorizontalAlignment="Center" VerticalAlignment="Top"
                             IsVisible="{Binding ShowDecibelMeter}">
                     <!-- 标题行：左「教室音量」，右当前档位文字（档位色；不配强度图标——
                          安静时只有一格反而像颗像素点） -->
@@ -157,7 +187,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </StackPanel>
+            </Grid>
 
             <!-- 底部：计数（左）/ 课程信息（正中）/ 按钮（右）同一行、同一高度。
                  中间列 Auto、左右两列都是 * —— 两边星列平分剩余空间，课程信息才落在屏幕正中，

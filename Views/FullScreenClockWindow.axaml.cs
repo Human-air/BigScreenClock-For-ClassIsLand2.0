@@ -1,9 +1,14 @@
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Transformation;
+using Avalonia.Styling;
 using Avalonia.Threading;
+using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.ViewModels;
 
 namespace EveningSelfStudyClock.Views;
@@ -25,6 +30,38 @@ public partial class FullScreenClockWindow : Window
         RulesPopup.PlacementTarget = CounterAreaBorder; // 规则浮层锚定在计数区域上方
         SizeChanged += (_, _) => UpdateSizeDependentLayout();
         DataContextChanged += (_, _) => UpdateSizeDependentLayout();
+
+        // 时钟/音量条的上下位置：主体区或两块自身的尺寸一变（换字号、开关注音条、内容行数变化）就重算
+        // 地震提醒的「左右绽开」：横向从中间展开，不从下往上冒
+        EarthquakeAlertBlock.RenderTransformOrigin = RelativePoint.Center;
+        EarthquakeAlertBlock.PropertyChanged += OnEarthquakeAlertPropertyChanged;
+
+        BodyArea.SizeChanged += (_, _) => ApplyBodyPositions();
+        ClockText.SizeChanged += (_, _) => ApplyBodyPositions();
+        VolumePanel.SizeChanged += (_, _) => ApplyBodyPositions();
+        EarthquakeAlertBlock.SizeChanged += (_, _) => ApplyBodyPositions();
+        Loaded += (_, _) => ApplyBodyPositions();
+
+        // 设置页拖动「时钟位置 / 音量条位置」滑块改的是同一个 PluginSettings 实例 → 立刻重排，
+        // 不用等重开窗口
+        if (Plugin.Settings is { } settings)
+        {
+            settings.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent)
+                    or nameof(PluginSettings.VolumePositionPercent)
+                    or nameof(PluginSettings.ShowDecibelMeter))
+                    ApplyBodyPositions();
+            };
+        }
+
+        // 窗口收起时没有限位在起作用了，把滑块范围放回整段（不然上次地震留下的下限会一直卡着设置页）
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.IsVisibleProperty && !IsVisible)
+                (DataContext as FullScreenClockViewModel)?.ResetPositionLimits();
+        };
+        Closed += (_, _) => (DataContext as FullScreenClockViewModel)?.ResetPositionLimits();
     }
 
     /// <summary>
@@ -38,6 +75,175 @@ public partial class FullScreenClockWindow : Window
         vm.ReminderPanelMaxWidth = Bounds.Width * 2.0 / 3.0;
         vm.MergeThreshold = Bounds.Width / 3.0;
         vm.CourseInfoMaxWidth = Math.Max(160, (Bounds.Width - 80) / 2.0);
+        // 地震提醒块：整窗宽去掉页面左右各 40 的边距，再留出内边距与描边
+        vm.EarthquakeAlertMaxWidth = Math.Max(240, Bounds.Width - 80 - 72);
+        ApplyBodyPositions();
+    }
+
+    /// <summary>地震提醒块固定在主体区顶部，这里留的余量（主体区本身就在顶部那行提醒下面，不会挡到弹幕）。</summary>
+    private const double QuakeAlertTop = 8;
+
+    /// <summary>
+    /// 地震提醒弹出动画：整块横向从中间向两侧绽开。
+    /// 地震预警插件在 CI 里是往下摊开的，跟大屏这面墙不搭，这里改成左右展开。
+    /// 用的是 Avalonia 对 RenderTransform 的原生插值（TransformOperations），缩放中心在正中。
+    /// </summary>
+    private static readonly Animation QuakeRevealAnimation = new()
+    {
+        Duration = TimeSpan.FromMilliseconds(380),
+        Easing = new CubicEaseOut(),
+        FillMode = FillMode.Forward,
+        Children =
+        {
+            new KeyFrame { Cue = new Cue(0d), Setters = { new Setter(Visual.RenderTransformProperty, QuakeScale(0.04)) } },
+            new KeyFrame { Cue = new Cue(1d), Setters = { new Setter(Visual.RenderTransformProperty, QuakeScale(1)) } },
+        },
+    };
+
+    /// <summary>只做横向缩放的变换（1 = 原样，越接近 0 越窄）。</summary>
+    private static TransformOperations QuakeScale(double scaleX)
+    {
+        var builder = new TransformOperations.Builder(1);
+        builder.AppendScale(scaleX, 1);
+        return builder.Build();
+    }
+
+    private void OnEarthquakeAlertPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != Visual.IsVisibleProperty) return;
+
+        if (!EarthquakeAlertBlock.IsVisible)
+        {
+            // 提醒收起：SizeChanged 不一定来，这里补一刀，让给过位的时钟当场回原位
+            ApplyBodyPositions();
+            return;
+        }
+
+        EarthquakeAlertBlock.RenderTransform = QuakeScale(0.04);   // 先归零，免得动画起来前闪一帧整块
+        try
+        {
+            _ = QuakeRevealAnimation.RunAsync(EarthquakeAlertBlock);
+        }
+        catch
+        {
+            EarthquakeAlertBlock.RenderTransform = QuakeScale(1);  // 动画起不来就直接显示，别把提醒吞了
+        }
+    }
+
+    /// <summary>地震提醒块底边与时钟上沿之间至少留出的距离（时钟限位的依据）。</summary>
+    private const double QuakeAlertGap = 26;
+
+    /// <summary>时钟与音量条之间至少留出的距离（音量条顶上来时的联动依据）。</summary>
+    private const double ClockVolumeGap = 24;
+
+    /// <summary>正在套用布局（也是往设置里写回实际位置的时候），用来挡住写回引发的重入。</summary>
+    private bool _applyingLayout;
+
+    /// <summary>
+    /// 时钟、音量条各自的上下位置。设置里存的是「该块中心落在主体区高度的百分之几」（0 最上、100 最下），
+    /// 这里按主体区的实测高度换算成上边距，再钳进这一轮算出来的可落范围（滑块的范围也是同一个）。
+    ///
+    /// 三块从上到下依次是：地震提醒（钉在主体区顶部，不随时钟移动）、时钟、音量条，谁都不许越界：
+    /// - 提醒块不会顶进上面那行（主体区本来就在它下面）；
+    /// - 时钟上不到提醒块里（下沿再留 QuakeAlertGap）；
+    /// - 音量条上不了时钟头顶（顶到头时时钟正好贴住提醒块），下不出主体区——
+    ///   再往下就压到「最小化 / 退出」那一行了。三条里这条和「时钟不越提醒」是硬要求。
+    ///
+    /// 音量条的下限是固定的，时钟的下限跟着音量条走——所以音量条往上顶，时钟的可落范围就收紧、
+    /// 被一并顶上去，一直顶到贴住提醒块为止；反过来往下拖时钟，时钟停在音量条上沿，
+    /// 不会把音量条挤下去。不用另记「这次拖的是哪一个」。
+    ///
+    /// 钳完的位置会写回设置，滑块范围也同步过去：滑块显示的、能拖的就是屏幕上的实际情况。
+    /// </summary>
+    private void ApplyBodyPositions()
+    {
+        if (Plugin.Settings is not { } settings) return;
+        if (_applyingLayout) return;                   // 写回设置引发的重入，一次就够
+        var areaHeight = BodyArea.Bounds.Height;
+        if (areaHeight <= 0) return;   // 布局还没跑，等下一轮 SizeChanged
+
+        _applyingLayout = true;
+        try
+        {
+            // 提醒块固定：贴着主体区顶部摆，并给时钟让出下沿
+            var alertVisible = EarthquakeAlertBlock.IsVisible;
+            var clockMinTop = 0.0;
+            if (alertVisible)
+            {
+                SetTop(EarthquakeAlertBlock, QuakeAlertTop);
+                clockMinTop = QuakeAlertTop + EarthquakeAlertBlock.Bounds.Height + QuakeAlertGap;
+            }
+
+            var clockHeight = ClockText.Bounds.Height;
+            var volumeVisible = VolumePanel.IsVisible;
+            var volumeHeight = VolumePanel.Bounds.Height;
+
+            // 音量条：上不了「顶到头时正好把时钟顶到提醒块下沿」那条线，
+            // 下不出主体区（再往下就压到「最小化 / 退出」那一行去了，这条优先守住）
+            var volumeMinTop = clockMinTop + clockHeight + ClockVolumeGap;
+            var volumeMaxTop = Math.Max(0, areaHeight - volumeHeight);
+            var volumeTop = volumeVisible
+                ? Math.Min(Math.Max(TopFor(settings.VolumePositionPercent, areaHeight, volumeHeight), volumeMinTop), volumeMaxTop)
+                : 0.0;
+
+            // 时钟：上不到提醒块里（这条也是硬要求），下压不到音量条上。装不下时宁可两块挨上也别越界
+            var clockRoomTop = volumeVisible ? volumeTop - ClockVolumeGap - clockHeight : areaHeight - clockHeight;
+            var clockMaxTop = Math.Max(clockMinTop, clockRoomTop);
+            var clockTop = Math.Clamp(TopFor(settings.ClockPositionPercent, areaHeight, clockHeight), clockMinTop, clockMaxTop);
+
+            if (volumeVisible) SetTop(VolumePanel, volumeTop);
+            SetTop(ClockText, clockTop);
+
+            // 滑块范围按「没有提醒块」的那套限位算（下限用 0 = 主体区最上面）：
+            // 提醒是临时来客，地震过去后时钟要回原位，滑块范围不能跟着它一起挤小——
+            // 范围一挤小，滑块会把设置里存的位置一起改掉，那就真回不去了。
+            if (DataContext is FullScreenClockViewModel vm)
+            {
+                vm.SetPositionLimits(
+                    PercentOf(0, areaHeight, clockHeight),
+                    PercentOf(clockMaxTop, areaHeight, clockHeight),
+                    volumeVisible ? PercentOf(Math.Min(clockHeight + ClockVolumeGap, volumeMaxTop), areaHeight, volumeHeight) : 0,
+                    volumeVisible ? PercentOf(volumeMaxTop, areaHeight, volumeHeight) : 100);
+            }
+
+            // 提醒块在的时候不写回：这会儿被顶下去是临时的，写回就把原位置丢了（提醒一撤，时钟回不去）
+            if (!alertVisible)
+                WriteBack(settings, areaHeight, clockTop, clockHeight, volumeTop, volumeHeight, volumeVisible);
+        }
+        finally
+        {
+            _applyingLayout = false;
+        }
+    }
+
+    /// <summary>把钳完的实际位置写回设置（差值太小就不写，免得每轮布局都惊动一遍设置）。</summary>
+    private static void WriteBack(PluginSettings settings, double areaHeight,
+                                  double clockTop, double clockHeight,
+                                  double volumeTop, double volumeHeight, bool volumeVisible)
+    {
+        var clockPercent = PercentOf(clockTop, areaHeight, clockHeight);
+        if (Math.Abs(clockPercent - settings.ClockPositionPercent) > 0.05)
+            settings.ClockPositionPercent = clockPercent;
+
+        if (!volumeVisible) return;
+        var volumePercent = PercentOf(volumeTop, areaHeight, volumeHeight);
+        if (Math.Abs(volumePercent - settings.VolumePositionPercent) > 0.05)
+            settings.VolumePositionPercent = volumePercent;
+    }
+
+    /// <summary>按「中心落在区域高度的百分之几」算出该块的上边距（未钳制，钳制在各调用处按优先级做）。</summary>
+    private static double TopFor(double percent, double areaHeight, double height)
+        => percent / 100.0 * areaHeight - height / 2.0;
+
+    /// <summary>上边距换算回「中心落在区域高度的百分之几」，与 <see cref="TopFor"/> 互逆。</summary>
+    private static double PercentOf(double top, double areaHeight, double height)
+        => Math.Clamp((top + height / 2.0) / areaHeight * 100, 0, 100);
+
+    /// <summary>摆好一块的上边距。只在真的变了才写：写过边距还会再跑一轮 SizeChanged，不比较会来回抖。</summary>
+    private static void SetTop(Control block, double top)
+    {
+        if (Math.Abs(block.Margin.Top - top) > 0.5)
+            block.Margin = new Thickness(0, top, 0, 0);
     }
 
     /// <summary>「点击后滚完这一遍就收」已生效：这期间重复点击不生效。</summary>

@@ -33,6 +33,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly DecibelMeterService _decibelService;
     private readonly CameraActivityService _cameraService;
     private readonly IServiceProvider _serviceProvider;
+    private readonly EarthquakeReader _earthquakeReader;
     private readonly NoiseCounter _counter = new();
     private readonly Lazy<IExactTimeService?> _exactTimeService;
     private System.Timers.Timer? _updateTimer;
@@ -130,6 +131,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _decibelService = decibelService;
         _cameraService = cameraService;
         _serviceProvider = serviceProvider;
+        _earthquakeReader = new EarthquakeReader(serviceProvider);
 
         // 惰性缓存 IExactTimeService，避免每次调用查服务
         _exactTimeService = new Lazy<IExactTimeService?>(() =>
@@ -177,6 +179,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             or nameof(PluginSettings.ShowRainReminder))
         {
             NotifyReminderChanged();
+        }
+        else if (args.PropertyName is nameof(PluginSettings.ShowEarthquakeReminder))
+        {
+            // 地震提醒开关：立刻显示/收起，不用等下一次整点刷新
+            UpdateEarthquakeAlert();
         }
         else if (args.PropertyName is nameof(PluginSettings.ShowAlertsReminder)
             or nameof(PluginSettings.ShowCameraReminder)
@@ -373,6 +380,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         var light = Chrome.IsLight;
         foreach (var a in AlertItems)
             a.Foreground = AlertBrush(a.Level, light);
+
+        // 地震提醒（等级色也分明暗两版）
+        NotifyEarthquakeChanged();
 
         // 计数片段：签名只记 黄/红/其它，换主题后签名不变会被判成「没变化」而不刷新，
         // 故清掉签名强制重建一次（下面会各自填回新颜色）
@@ -694,6 +704,156 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public bool ShowReminderPanel => _settings.ShowReminderPanel
         && (ShowAlertsRow || ShowRainReminderPanel || ShowCountdownPanel || ShowTextPanel);
 
+    // ===== 地震提醒（屏幕上方弹出，内容读自「地震预警」插件） =====
+    // 每分钟的行程另有其人：数据由 EarthquakeReader 反射取，组装规则在 EarthquakeAlertBuilder（纯函数）。
+
+    /// <summary>当前这场地震的提醒；没有正在预警的地震时为 null。</summary>
+    private EarthquakeAlert? _earthquakeAlert;
+
+    /// <summary>这场地震的横波到达时刻。一旦开始显示就守着它倒数到点，中途读不到数据也不收。</summary>
+    private DateTime _earthquakeEndTime;
+
+    /// <summary>正在显示的这场地震是谁（对方的事件标识）。用来认出「对方换了一场」。</summary>
+    private string? _earthquakeEventKey;
+
+    /// <summary>是否在时钟正上方弹出地震提醒（开关开着且有正在预警的地震）。</summary>
+    public bool ShowEarthquakeAlert => _settings.ShowEarthquakeReminder && _earthquakeAlert is not null;
+
+    /// <summary>第一行：横波还有 X 秒到达。</summary>
+    public string EarthquakeLine1 => _earthquakeAlert?.Line1 ?? "";
+
+    /// <summary>第二行：震中 + 震级。</summary>
+    public string EarthquakeLine2 => _earthquakeAlert?.Line2 ?? "";
+
+    /// <summary>等级色（本地烈度分档，与地震预警插件同一套）：两行文字、描边、底色都用它。</summary>
+    public IBrush EarthquakeAlertBrush => QuakeBrush(0xFF);
+
+    /// <summary>提醒块底色：等级色的低透明版（强调用，不盖住文字）。</summary>
+    public IBrush EarthquakeAlertBackground => QuakeBrush(Chrome.IsLight ? (byte)0x22 : (byte)0x33);
+
+    /// <summary>提醒块描边：等级色的半透明版。</summary>
+    public IBrush EarthquakeAlertBorder => QuakeBrush(Chrome.IsLight ? (byte)0x88 : (byte)0x99);
+
+    /// <summary>第一行（倒计时）字号：随时钟字号缩放，太长时由 Viewbox 再缩。</summary>
+    public double EarthquakeLine1FontSize => Math.Clamp(ClockFontSize * 0.18, 26, 96);
+
+    /// <summary>第二行（震中/震级）字号。</summary>
+    public double EarthquakeLine2FontSize => Math.Clamp(ClockFontSize * 0.12, 18, 64);
+
+    private IBrush QuakeBrush(byte alpha)
+    {
+        var hex = SemanticColors.EarthquakeHex(_earthquakeAlert?.Intensity ?? 0, Chrome.IsLight);
+        var color = Color.Parse(hex);
+        return new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+    }
+
+    /// <summary>
+    /// 地震提醒：每秒从「地震预警」插件读一次（横波倒计时每秒都在变）。
+    /// 内容没变就不发通知，免得每秒都重排一次布局。
+    ///
+    /// 一旦开始显示就「粘」住：记下横波到达时刻，之后哪怕某一秒读不到数据（对方正在更新记录、
+    /// 或我们这边正好在改设置重排），也照着自己的节拍把倒计时数到点才收——不会中途闪断。
+    ///
+    /// 但粘住的范围只限「同一场地震」：对方换了另一场（比如测试里从四川换成云南，
+    /// 或前一报已经了结）就得当场收起，不能抱着上一场往下数（用户 2026-10-01 反馈）。
+    /// 靠对方的事件标识分辨这两件事。
+    /// </summary>
+    private void UpdateEarthquakeAlert()
+    {
+        var now = DateTime.Now;
+
+        if (!_settings.ShowEarthquakeReminder)
+        {
+            ClearEarthquakeAlert();
+            return;
+        }
+
+        var reading = _earthquakeReader.Read(now);
+        if (reading.Alert is { } next)
+        {
+            _earthquakeEventKey = reading.EventKey ?? _earthquakeEventKey;
+            _earthquakeEndTime = now.AddSeconds(next.SecondsLeft);
+            if (next == _earthquakeAlert) return;   // 文案没变（同一秒内被调了两次）
+            _earthquakeAlert = next;
+            NotifyEarthquakeChanged();
+            return;
+        }
+
+        // 这一拍没有要提醒的地震。没在显示的就算了；正在显示的得先看对方是不是换了一场
+        if (_earthquakeAlert is null) return;
+        if (reading.EventKey is not null && reading.EventKey != _earthquakeEventKey)
+        {
+            ClearEarthquakeAlert();
+            return;
+        }
+
+        // 还是同一场、只是这拍没读到：接着数，数到横波到达才收
+        var left = (int)Math.Round((_earthquakeEndTime - now).TotalSeconds);
+        if (left < 1)
+        {
+            ClearEarthquakeAlert();
+            return;
+        }
+
+        if (left == _earthquakeAlert.SecondsLeft) return;
+        _earthquakeAlert = _earthquakeAlert.WithSecondsLeft(left);
+        NotifyEarthquakeChanged();
+    }
+
+    private void ClearEarthquakeAlert()
+    {
+        _earthquakeEventKey = null;
+        if (_earthquakeAlert is null) return;
+        _earthquakeAlert = null;
+        NotifyEarthquakeChanged();
+    }
+
+    // ===== 时钟/音量条滑块的可拖范围（百分比） =====
+    // 大屏那边按限位算出「实际能落到哪」后写进来（见 FullScreenClockWindow.ApplyBodyPositions），
+    // 设置页的滑块拿它当 Minimum/Maximum。不这么做滑块能一路拖到 0，
+    // 而屏幕上早就顶住不动了——「还能继续调小、右边数字却不变」（用户 2026-10-01 反馈）。
+
+    public double ClockPositionMin => _clockPositionMin;
+    public double ClockPositionMax => _clockPositionMax;
+    public double VolumePositionMin => _volumePositionMin;
+    public double VolumePositionMax => _volumePositionMax;
+
+    private double _clockPositionMin;
+    private double _clockPositionMax = 100;
+    private double _volumePositionMin;
+    private double _volumePositionMax = 100;
+
+    /// <summary>大屏那边算完限位后同步滑块范围（全屏时钟没开时是默认的 0~100，等同不限制）。</summary>
+    public void SetPositionLimits(double clockMin, double clockMax, double volumeMin, double volumeMax)
+    {
+        SetLimit(ref _clockPositionMin, clockMin, nameof(ClockPositionMin));
+        SetLimit(ref _clockPositionMax, clockMax, nameof(ClockPositionMax));
+        SetLimit(ref _volumePositionMin, volumeMin, nameof(VolumePositionMin));
+        SetLimit(ref _volumePositionMax, volumeMax, nameof(VolumePositionMax));
+    }
+
+    /// <summary>全屏时钟收起时恢复成整段可拖（这时没有任何限位在起作用）。</summary>
+    public void ResetPositionLimits() => SetPositionLimits(0, 100, 0, 100);
+
+    private void SetLimit(ref double field, double value, string propertyName)
+    {
+        if (Math.Abs(field - value) < 0.05) return;   // 布局每轮都算一遍，没变就别惊动绑定
+        field = value;
+        OnPropertyChanged(propertyName);
+    }
+
+    private void NotifyEarthquakeChanged()
+    {
+        OnPropertyChanged(nameof(ShowEarthquakeAlert));
+        OnPropertyChanged(nameof(EarthquakeLine1));
+        OnPropertyChanged(nameof(EarthquakeLine2));
+        OnPropertyChanged(nameof(EarthquakeAlertBrush));
+        OnPropertyChanged(nameof(EarthquakeAlertBackground));
+        OnPropertyChanged(nameof(EarthquakeAlertBorder));
+        OnPropertyChanged(nameof(EarthquakeLine1FontSize));
+        OnPropertyChanged(nameof(EarthquakeLine2FontSize));
+    }
+
     // ===== 提醒自动合并为同行（顶部第一行 = 主位块 + 预警详情弹幕 + 日期） =====
     // 用户定稿规则：
     // - 天气固定第一行，与弹幕同行；
@@ -854,6 +1014,22 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         }
     }
     private double _courseInfoMaxWidth = double.PositiveInfinity;
+
+    /// <summary>
+    /// 地震提醒块的最大宽（窗口按「整窗宽去掉页面左右边距」设置）。两行文字太长时交给 Viewbox 等比缩字，
+    /// 保证整个提醒都塞得进屏幕。默认无穷大：窗口还没量出尺寸前不设限。
+    /// </summary>
+    public double EarthquakeAlertMaxWidth
+    {
+        get => _earthquakeAlertMaxWidth;
+        set
+        {
+            if (Math.Abs(_earthquakeAlertMaxWidth - value) < 0.5) return;
+            _earthquakeAlertMaxWidth = value;
+            OnPropertyChanged();
+        }
+    }
+    private double _earthquakeAlertMaxWidth = double.PositiveInfinity;
 
 
     // ===== 颜文字副标题（趣味提醒）：气温/天气旁、日期旁、倒计时旁、降雨旁的小字号副标题 =====
@@ -1197,6 +1373,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             // 主动触发通知让绑定重新求值（修复：改完颜色后要重启 CI 才生效的问题）
             RefreshAppearanceBindings();
             RefreshRemindersNow();
+            UpdateEarthquakeAlert();   // 正赶上一场地震时，开屏就有（否则等下个整秒的刷新）
 
             if (_window == null)
             {
@@ -1227,6 +1404,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     _window.Show();
                     _window.WindowState = WindowState.FullScreen;
                 }
+                // 最小化时把 CI 主界面拉了出来（见 Minimize），回到大屏就得收回去，
+                // 否则主界面一直留在大屏时钟后面/旁边
+                SetMainWindowVisible(false);
                 RefreshAll();
                 return;
             }
@@ -1296,6 +1476,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (_window.WindowState is WindowState.FullScreen or WindowState.Minimized) return;
         _window.Show();   // 幂等：窗口已可见时再次 Show 把后台/非活动窗口置前
         _window.WindowState = WindowState.FullScreen;
+        // 从任务栏点回也算「回到大屏」：最小化时拉出来的 CI 主界面同样要收回去
+        SetMainWindowVisible(false);
     }
 
     public void Hide()
@@ -1353,6 +1535,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         // 摄像头占用：占用快照由后台监视器事件驱动更新，这里每秒取一次并合成提醒条目
         // （内容没变时 UpdateAlertItems 直接返回，不会打断正在看的预警详情弹幕）
         UpdateAlertItems();
+
+        // 地震提醒：横波倒计时每秒都在变，跟着这一秒的节拍刷新
+        UpdateEarthquakeAlert();
 
         // 提醒面板：组件配置每 3 秒同步一次（用户改 CI 组件自动跟随），天气缓存每 60 秒读一次
         _reminderTick++;

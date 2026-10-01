@@ -14,12 +14,18 @@
     <Grid ColumnDefinitions="*,280" Margin="12">
 
         <!-- ===== 左栏：设置（可滚动） =====
-             整体透明无底：文字颜色绑 FluentAvalonia 主题键（CI 亮色=深字 / 暗色=白字），
-             不再写死卡片背景与白色前景，随 CI 主题自动切换。 -->
+             每个区块是一张卡片，用的是 CI 设置页里 SettingsExpander 那套：
+             卡片底 CardBackgroundFillColorDefaultBrush、1px 边框 CardStrokeColorDefaultBrush、
+             圆角 ControlCornerRadius(4)；文字颜色同样绑 FluentAvalonia 主题键，随 CI 主题自动切换。
+             卡片跟着窗口一起变宽，铺满整个设置区域（本页标了 [FullWidthPage]，
+             CI 的页面标题也就固定靠左，左距 12 与这里的 12 对齐）。 -->
         <ScrollViewer Grid.Column="0" Padding="0,0,12,0">
-            <StackPanel Spacing="18" Margin="4,8,0,8">
+            <StackPanel Spacing="12" Margin="0,8,0,8">
 
                 <!-- 功能开关 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI Settings}" FontSize="17"
@@ -112,6 +118,22 @@
                                     <TextBlock Text="摄像头占用" FontSize="14" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </CheckBox>
+                            <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+                                <CheckBox IsChecked="{Binding ShowEarthquakeReminder}"
+                                          IsEnabled="{Binding IsEarthquakePluginAvailable}"
+                                          FontSize="14"
+                                          ToolTip.Tip="读「地震预警」插件的实时状态，在屏幕上方弹出横波倒计时与震中震级">
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <TextBlock Classes="icon" Text="{ci:LI Activity}" FontSize="13"/>
+                                        <TextBlock Text="地震预警" FontSize="14" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </CheckBox>
+                                <!-- 没装「地震预警」插件时：开关置灰，下面说明原因 -->
+                                <TextBlock FontSize="12" TextWrapping="Wrap"
+                                           IsVisible="{Binding ShowEarthquakePluginHint}"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="启用地震预警需先安装 ClassIsland 插件「地震预警」"/>
+                            </StackPanel>
                         </Grid>
 
                         <!-- 摄像头占用子项：勾选「摄像头占用」后出现 -->
@@ -143,8 +165,12 @@
                     <TextBlock Text="关闭后 CI 托盘右键菜单里不再出现该入口（下次打开菜单即生效）。" FontSize="11" Margin="20,0,0,0"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
+                </Border>
 
                 <!-- 目标课程 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI ListChecks}" FontSize="17"
@@ -184,8 +210,12 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
+                </Border>
 
                 <!-- 音量检测 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI Volume2}" FontSize="17"
@@ -232,8 +262,12 @@
                                    TextWrapping="Wrap"/>
                     </Grid>
                 </StackPanel>
+                </Border>
 
                 <!-- 记录参数 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI Calculator}" FontSize="17"
@@ -314,8 +348,12 @@
                                    FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"/>
                     </Grid>
                 </StackPanel>
+                </Border>
 
                 <!-- 外观 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI Palette}" FontSize="17"
@@ -361,22 +399,29 @@
                         <TextBlock Grid.Column="2" Text="{Binding CountFontSizeText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
-                    <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板 -->
-                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                        <TextBlock Grid.Column="0" Text="背景颜色" VerticalAlignment="Center"
+                    <!-- 上下位置：数值 = 该块中心落在主体区（去掉顶部提醒行与底部各行后剩下的那块）高度的百分之几 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="时钟位置" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <TextBlock Grid.Column="1" Text="{Binding BackgroundColorHex}" FontSize="12"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        <cp:ColorPicker Grid.Column="2" Color="{Binding BackgroundColorValue}"
-                                        IsAccentColorsVisible="False" Width="90" Height="28"
-                                        HorizontalAlignment="Right">
-                            <cp:ColorPicker.Content>
-                                <Border Background="{Binding BackgroundColorBrush}" CornerRadius="3"
-                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"/>
-                            </cp:ColorPicker.Content>
-                        </cp:ColorPicker>
+                        <!-- 上下限跟着大屏那边的限位走：拖到头就是屏幕上能到的最上/最下，不进死区 -->
+                        <Slider Grid.Column="1" Minimum="{Binding ClockPositionMin}" Maximum="{Binding ClockPositionMax}"
+                                Value="{Binding ClockPositionPercent}"
+                                TickFrequency="5" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding ClockPositionPercentText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="音量条位置" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Column="1" Minimum="{Binding VolumePositionMin}" Maximum="{Binding VolumePositionMax}"
+                                Value="{Binding VolumePositionPercent}"
+                                TickFrequency="5" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding VolumePositionPercentText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板 -->
+                    <!-- 背景色不可调：它由主题定（明亮 = 白、黑暗 = 黑），不跟着主题走的话
+                         切主题后整块只有底色没变，反而更别扭 -->
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                         <TextBlock Grid.Column="0" Text="时钟字体颜色" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
@@ -453,8 +498,12 @@
                         </cp:ColorPicker>
                     </Grid>
                 </StackPanel>
+                </Border>
 
                 <!-- 规则说明 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="4">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Classes="icon" Text="{ci:LI ScrollText}" FontSize="17"
@@ -478,6 +527,7 @@
                                    FontSize="12" Foreground="#d97706" TextWrapping="Wrap"/>
                     </Grid>
                 </StackPanel>
+                </Border>
 
             </StackPanel>
         </ScrollViewer>

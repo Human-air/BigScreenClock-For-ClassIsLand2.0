@@ -18,6 +18,22 @@ public static class SemanticColors
     /// <summary>「吵闹」计数与「正在记录：吵闹」提示的红色。</summary>
     public static string CountNoisyHex(bool light) => light ? "#C62828" : "#FF5555";
 
+    /// <summary>
+    /// 地震提醒的等级色：按**本地烈度**分档，分档区间取自地震预警插件的 IntensityToColorConverter
+    /// （≤2 蓝 / ≤4 黄 / ≤6 橙 / &gt;6 红）；浅底上换成同色相的压暗版（与预警等级色同一套处理）。
+    /// </summary>
+    public static string EarthquakeHex(double intensity, bool light) => (intensity, light) switch
+    {
+        (<= 2, false) => "#55AAFF",
+        (<= 2, true) => "#1976D2",
+        (<= 4, false) => "#FFDD44",
+        (<= 4, true) => "#B58900",
+        (<= 6, false) => "#FF9933",
+        (<= 6, true) => "#E06C00",
+        (_, false) => "#FF5555",
+        (_, true) => "#D32F2F",
+    };
+
     /// <summary>预警等级色（蓝/黄/橙/红）；等级未知返回 null（调用方用主题正文色兜底）。</summary>
     public static string? AlertHex(string? level, bool light) => (level, light) switch
     {

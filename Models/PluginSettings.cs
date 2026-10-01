@@ -33,6 +33,8 @@ public class PluginSettings : INotifyPropertyChanged
     private int _logKeepMinutes = 10;
     private int _logKeepMinKb = 100;
     private int _clockFontSize = 180;
+    private double _clockPositionPercent = 30;      // 时钟中心在主体区高度的 30% 处
+    private double _volumePositionPercent = 80;     // 音量条中心在主体区高度的 80% 处
     private int _courseInfoFontSize = 28;
     private int _countFontSize = 24;
     private int _themeMode;
@@ -47,6 +49,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showEmojiSubtitles = true;
     private bool _showTrayMenuEntry = true;
     private bool _showCameraReminder = true;
+    private bool _showEarthquakeReminder = true;
     private bool _cameraListFilled;
     private ObservableCollection<string> _monitoredCameras = new();
 
@@ -343,6 +346,26 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 时钟垂直位置：时钟中心落在主体区（去掉顶部提醒行与底部各行后剩下的那块）高度的百分之几。
+    /// 0 = 最上，100 = 最下；实际按该块的实测高度做了钳制，滑块拉到两端也不会跑到屏幕外。
+    /// </summary>
+    public double ClockPositionPercent
+    {
+        get => _clockPositionPercent;
+        set { _clockPositionPercent = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 音量条垂直位置：同 <see cref="ClockPositionPercent"/>，音量条中心在主体区高度的百分之几。
+    /// 与时钟各调各的，互不牵连。
+    /// </summary>
+    public double VolumePositionPercent
+    {
+        get => _volumePositionPercent;
+        set { _volumePositionPercent = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
+    }
+
+    /// <summary>
     /// 窗口标题
     /// </summary>
     public string WindowTitle
@@ -412,6 +435,16 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _showCameraReminder;
         set { _showCameraReminder = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 是否显示地震提醒（读「地震预警」插件的实时状态，在时钟正上方弹出，见 <see cref="Services.EarthquakeReader"/>）。
+    /// 该插件没装 / 没启用时这一项不起作用。
+    /// </summary>
+    public bool ShowEarthquakeReminder
+    {
+        get => _showEarthquakeReminder;
+        set { _showEarthquakeReminder = value; OnPropertyChanged(); }
     }
 
     /// <summary>

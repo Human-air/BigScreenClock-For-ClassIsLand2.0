@@ -18,6 +18,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace EveningSelfStudyClock.Settings;
 
 [SettingsPageInfo("com.bigscreen.clock.settings", "大屏时钟", SettingsPageCategory.External)]
+// 全宽页：不加这个，CI 会把页面标题限制在 960 宽并居中，窗口一变大标题就往中间跑，
+// 和下面铺满的设置卡片对不齐。加了这个标题固定靠左（左距与卡片一致），缩放窗口不再移动。
+[FullWidthPage]
 public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 {
     private readonly PluginSettings _settings;
@@ -33,16 +36,41 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         InitializeComponent();
         _settings = Plugin.Settings!;
+        _earthquakePluginAvailable = CheckEarthquakePlugin();
+        try { _clockViewModel = Plugin.ServiceProvider?.GetService<FullScreenClockViewModel>(); } catch { }
+
+        // 滑块范围跟着大屏那边的限位走；页面收起就摘掉，别让 ViewModel 攒着一堆旧页面的订阅
+        Loaded += (_, _) => HookPositionLimits();
+        Unloaded += (_, _) => UnhookPositionLimits();
+
         DataContext = this;
 
         // 预览按当前生效主题呈现：跟随档下 CI 的亮暗就是这里的亮暗
         ClockThemeApplier.Apply(_settings, CiIsDark);
         ApplyThemeFromSettings();
+        // 上面这一步刚换过颜色，而 DataContext 早一步就赋好了、绑定已经按旧颜色求过一次值：
+        // 不在这里补通知，几个色块会停在切换前那套颜色上（色块与右边 hex 对不上）
+        NotifyAllColorsChanged();
 
         LoadAllCourseNames();
         RestoreSelectedCourses();
         LoadCameraDevices();
         StartPreviewTimer();
+
+        // 时钟/音量条的位置会被大屏那边按限位改写（写回实际位置），滑块要跟着动
+        _settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent))
+            {
+                OnPropertyChanged(nameof(ClockPositionPercent));
+                OnPropertyChanged(nameof(ClockPositionPercentText));
+            }
+            else if (e.PropertyName is nameof(PluginSettings.VolumePositionPercent))
+            {
+                OnPropertyChanged(nameof(VolumePositionPercent));
+                OnPropertyChanged(nameof(VolumePositionPercentText));
+            }
+        };
 
         // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
         ActualThemeVariantChanged += (_, _) => ApplyThemeFromSettings();
@@ -197,6 +225,62 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         get => _settings.CountFontSize;
         set { _settings.CountFontSize = (int)value; OnPropertyChanged(nameof(CountFontSize)); OnPropertyChanged(nameof(CountFontSizeText)); }
+    }
+
+    /// <summary>时钟垂直位置：中心落在主体区高度的百分之几（大屏时钟开着时拖动即时生效）。</summary>
+    public double ClockPositionPercent
+    {
+        get => _settings.ClockPositionPercent;
+        set { _settings.ClockPositionPercent = value; OnPropertyChanged(nameof(ClockPositionPercent)); OnPropertyChanged(nameof(ClockPositionPercentText)); }
+    }
+
+    /// <summary>音量条垂直位置：同上。</summary>
+    public double VolumePositionPercent
+    {
+        get => _settings.VolumePositionPercent;
+        set { _settings.VolumePositionPercent = value; OnPropertyChanged(nameof(VolumePositionPercent)); OnPropertyChanged(nameof(VolumePositionPercentText)); }
+    }
+
+    // 两个位置滑块能拖到哪儿，由大屏那边按当前限位（地震提醒下沿、两块互顶、屏幕边缘）算出来。
+    // 直接把它当 Slider 的 Minimum/Maximum：否则滑块能一路拖进「屏幕上早就顶住、数字却不变」的死区。
+    public double ClockPositionMin => _clockViewModel?.ClockPositionMin ?? 0;
+    public double ClockPositionMax => _clockViewModel?.ClockPositionMax ?? 100;
+    public double VolumePositionMin => _clockViewModel?.VolumePositionMin ?? 0;
+    public double VolumePositionMax => _clockViewModel?.VolumePositionMax ?? 100;
+
+    /// <summary>大屏时钟的 ViewModel（全屏时钟窗口和这里是同一个实例），拿它的限位。</summary>
+    private readonly FullScreenClockViewModel? _clockViewModel;
+
+    private void HookPositionLimits()
+    {
+        if (_clockViewModel is null) return;
+        _clockViewModel.PropertyChanged += OnClockViewModelChanged;
+        OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.ClockPositionMin)));
+        OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.VolumePositionMin)));
+        OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.ClockPositionMax)));
+        OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.VolumePositionMax)));
+    }
+
+    private void UnhookPositionLimits()
+    {
+        if (_clockViewModel is null) return;
+        _clockViewModel.PropertyChanged -= OnClockViewModelChanged;
+    }
+
+    private void OnClockViewModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(FullScreenClockViewModel.ClockPositionMin)
+            or nameof(FullScreenClockViewModel.ClockPositionMax))
+        {
+            OnPropertyChanged(nameof(ClockPositionMin));
+            OnPropertyChanged(nameof(ClockPositionMax));
+        }
+        else if (e.PropertyName is nameof(FullScreenClockViewModel.VolumePositionMin)
+            or nameof(FullScreenClockViewModel.VolumePositionMax))
+        {
+            OnPropertyChanged(nameof(VolumePositionMin));
+            OnPropertyChanged(nameof(VolumePositionMax));
+        }
     }
 
     private void LoadAllCourseNames()
@@ -679,6 +763,37 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set { _settings.ShowCameraReminder = value; OnPropertyChanged(nameof(ShowCameraReminder)); }
     }
 
+    /// <summary>地震提醒（读「地震预警」插件的实时状态，在时钟正上方弹出）。</summary>
+    public bool ShowEarthquakeReminder
+    {
+        get => _settings.ShowEarthquakeReminder;
+        set { _settings.ShowEarthquakeReminder = value; OnPropertyChanged(nameof(ShowEarthquakeReminder)); }
+    }
+
+    /// <summary>
+    /// 「地震预警」插件装了没。没装时地震提醒那一项置灰、下方给出提示——
+    /// 它只是个通知提供方，没装的话这个开关调了也没有用。
+    /// 设置页是每次打开新建的，构造函数里查一次即可。
+    /// </summary>
+    public bool IsEarthquakePluginAvailable => _earthquakePluginAvailable;
+
+    /// <summary>没装「地震预警」插件时，在那一项下方给出原因。</summary>
+    public bool ShowEarthquakePluginHint => !_earthquakePluginAvailable;
+
+    private readonly bool _earthquakePluginAvailable;
+
+    private static bool CheckEarthquakePlugin()
+    {
+        try
+        {
+            return Plugin.ServiceProvider is { } sp && new EarthquakeReader(sp).IsAvailable();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public bool ShowEmojiSubtitles
     {
         get => _settings.ShowEmojiSubtitles;
@@ -793,6 +908,10 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public string CourseInfoFontSizeText => $"{_settings.CourseInfoFontSize}px";
 
     public string CountFontSizeText => $"{_settings.CountFontSize}px";
+
+    public string ClockPositionPercentText => $"{_settings.ClockPositionPercent:0}%";
+
+    public string VolumePositionPercentText => $"{_settings.VolumePositionPercent:0}%";
 
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)
