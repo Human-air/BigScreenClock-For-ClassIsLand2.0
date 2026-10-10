@@ -10,7 +10,7 @@ namespace EveningSelfStudyClock.Models;
 /// </summary>
 public static class BackgroundImageStore
 {
-    /// <summary>副本的固定文件名（不带扩展名）。配置目录里同一时间只留这一张。</summary>
+    /// <summary>副本的文件名前缀。后面接一串时间戳，配置目录里同一时间只留最新那张。</summary>
     private const string BaseName = "background";
 
     /// <summary>设置里记的文件名 → 完整路径；没设或文件已经不在了都返回 null。</summary>
@@ -28,6 +28,10 @@ public static class BackgroundImageStore
     /// <summary>
     /// 把 <paramref name="sourcePath"/> 复制进配置目录并写进设置。会顺手删掉上一张
     /// （不然换几次图，配置目录里就攒一堆几 MB 的图）。
+    ///
+    /// 文件名带时间戳，每次选图都必然是一串新名字 —— 固定名字的话，
+    /// 连着换两张同格式的图（jpg 换 jpg），设置里那个字符串没变，
+    /// PropertyChanged 就不会发，大屏和预览都还以为没换过。
     /// </summary>
     public static void Replace(string sourcePath, PluginSettings settings)
     {
@@ -37,7 +41,8 @@ public static class BackgroundImageStore
         Directory.CreateDirectory(folder);
         RemoveExisting();
 
-        var name = BaseName + Path.GetExtension(sourcePath).ToLowerInvariant();
+        var name = BaseName + "-" + DateTime.Now.ToString("yyyyMMddHHmmssfff")
+                   + Path.GetExtension(sourcePath).ToLowerInvariant();
         File.Copy(sourcePath, Path.Combine(folder, name), overwrite: true);
         settings.BackgroundImageFile = name;
     }
@@ -131,8 +136,13 @@ public static class BackgroundImageStore
         var folder = Plugin.ConfigFolder;
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
 
-        foreach (var file in Directory.GetFiles(folder, BaseName + ".*"))
+        foreach (var file in Directory.GetFiles(folder, BaseName + "*"))
         {
+            // 只删我们自己放的副本，别误伤配置目录里同前缀的其它文件
+            var name = Path.GetFileName(file);
+            if (!name.StartsWith(BaseName + ".", StringComparison.OrdinalIgnoreCase) &&
+                !name.StartsWith(BaseName + "-", StringComparison.OrdinalIgnoreCase)) continue;
+
             try { File.Delete(file); }
             catch { /* 正被占用就留着，下次换图再删 */ }
         }

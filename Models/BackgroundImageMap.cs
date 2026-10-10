@@ -25,6 +25,12 @@ public enum BackgroundImageStretch
 public static class BackgroundImageMap
 {
     /// <summary>
+    /// 底图最多解到这一屏用得上的像素的多少倍。稍微留一点余量，是为了「比屏幕略宽/略高」的图
+    /// 别在解码时就被裁掉边角上的锐度；再多就是白占内存了（超出的部分绘制时本来就被裁掉）。
+    /// </summary>
+    private const double PixelBudgetFactor = 1.25;
+
+    /// <summary>
     /// 整张图应该落在视口坐标里的哪个矩形。结果可以超出视口（铺满裁切时就是超出的），
     /// 由绘制方自己裁剪。
     /// </summary>
@@ -85,6 +91,48 @@ public static class BackgroundImageMap
             (viewportRect.Y - dest.Y) * ky,
             viewportRect.Width * kx,
             viewportRect.Height * ky);
+    }
+
+    /// <summary>
+    /// 这张底图该解成多大的像素。两条规矩：
+    ///
+    /// 1. **绝不放大**。解码器不管原图多大，给多宽就解多宽 —— 一张 1600×1600 的壁纸给它 2560
+    ///    就解出 2560×2560，多花一倍半内存，而且先在解码时插一遍值、绘制时又插一遍，比直接
+    ///    拿原图放大还糊。原图比要的地方小，就按原样解，放大交给绘制那一步。
+    /// 2. 极端长条（超宽全景 / 超长截图）按规矩 1 解出来还是可能几倍于这一屏用得上的像素，
+    ///    再按像素预算压一档。宁可稍微糊一点，也不要把 CI 的内存看门狗顶爆。
+    /// </summary>
+    /// <param name="nativeSize">原图像素尺寸（见 <see cref="ImageHeader"/>）。</param>
+    /// <param name="boxSize">这一层落屏要多少物理像素。</param>
+    /// <param name="stretch">见 <see cref="BackgroundImageStretch"/>。</param>
+    public static PixelSize DecodeSize(PixelSize nativeSize, PixelSize boxSize, int stretch)
+    {
+        if (nativeSize.Width <= 0 || nativeSize.Height <= 0) return boxSize;
+        if (boxSize.Width <= 0 || boxSize.Height <= 0) return nativeSize;
+
+        var sx = boxSize.Width / (double)nativeSize.Width;
+        var sy = boxSize.Height / (double)nativeSize.Height;
+
+        var needed = (BackgroundImageStretch)stretch switch
+        {
+            BackgroundImageStretch.Fit => Math.Min(sx, sy),       // 整张都看得见：按小的那维缩
+            BackgroundImageStretch.Stretch => sx,                 // 拉伸档按宽度走，纵向本来就变形
+            _ => Math.Max(sx, sy),                                // 铺满裁切：按大的那维缩，另一维溢出
+        };
+
+        var t = Math.Min(1.0, needed);                            // 只缩不放
+        var w = Math.Max(1, (int)Math.Round(nativeSize.Width * t));
+        var h = Math.Max(1, (int)Math.Round(nativeSize.Height * t));
+
+        var budget = (long)(boxSize.Width * boxSize.Height * PixelBudgetFactor);
+        if ((long)w * h > budget)
+        {
+            var k = Math.Sqrt((double)budget / ((long)w * h));
+            w = Math.Max(1, (int)Math.Round(w * k));
+            h = Math.Max(1, (int)Math.Round(h * k));
+        }
+
+        return new PixelSize(w, h);
     }
 
     /// <summary>

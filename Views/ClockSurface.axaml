@@ -252,11 +252,11 @@
 
                 <StackPanel x:Name="ButtonBar" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
                             HorizontalAlignment="Right">
-                    <Button
+                    <Button x:Name="MinimizeButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
                             CornerRadius="6" Padding="12,6"
-                            Cursor="Hand" Opacity="0.5"
+                            Cursor="Hand"
                             Click="MinimizeButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Classes="icon" Text="{ci:LI Minus}" FontSize="15"
@@ -265,16 +265,15 @@
                         </StackPanel>
                         <Button.Styles>
                             <Style Selector="Button:pointerover">
-                                <Setter Property="Opacity" Value="1"/>
                                 <Setter Property="Background" Value="{Binding Chrome.ButtonHover}"/>
                             </Style>
                         </Button.Styles>
                     </Button>
-                    <Button
+                    <Button x:Name="ExitButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
                             CornerRadius="6" Padding="12,6"
-                            Cursor="Hand" Opacity="0.5"
+                            Cursor="Hand"
                             Click="ExitButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Classes="icon" Text="{ci:LI X}" FontSize="15"
@@ -283,7 +282,6 @@
                         </StackPanel>
                         <Button.Styles>
                             <Style Selector="Button:pointerover">
-                                <Setter Property="Opacity" Value="1"/>
                                 <Setter Property="Background" Value="{Binding Chrome.ButtonHover}"/>
                             </Style>
                         </Button.Styles>

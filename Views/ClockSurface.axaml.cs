@@ -68,18 +68,68 @@ public partial class ClockSurface : UserControl
         EarthquakeAlertBlock.SizeChanged += (_, _) => ApplyBodyPositions();
         Loaded += (_, _) => ApplyBodyPositions();
 
-        // 设置页拖动「时钟位置 / 音量条位置」滑块改的是同一个 PluginSettings 实例 → 立刻重排，
-        // 不用等重开窗口
-        if (Plugin.Settings is { } settings)
+    }
+
+    // ===== 生命周期：挂上/摘掉那几根「全局事件」的线 =====
+
+    // Plugin.Settings 与 ViewModel 都是长命的单例，挂上去的处理器会让它们反过来攥住这一整棵
+    // 视觉树。设置页每打开一次就新建一个 ClockSurface（预览那份），不摘线的话每开一次就漏一整份
+    // 控件树 + 背景层的位图，而且之后每次改设置都要多跑一遍 —— 内存一路涨、界面一路钝。
+    // 所以挂线只在真正进了视觉树时做，离开时全部摘掉（大屏窗口只是最小化、不脱离树，不受影响）。
+
+    private bool _settingsHooked;
+    private FullScreenClockViewModel? _hookedVm;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        HookSignals();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        UnhookSignals();
+    }
+
+    private void HookSignals()
+    {
+        if (!_settingsHooked && Plugin.Settings is { } settings)
         {
-            settings.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent)
-                    or nameof(PluginSettings.VolumePositionPercent)
-                    or nameof(PluginSettings.ShowDecibelMeter))
-                    ApplyBodyPositions();
-            };
+            settings.PropertyChanged += OnPluginSettingsChanged;
+            _settingsHooked = true;
         }
+
+        if (_hookedVm is null && DataContext is FullScreenClockViewModel vm)
+        {
+            vm.PropertyChanged += OnClockViewModelPropertyChanged;
+            _hookedVm = vm;
+        }
+    }
+
+    private void UnhookSignals()
+    {
+        if (_settingsHooked && Plugin.Settings is { } settings)
+            settings.PropertyChanged -= OnPluginSettingsChanged;
+        _settingsHooked = false;
+
+        if (_hookedVm is { } vm)
+            vm.PropertyChanged -= OnClockViewModelPropertyChanged;
+        _hookedVm = null;
+    }
+
+    private void OnPluginSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // 设置页拖滑块改的是同一个 PluginSettings 实例 → 立刻重排，不用等重开窗口
+        if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent)
+            or nameof(PluginSettings.VolumePositionPercent)
+            or nameof(PluginSettings.ShowDecibelMeter))
+        {
+            ApplyBodyPositions();
+            return;
+        }
+
+        OnBackdropSettingsChanged(sender, e);
     }
 
     // ===== 背景图 + 组件玻璃底 =====
@@ -131,15 +181,15 @@ public partial class ClockSurface : UserControl
                 target.PropertyChanged += OnGlassTargetPropertyChanged;
             }
 
-            vm.PropertyChanged += OnClockViewModelPropertyChanged;
-
-            // 设置页里改背景/玻璃相关项 → 立刻生效，不用重开窗口
-            if (Plugin.Settings is { } settings)
-                settings.PropertyChanged += OnBackdropSettingsChanged;
+            // 设置页里改背景/玻璃相关项 → 立刻生效，不用重开窗口。
+            // 挂线统一走 HookSignals（进视觉树时挂、离开时摘），在那儿挂的是一根
+            // OnPluginSettingsChanged，位置/音量条与背景/玻璃两类通知都从它转发过来。
+            HookSignals();
 
             Loaded += (_, _) => Backdrop.InvalidateGlass();
         }
 
+        ApplyButtonHalo();
         ApplyBackdrop();
     }
 
@@ -154,7 +204,36 @@ public partial class ClockSurface : UserControl
         // 换主题 / 自动配色下换背景色 → 玻璃的底色、描边、留白色整批跟着变
         if (e.PropertyName is nameof(FullScreenClockViewModel.Chrome)
             or nameof(FullScreenClockViewModel.BackgroundColor))
+        {
+            ApplyButtonHalo();
             ApplyBackdrop();
+        }
+    }
+
+    /// <summary>
+    /// 给「最小化 / 退出」两个按钮的字描一圈同色系的柔光。
+    ///
+    /// 这两个键以前靠一块很实的黑/白底片保证可读，底片一淡就糊、够实又成了一堆亮色里杵一块砖。
+    /// 可读性改由这圈柔光扛：深色主题白字配黑晕、明亮主题黑字配白晕，
+    /// 底片于是可以只留一点同色系的淡彩，看着是「同一家族里挑出来的一个」，而不是贴上去的黑块。
+    /// </summary>
+    private void ApplyButtonHalo()
+    {
+        if (DataContext is not FullScreenClockViewModel vm) return;
+
+        // 两个控件不能共用一个 Effect 实例，各建一份
+        foreach (var button in new[] { MinimizeButton, ExitButton })
+        {
+            if (button.Content is not Control content) continue;
+            content.Effect = new DropShadowEffect
+            {
+                Color = vm.Chrome.IsLight ? Colors.White : Colors.Black,
+                OffsetX = 0,
+                OffsetY = 0,
+                BlurRadius = 4,
+                Opacity = 0.9,
+            };
+        }
     }
 
     private void OnBackdropSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -167,7 +246,8 @@ public partial class ClockSurface : UserControl
             or nameof(PluginSettings.GlassOpacity)
             or nameof(PluginSettings.GlassBlurRadius)
             or nameof(PluginSettings.GlassRefraction)
-            or nameof(PluginSettings.GlassFrost))
+            or nameof(PluginSettings.GlassFrost)
+            or nameof(PluginSettings.AdjustingLayout))
             ApplyBackdrop();
     }
 
@@ -185,7 +265,7 @@ public partial class ClockSurface : UserControl
                        settings.BackgroundImageStretch, settings.BackgroundDim,
                        on ? settings.GlassMode : (int)GlassMode.Off,
                        settings.GlassOpacity, settings.GlassBlurRadius, settings.GlassRefraction,
-                       settings.GlassFrost);
+                       settings.GlassFrost, settings.AdjustingLayout);
     }
 
     private static Color ParseColorOrDefault(string? hex, Color fallback)

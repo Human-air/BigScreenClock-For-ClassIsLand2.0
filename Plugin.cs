@@ -41,6 +41,10 @@ public class Plugin : PluginBase
         var settingsPath = Path.Combine(ConfigFolder, "Settings.json");
         Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(settingsPath);
 
+        // 「正在拖位置/字号」纯界面状态，绝不该跨会话留着：万一哪次拖到一半崩了把它存了下来，
+        // 下次启动玻璃就一直是收起的。这里强制归零。
+        Settings.AdjustingLayout = false;
+
         // 已经有配置文件 = 老版本升级上来：把原有那套颜色原样留在黑暗主题下，
         // 别让「跟随 ClassIsland」在首次启动时就把外观换成另一套（新装用户没有这个问题，默认跟随）
         if (File.Exists(settingsPath))

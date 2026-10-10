@@ -71,16 +71,24 @@ public sealed class BackdropLayer : Control
     private uint[]? _blurPixels;     // 模糊底图的像素快照，磨砂那一档用
 
     // 「真•◯◯玻璃」那张整层的高光折射图。只在背景/组件位置/主题这些**离散**时刻重算。
+    //
+    // 下面这块画布与这张位图都是**复用**的，不每次重烘都新建：它们各有整屏那么大（1920×1080 就是 8 MB），
+    // 而重烘其实每秒都在发生（时钟秒数一跳，它的玻璃矩形就变一次），每烘一次扔掉十几 MB 的话，
+    // 几分钟就能把进程的常驻内存顶到 CI 内存看门狗的上限（1.40 GiB）——那条「闪退」就是这么来的。
+    private uint[]? _sheetCanvas;
     private WriteableBitmap? _sheet;
     private bool _sheetDirty = true;
     private bool _sheetBusy;
+    // 手上那张折射图被扔掉了（拖动一开始就扔）、新的还没烘好。这段时间这一档整块不画。
+    // 见 Apply 里拖动开始那一段。
+    private bool _sheetDropped;
     private DispatcherTimer? _sheetTimer;
     private string _builtPath = "";  // 手上这张底图是按哪个输入烘出来的：换了输入才重烘
     private double _builtRadius = -1;
-    private int _builtPixelWidth = -1;   // 烘的时候按多宽解的（屏幕缩放变了要重来）
     private bool? _builtWantBlur;        // 上次烘的时候要不要模糊底图（换了要重来）
     private bool _needsRebuild;
     private bool _busy;
+    private bool _releasePending;   // 离开视觉树时后台正好在烘图 → 等它收工再放位图
     private GlassRect[] _rects = Array.Empty<GlassRect>();
 
     private EventHandler? _layoutUpdatedHandler;
@@ -107,6 +115,16 @@ public sealed class BackdropLayer : Control
     /// <summary>整层圆角（设置页预览那块圆角卡片用；大屏是全屏，保持 0）。</summary>
     public CornerRadius CornerRadius { get; set; }
 
+    /// <summary>
+    /// 设置页正在拖「位置 / 字号」，玻璃整层收起不画。
+    ///
+    /// 拖动时每一帧都要跟着重排，而玻璃这一层每帧的代价是很实的：十二块圆角投影、一层整屏折射图、
+    /// 一层整屏清晰图，三样叠起来 Skia 每帧都要出好几个整屏中间面。帧一多，这些面排着队释放不掉，
+    /// 内存就顶着看门狗上限走（现象：一调位置大小就闪退）；而且拖动中间态的一堆整屏重烘画出来
+    /// 也是一片拖影。索性拖动期间不画，松手（停 300 毫秒）再一次性画出来。
+    /// </summary>
+    private bool _adjusting;
+
     /// <summary>换主题：玻璃的底色与描边跟着亮/暗翻转（底色是画的时候现取的，不用重烘位图）。</summary>
     public void SetPalette(ClockBrushes chrome, Color themeBackground)
     {
@@ -118,10 +136,41 @@ public sealed class BackdropLayer : Control
     }
 
     /// <summary>套用设置。只有「换图」和「磨砂半径」动到那张烘好的位图，其余都是画的时候现算的。</summary>
+    /// <param name="adjusting">
+    /// 设置页正在拖「位置 / 字号」这类连着改布局的滑块。为真时玻璃整层收起、重烘也停掉，
+    /// 见 <see cref="PluginSettings.AdjustingLayout"/>。
+    /// </param>
     public void Apply(string? imagePath, int stretch, double dim, int glassMode, double glassOpacity,
-                      double blurRadius, double refraction, double frost)
+                      double blurRadius, double refraction, double frost, bool adjusting = false)
     {
         imagePath ??= "";
+
+        if (_adjusting != adjusting)
+        {
+            _adjusting = adjusting;
+
+            // 拖动期间插值降到双线性：设置页那块预览是个 Viewbox，里面装着整屏那么大的一面，
+            // 高质量缩放会让 Skia 每帧给整屏位图重算一次 mipmap（几十兆级的临时面，一秒钟几十个）。
+            // 拖动中降档既省下这一大笔，画面又几乎看不出差别；松手立刻换回高质量。
+            RenderOptions.SetBitmapInterpolationMode(this, _adjusting
+                ? BitmapInterpolationMode.LowQuality
+                : BitmapInterpolationMode.HighQuality);
+
+            // 一开始拖就把手上这张折射图扔掉。它是上一版位置烘出来的，留着的话松手那一刻
+            // 玻璃会先按旧位置原样画一下、等新图烘好再跳过去（「刚渲染出新玻璃的一瞬间老的还在」）。
+            // 扔掉之后 _sheet 为 null，渲染那边直到新图出来之前整块不画 —— 拖的过程中本来就是
+            // 整层收起的，接得上。顺带把这一整屏的位图（8 MB）在拖的时候腾出去。
+            if (_adjusting && _sheet is not null)
+            {
+                _sheet.Dispose();
+                _sheet = null;
+                _sheetDropped = true;
+            }
+
+            // 收起来这一下：停掉在途的重烘，把已经排上的重烘请求作废；
+            // 放出来这一下：按当前设置把整屏折射重烘一遍（拖动期间的每一次布局变化都不再烘了）
+            MarkSheetDirty();
+        }
 
         // 模糊底图三个用途：磨砂玻璃里透出的那片、「完整显示」两侧的虚化填充，
         // 以及高光折射里那层可调的磨砂（背后那张花壁纸原样透过去，压在上面的字就淹了）。
@@ -160,13 +209,16 @@ public sealed class BackdropLayer : Control
     /// <summary>组件被拖动/内容变化后，玻璃要跟着走。窗口那边在布局变化的钩子里调。</summary>
     public void InvalidateGlass()
     {
-        _sheetDirty = true;
+        // 走防抖那条路：这里以前是直接标脏，于是「标脏 → 下一帧 Render 里立刻重烘」，
+        // 拖滑块时等于每帧烘一张整屏图。攒 120ms 再算，中间态都白算。
+        MarkSheetDirty();
         InvalidateVisual();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _releasePending = false;   // 又回到树上了：刚才那次「离开时放掉」取消
         _layoutUpdatedHandler ??= (_, _) => OnLayoutUpdated();
         LayoutUpdated += _layoutUpdatedHandler;
         RequestRebuild();
@@ -176,40 +228,131 @@ public sealed class BackdropLayer : Control
     {
         base.OnDetachedFromVisualTree(e);
         if (_layoutUpdatedHandler is { } handler) LayoutUpdated -= handler;
+        ReleaseBitmaps();
+    }
+
+    /// <summary>
+    /// 离开视觉树时把底图与折射图全放掉、把重烘的定时器停掉。
+    ///
+    /// 不放的话：DispatcherTimer 会一直攥着这个背景层（连带它那几张整屏位图与像素快照，几十 MB），
+    /// 设置页每开一次预览就漏一份 —— CI 的内存看门狗就是这么被顶爆的。
+    /// 回到树上时 <see cref="OnAttachedToVisualTree"/> 会重新 RequestRebuild，按当时的设置重烘一遍。
+    /// </summary>
+    private void ReleaseBitmaps()
+    {
+        _sheetTimer?.Stop();
+
+        // 后台正烘着图（它正读着这些像素/位图）就先让开，等它回来再放
+        if (_busy || _sheetBusy)
+        {
+            _releasePending = true;
+            return;
+        }
+
+        _releasePending = false;
+        _sharp?.Dispose();
+        _sharp = null;
+        _blur?.Dispose();
+        _blur = null;
+        _sheet?.Dispose();
+        _sheet = null;
+        _sharpPixels = null;
+        _blurPixels = null;
+        _sheetCanvas = null;
+
+        _builtPixel = default;
+        _sheetPixel = default;
+        _reqPixel = default;
+        _builtPath = "";
+        _builtRadius = -1;
+        _builtWantBlur = null;
+
+        _needsRebuild = true;
+        _sheetDirty = true;
+        _sheetDropped = false;
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         var result = base.ArrangeOverride(finalSize);
-        // 尺寸变了：清晰图要按新宽度重解，模糊底图要重烘。
+        if (finalSize.Width < 2 || finalSize.Height < 2) return result;
+
         // 这里显式传 finalSize 而不是走 Bounds —— 排布过程中 Bounds 还是上一轮的旧值，
         // 拿旧尺寸烘出来的底图会让玻璃里的画面整体错位。
-        // 顺带比一下物理像素宽：窗口被拖到另一块缩放倍率不同的显示器上时，逻辑尺寸可能没变，
-        // 但要解码的像素宽变了（不解就是糊的）。
-        if (_sharpSize != finalSize || _builtPixelWidth != PixelWidthFor(finalSize))
-        {
-            _needsRebuild = true;
-            TryStartRebuild(finalSize);
-        }
-        if (_sheetSize != finalSize)
-        {
-            _sheetSize = finalSize;
-            MarkSheetDirty();
-        }
+        SyncPixelBudget(finalSize);
+        TryStartRebuild(finalSize);
+
         return result;
     }
 
-    private Size _sharpSize;
-    private Size _sheetSize;
+    /// <summary>
+    /// 现在这个尺寸该按多少物理像素烘东西；发现手上那批不是这个尺寸，就安排重烘。
+    ///
+    /// 比的是**物理像素**而不是逻辑尺寸（窗口被拖到另一块缩放倍率不同的显示器上时，
+    /// 逻辑尺寸可能没变但该解的像素变了；反过来设置页那块预览逻辑尺寸抖一个像素也不改画质）。
+    /// 「正在烘的那一批」也算数：不算它的话，同一批会被反复作废重来，每来一遍就是上百兆垃圾。
+    /// </summary>
+    private void SyncPixelBudget(Size size)
+    {
+        if (size.Width < 2 || size.Height < 2) return;
 
-    /// <summary>这个逻辑尺寸对应要解码多少物理像素。</summary>
-    private int PixelWidthFor(Size size) => Math.Max(64, (int)Math.Round(size.Width * RenderScale));
+        var want = WantedPixelSize(size);
+        if ((_busy ? _reqPixel : _builtPixel) != want) _needsRebuild = true;
+
+        if (_sheetPixel != want)
+        {
+            _sheetPixel = want;
+            MarkSheetDirty();
+        }
+    }
+
+    // 底下这几张图各自多大，一律按**物理像素**记（逻辑尺寸在设置页预览那种缩放的场合会骗人）
+    private PixelSize _builtPixel;   // 手上这张底图是按多少物理像素解的
+    private PixelSize _sheetPixel;   // 折射图是按多少物理像素烘的
+    private PixelSize _reqPixel;     // 正在烘的那一批要多少物理像素
+
+    /// <summary>这个逻辑尺寸该烘成多少物理像素。</summary>
+    private PixelSize WantedPixelSize(Size size)
+    {
+        var scale = DeviceScale(size);
+        return new PixelSize(Math.Max(64, (int)Math.Round(size.Width * scale)),
+                             Math.Max(36, (int)Math.Round(size.Height * scale)));
+    }
+
+    /// <summary>
+    /// 一个逻辑像素最后落在几个物理像素上 = 屏幕缩放 × 这一层在屏幕上被缩放的倍率。
+    ///
+    /// 大屏是满屏映到屏幕上，后一项是 1；设置页那块预览是 Viewbox 缩着放的，里面却装着
+    /// 整屏那么大的一面 —— 不把这一层算进来，就是为一张几百像素宽的缩略图去解一张 2560 宽的底图、
+    /// 再烘一张 2560 宽的折射图：白占两百来兆常驻，每换一次图还要造上百兆垃圾（CI 的内存看门狗就是这么被顶爆的）。
+    /// </summary>
+    private double DeviceScale(Size size)
+    {
+        var scale = RenderScale;
+
+        if (size.Width < 2) return scale;
+
+        try
+        {
+            if (TopLevel.GetTopLevel(this) is { } top && this.TransformToVisual(top) is { } m)
+            {
+                var visual = Math.Abs(m.M11);   // 这一路没有旋转，取横向缩放就够
+                if (visual is >= 0.05 and <= 4) scale *= visual;
+            }
+        }
+        catch
+        {
+            // 拿不到变换就只按屏幕缩放算
+        }
+
+        return scale;
+    }
 
     /// <summary>每次布局跑完后比一比：玻璃所在的矩形动了就重画（Avalonia 是保留式渲染，别人动了不会叫醒这一层）。</summary>
     private void OnLayoutUpdated()
     {
         if (_needsRebuild) TryStartRebuild(Bounds.Size);
-        if (_glassMode == (int)GlassMode.Off) return;
+        if (_glassMode == (int)GlassMode.Off || _adjusting) return;
 
         var rects = ComputeGlassRects(Bounds.Size);
         if (!SameRects(rects, _rects))
@@ -226,6 +369,11 @@ public sealed class BackdropLayer : Control
     {
         var size = Bounds.Size;
         if (size.Width < 2 || size.Height < 2) return;
+
+        // 画之前再核一次倍率：排布那一刻层可能刚挂上视觉树，外面那层缩放（设置页预览的 Viewbox）
+        // 还没落定，照着排布时的倍率就会烘出一张整屏大的图白占内存。这里核出来不对就当场重来一遍，
+        // 大屏上这一步永远是对上的，不会多做工。
+        SyncPixelBudget(size);
 
         if (_needsRebuild) TryStartRebuild(size);
         if (_sheetDirty) TryStartSheet();
@@ -268,11 +416,16 @@ public sealed class BackdropLayer : Control
         if (veil is not null)
             context.FillRectangle(veil, new Rect(size));
 
-        if (_glassMode == (int)GlassMode.Off) return;
+        // 拖动位置/字号期间：玻璃整层让开，只留背景图（重活全在这一块里，拖起来也看不清）
+        if (_glassMode == (int)GlassMode.Off || _adjusting) return;
 
         var frosted = _glassMode == (int)GlassMode.Frosted;
         var liquid = _glassMode == (int)GlassMode.Liquid;
         var rects = _rects.Length > 0 ? _rects : ComputeGlassRects(size);
+
+        // 折射图被扔了、新的还没烘好（刚放手那 100 多毫秒）：这一档整块不画。
+        // 只画描边不画内容的话，屏幕上是几个空心框，比什么都不画更奇怪。
+        if (liquid && _sheetDropped) return;
 
         // 「真•高光折射」：整层折射图一次性画上去（每块玻璃的像素已经算好在那儿了）。
         // 底下那张清晰图不用先擦掉——折射图在玻璃范围内是不透明的，正好把它盖住。
@@ -466,6 +619,11 @@ public sealed class BackdropLayer : Control
     private void TryStartSheet()
     {
         if (_sheetBusy || !_sheetDirty) return;
+        // 防抖计时器还在跑就等它：否则每次布局/渲染都从这里直接烘一遍，
+        // 上面那个 120ms 防抖等于白搭（拖滑块时每帧一张整屏图）
+        if (_sheetTimer is { IsEnabled: true }) return;
+        // 拖动期间一次都不烘：这一张图要算整屏，拖动时每一下布局变化都重算一遍是白烧
+        if (_adjusting) return;
         if (_glassMode != (int)GlassMode.Liquid) return;
 
         var size = Bounds.Size;
@@ -474,17 +632,23 @@ public sealed class BackdropLayer : Control
         var rects = _rects.Length > 0 ? _rects : ComputeGlassRects(size);
         if (rects.Length == 0) return;
 
-        var scale = RenderScale;
+        // 用实际落屏的倍率，不是屏幕缩放：设置页那块预览缩着放，折射图按它实际画到的大小烘就行
+        // （按整屏烘一张 2560×1600 的，屏幕上一共才几百像素宽，白烧 15MB + 每秒一次的整屏重算）
+        var scale = DeviceScale(size);
         var layerW = Math.Max(2, (int)Math.Round(size.Width * scale));
         var layerH = Math.Max(2, (int)Math.Round(size.Height * scale));
-        if ((long)layerW * layerH > 40_000_000) return;   // 大到离谱（多屏拼出的巨桌面）就不做了
+        if ((long)layerW * layerH > 40_000_000)
+        {
+            // 大到离谱（多屏拼出的巨桌面）就不做折射了：别把它算成「一直在等新图」而整块不画
+            _sheetDropped = false;
+            return;
+        }
 
         // 快照：算的这段时间里设置可能又变，变了就让结果作废重来（_sheetDirty 会再置上）
         var sharpPixels = _sharpPixels;
         var sharpPixelsSize = _sharpPixelsSize;
         var blurPixels = _blurPixels;
         var blurImageSize = _blur?.PixelSize ?? default;
-        var blur = _blur;
         var stretch = _stretch;
         var style = BuildStyle(scale);
         var veilA = Math.Abs(_dim) < 0.5 ? 0.0 : Math.Min(1.0, Math.Abs(_dim) / 100.0);
@@ -492,16 +656,24 @@ public sealed class BackdropLayer : Control
         var themeBg = _themeBg;
         var radiusOf = rects;
 
+        // 画布只增不减：尺寸没变就一直用同一块，重烘不再产生大对象
+        if (_sheetCanvas is null || _sheetCanvas.Length != layerW * layerH)
+            _sheetCanvas = new uint[layerW * layerH];
+        var canvas = _sheetCanvas;
+
         _sheetDirty = false;
         _sheetBusy = true;
 
         Task.Run(() =>
         {
-            WriteableBitmap? sheet = null;
+            var ok = false;
             try
             {
+                // 画布是复用的，烘之前必须先擦干净：不擦的话上一次那几块玻璃的像素会留在原地，
+                // 组件一挪位就成了「好几块玻璃叠在一起」的拖影。
+                Array.Clear(canvas, 0, canvas.Length);
+
                 var device = new Size(layerW, layerH);
-                var layer = new uint[layerW * layerH];
 
                 // 玻璃背后那块画面：清晰图（「完整显示」档铺不满时，留白处退回模糊放大填充）＋整层明暗遮罩。
                 // 折射采样必须走跟外面那张清晰图**同一套** ComputeDestRect，里外才能严丝合缝。
@@ -517,11 +689,12 @@ public sealed class BackdropLayer : Control
                     BlurDest = blurPixels is null
                         ? default
                         : BackgroundImageMap.ComputeDestRect(blurImageSize, device, stretch),
-                    Fill = blur is null ? null : ReadPixels(blur),
-                    FillSize = blur?.PixelSize ?? default,
-                    FillDest = blur is null
+                    // 留白处的填充与模糊那一路是同一张快照，别再拷一份（拷一次就是 8 MB 垃圾）
+                    Fill = blurPixels,
+                    FillSize = blurPixels is null ? default : blurImageSize,
+                    FillDest = blurPixels is null
                         ? default
-                        : BackgroundImageMap.ComputeDestRect(blur.PixelSize, device, (int)BackgroundImageStretch.FillCrop),
+                        : BackgroundImageMap.ComputeDestRect(blurImageSize, device, (int)BackgroundImageStretch.FillCrop),
                     ThemeBackground = themeBg,
                     VeilAlpha = veilA,
                     VeilColor = veilColor,
@@ -532,34 +705,41 @@ public sealed class BackdropLayer : Control
                 foreach (var g in radiusOf)
                 {
                     LiquidGlassBaker.RenderPanel(
-                        layer, layerW, layerH,
+                        canvas, layerW, layerH,
                         g.Rect.X * scale, g.Rect.Y * scale,
                         g.Rect.Width * scale, g.Rect.Height * scale,
                         g.Radius * scale, style, backdrop);
                 }
 
-                sheet = new WriteableBitmap(new PixelSize(layerW, layerH), new Vector(96, 96),
-                                            PixelFormat.Bgra8888, AlphaFormat.Premul);
-                using (var frame = sheet.Lock())
-                    CopyInto(frame, layer, layerW, layerH);
+                ok = true;
             }
             catch
             {
-                sheet?.Dispose();
-                sheet = null;
+                // 算崩了就保持原来那张，别把大屏拖垮
             }
 
             Dispatcher.UIThread.Post(() =>
             {
                 _sheetBusy = false;
-                if (_sheetDirty)
+                if (_releasePending) { ReleaseBitmaps(); return; }
+                if (ok && !_sheetDirty)
                 {
-                    sheet?.Dispose();       // 期间又变了，这批作废，按最新的重来
+                    // 位图也在 UI 线程上复用：渲染器本来就在这个线程读它，锁与画不会打架
+                    if (_sheet is not { } sheet || sheet.PixelSize.Width != layerW || sheet.PixelSize.Height != layerH)
+                    {
+                        _sheet?.Dispose();
+                        _sheet = sheet = new WriteableBitmap(new PixelSize(layerW, layerH), new Vector(96, 96),
+                                                             PixelFormat.Bgra8888, AlphaFormat.Premul);
+                    }
+                    using (var frame = sheet.Lock())
+                        CopyInto(frame, canvas, layerW, layerH);
+                    _sheetDropped = false;
+                    InvalidateVisual();
                 }
-                else
+                else if (!ok)
                 {
-                    _sheet?.Dispose();
-                    _sheet = sheet;
+                    // 算崩了：退回「只画描边」的老样子，别让玻璃整块消失
+                    _sheetDropped = false;
                     InvalidateVisual();
                 }
                 TryStartSheet();
@@ -708,6 +888,11 @@ public sealed class BackdropLayer : Control
         if (Bounds.Width > 1) TryStartRebuild(Bounds.Size);
     }
 
+    /// <summary>当前设置下要不要一张模糊底图（磨砂与折射两档要，「完整显示」的补边也要）。</summary>
+    private bool WantBlurNow()
+        => _glassMode is (int)GlassMode.Frosted or (int)GlassMode.Liquid
+           || _stretch == (int)BackgroundImageStretch.Fit;
+
     private void TryStartRebuild(Size size)
     {
         if (_busy || !_needsRebuild) return;
@@ -718,11 +903,12 @@ public sealed class BackdropLayer : Control
 
         var path = _imagePath;
         var radius = _blurRadius;
-        var wantBlur = _glassMode is (int)GlassMode.Frosted or (int)GlassMode.Liquid
-                       || _stretch == (int)BackgroundImageStretch.Fit;
+        var wantBlur = WantBlurNow();
+        var stretch = _stretch;
 
         // 倍率得在 UI 线程上问（TopLevel 不能在后台线程碰）；按物理像素宽解码
-        var pixelWidth = PixelWidthFor(size);
+        var pixels = WantedPixelSize(size);
+        _reqPixel = pixels;
 
         Task.Run(() =>
         {
@@ -735,14 +921,22 @@ public sealed class BackdropLayer : Control
             {
                 if (path.Length > 0 && File.Exists(path))
                 {
+                    // 解码尺寸要按**原图**多大来定：解码器给多宽就解多宽，小图会被放大着解，
+                    // 白白多占一倍半内存还多插一遍值。原图尺寸只读文件头，不解码。
+                    var native = ImageHeader.ReadSize(path) ?? pixels;
+                    var decode = BackgroundImageMap.DecodeSize(native, pixels, stretch);
+
                     using var stream = File.OpenRead(path);
-                    sharp = Bitmap.DecodeToWidth(stream, pixelWidth, BitmapInterpolationMode.HighQuality);
+                    sharp = Bitmap.DecodeToWidth(stream, decode.Width, BitmapInterpolationMode.HighQuality);
                     // 折射要在 CPU 上逐像素采样，顺手把像素倒成连续数组（位图每次读都得先 Lock，太贵）
                     sharpPixels = ReadPixels(sharp);
                     sharpPixelsSize = sharp.PixelSize;
                     if (wantBlur)
                     {
-                        blur = BakeBlur(sharp, radius);
+                        // 模糊半径说的是「屏幕上多少像素」，底图却是按自己的像素烘的。底图比这一层
+                        // 落屏的像素少（小图不放大着解、设置页那块是缩着的预览），不换算磨砂在屏幕上
+                        // 就会比设定值粗 —— 小图越小事越明显。
+                        blur = BakeBlur(sharp, radius * decode.Width / Math.Max(1, pixels.Width));
                         if (blur is not null) blurPixels = ReadPixels(blur);
                     }
                 }
@@ -761,14 +955,30 @@ public sealed class BackdropLayer : Control
             Dispatcher.UIThread.Post(() =>
             {
                 _busy = false;
-                if (_needsRebuild)
+                if (_releasePending)
                 {
-                    // 期间设置又变了：这批结果直接扔掉，按最新的再来一遍
+                    // 这期间离开了视觉树：结果扔掉，位图也一并放掉
+                    sharp?.Dispose();
+                    blur?.Dispose();
+                    ReleaseBitmaps();
+                    return;
+                }
+                // 期间设置又变了：但只有「烘图真正吃的那几项」变了才值得重来一遍。
+                // 换一次壁纸，设置页会连着写好几项设置（图片路径、填充方式、遮罩……），
+                // 其中只有一项能让这张图作废，后几次写的是同一张图 —— 不做这个判断，
+                // 同一张图会被烘两遍，白造上百兆垃圾（换图那一秒内存窜一截就是这么来的）。
+                var stale = _needsRebuild
+                            && (_imagePath != path || _blurRadius != radius || _stretch != stretch
+                                || WantBlurNow() != wantBlur || _reqPixel != pixels);
+
+                if (stale)
+                {
                     sharp?.Dispose();
                     blur?.Dispose();
                 }
                 else
                 {
+                    _needsRebuild = false;
                     _sharp?.Dispose();
                     _blur?.Dispose();
                     _sharp = sharp;
@@ -776,8 +986,7 @@ public sealed class BackdropLayer : Control
                     _sharpPixels = sharpPixels;
                     _sharpPixelsSize = sharpPixelsSize;
                     _blurPixels = blurPixels;
-                    _sharpSize = size;
-                    _builtPixelWidth = pixelWidth;
+                    _builtPixel = pixels;
                     _builtWantBlur = wantBlur;
                     _builtPath = path;
                     _builtRadius = radius;

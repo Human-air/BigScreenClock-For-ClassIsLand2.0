@@ -220,16 +220,14 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// <summary>「背景与玻璃」那一组是不是展开着。默认收起，拨开上面的开关会自动展开。</summary>
     public bool IsBackgroundSectionExpanded
     {
-        get => _backgroundSectionExpanded;
+        get => _settings.BackgroundSectionExpanded;
         set
         {
-            if (_backgroundSectionExpanded == value) return;
-            _backgroundSectionExpanded = value;
+            if (_settings.BackgroundSectionExpanded == value) return;
+            _settings.BackgroundSectionExpanded = value;
             OnPropertyChanged(nameof(IsBackgroundSectionExpanded));
         }
     }
-
-    private bool _backgroundSectionExpanded;
 
     /// <summary>
     /// 背景主题档位：0 = 自动（跟着背景图），1 = 暗底白字，2 = 亮底黑字。
@@ -330,7 +328,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return;
 
             BackgroundImageStore.Replace(source, _settings);
-            BackgroundImageHint = $"已复制到插件配置目录：{_settings.BackgroundImageFile}";
+            BackgroundImageHint = $"已复制到插件配置目录：{Path.GetFileName(source)}";
             NotifyBackgroundChanged();
         }
         catch (Exception ex)
@@ -481,35 +479,63 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public double ClockFontSize
     {
         get => _settings.ClockFontSize;
-        set { _settings.ClockFontSize = (int)value; OnPropertyChanged(nameof(ClockFontSize)); OnPropertyChanged(nameof(ClockFontSizeText)); }
+        set { BeginLayoutAdjust(); _settings.ClockFontSize = (int)value; OnPropertyChanged(nameof(ClockFontSize)); OnPropertyChanged(nameof(ClockFontSizeText)); }
     }
 
     /// <summary>底部居中的课程信息字号（改完进大屏时钟生效）。</summary>
     public double CourseInfoFontSize
     {
         get => _settings.CourseInfoFontSize;
-        set { _settings.CourseInfoFontSize = (int)value; OnPropertyChanged(nameof(CourseInfoFontSize)); OnPropertyChanged(nameof(CourseInfoFontSizeText)); }
+        set { BeginLayoutAdjust(); _settings.CourseInfoFontSize = (int)value; OnPropertyChanged(nameof(CourseInfoFontSize)); OnPropertyChanged(nameof(CourseInfoFontSizeText)); }
     }
 
     /// <summary>左下角计数字号（改完进大屏时钟生效）。</summary>
     public double CountFontSize
     {
         get => _settings.CountFontSize;
-        set { _settings.CountFontSize = (int)value; OnPropertyChanged(nameof(CountFontSize)); OnPropertyChanged(nameof(CountFontSizeText)); }
+        set { BeginLayoutAdjust(); _settings.CountFontSize = (int)value; OnPropertyChanged(nameof(CountFontSize)); OnPropertyChanged(nameof(CountFontSizeText)); }
     }
 
     /// <summary>时钟垂直位置：中心落在主体区高度的百分之几（大屏时钟开着时拖动即时生效）。</summary>
     public double ClockPositionPercent
     {
         get => _settings.ClockPositionPercent;
-        set { _settings.ClockPositionPercent = value; OnPropertyChanged(nameof(ClockPositionPercent)); OnPropertyChanged(nameof(ClockPositionPercentText)); }
+        set { BeginLayoutAdjust(); _settings.ClockPositionPercent = value; OnPropertyChanged(nameof(ClockPositionPercent)); OnPropertyChanged(nameof(ClockPositionPercentText)); }
     }
 
     /// <summary>音量条垂直位置：同上。</summary>
     public double VolumePositionPercent
     {
         get => _settings.VolumePositionPercent;
-        set { _settings.VolumePositionPercent = value; OnPropertyChanged(nameof(VolumePositionPercent)); OnPropertyChanged(nameof(VolumePositionPercentText)); }
+        set { BeginLayoutAdjust(); _settings.VolumePositionPercent = value; OnPropertyChanged(nameof(VolumePositionPercent)); OnPropertyChanged(nameof(VolumePositionPercentText)); }
+    }
+
+    // ===== 调位置/字号的「让玻璃歇一会儿」=====
+    //
+    // 这几个滑块一动，大屏和预览每一帧都要重排；而玻璃那一层每帧要画十二块圆角投影 + 整屏折射图 +
+    // 整屏清晰图，Skia 每帧出的好几个整屏中间面排着队释放不掉，内存顶着 CI 的看门狗上限走
+    // （现象就是「一调位置大小就闪退」），画面本身也只是一片拖影。
+    // 所以拖动期间让玻璃整层收起，松手 300 毫秒后按最终位置一次性画出来。
+
+    private DispatcherTimer? _layoutAdjustTimer;
+
+    private void BeginLayoutAdjust()
+    {
+        _settings.AdjustingLayout = true;
+        _layoutAdjustTimer ??= CreateLayoutAdjustTimer();
+        _layoutAdjustTimer.Stop();
+        _layoutAdjustTimer.Start();
+    }
+
+    private DispatcherTimer CreateLayoutAdjustTimer()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _settings.AdjustingLayout = false;
+        };
+        return timer;
     }
 
     // 两个位置滑块能拖到哪儿，由大屏那边按当前限位（地震提醒下沿、两块互顶、屏幕边缘）算出来。
@@ -1050,6 +1076,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set
         {
             if (Math.Abs(_settings.CameraAlertFontSize - value) < 0.01) return;
+            BeginLayoutAdjust();
             _settings.CameraAlertFontSize = value;
             OnPropertyChanged(nameof(CameraAlertFontSize));
             OnPropertyChanged(nameof(CameraAlertFontSizeText));

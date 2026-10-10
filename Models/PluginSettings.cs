@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using ClassIsland.Core.Helpers;
 
 namespace EveningSelfStudyClock.Models;
@@ -40,6 +41,7 @@ public class PluginSettings : INotifyPropertyChanged
     private int _themeMode;
     private int _appliedPaletteVariant = ClockTheme.VariantUnknown;
     private bool _backgroundEnabled;
+    private bool _backgroundSectionExpanded;
     private int _backgroundThemeMode;
     private string _backgroundImageFile = "";
     private int _backgroundImageStretch;
@@ -170,6 +172,41 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _backgroundEnabled;
         set { _backgroundEnabled = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 设置页「背景设置」那一组展开着没有。
+    /// 纯粹是界面状态，但不存下来的话，每次重开 CI、或者跳到别的设置页再回来，
+    /// 它都会自己折回去，调个参数还得重新点开一次。
+    /// </summary>
+    public bool BackgroundSectionExpanded
+    {
+        get => _backgroundSectionExpanded;
+        set { _backgroundSectionExpanded = value; OnPropertyChanged(); }
+    }
+
+    private bool _adjustingLayout;
+
+    /// <summary>
+    /// 设置页正在拖「位置 / 字号」这类连着改布局的滑块（松手 300 毫秒后自动归假）。
+    ///
+    /// 拖动期间大屏与预览的玻璃整层收起。原因见 <see cref="Views.BackdropLayer"/>：玻璃那层每帧
+    /// 要画十二块圆角投影 + 整屏折射图 + 整屏清晰图，Skia 每帧出的好几个整屏中间面排着队释放不掉，
+    /// 内存顶着 CI 的看门狗上限走（现象是「一调位置大小就闪退」），画面本身也只是一片拖影。
+    ///
+    /// 纯界面状态，不存盘；<see cref="Plugin.Initialize"/> 里另外兜底归零一次，
+    /// 免得万一被序列化下来，下次启动玻璃就一直是收起的。
+    /// </summary>
+    [JsonIgnore]
+    public bool AdjustingLayout
+    {
+        get => _adjustingLayout;
+        set
+        {
+            if (_adjustingLayout == value) return;
+            _adjustingLayout = value;
+            OnPropertyChanged();
+        }
     }
 
     /// <summary>

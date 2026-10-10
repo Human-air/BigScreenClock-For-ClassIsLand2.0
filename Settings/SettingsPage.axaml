@@ -394,7 +394,8 @@
                     </Grid>
                     <!-- 开关关着时整组同时压暗：光靠 IsEnabled 只能让下拉、按钮变灰，
                          几行说明文字因为各自写了 Foreground，不会跟着变，看着像还能调 -->
-                    <Expander HorizontalAlignment="Stretch" IsExpanded="{Binding IsBackgroundSectionExpanded}"
+                    <Expander HorizontalAlignment="Stretch"
+                              IsExpanded="{Binding IsBackgroundSectionExpanded, Mode=TwoWay}"
                               IsEnabled="{Binding BackgroundEnabled}"
                               Opacity="{Binding BackgroundSectionOpacity}">
                         <Expander.Header>

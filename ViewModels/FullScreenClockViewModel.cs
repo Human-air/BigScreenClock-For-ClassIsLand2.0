@@ -165,7 +165,21 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     private void OnSettingsPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName is nameof(PluginSettings.SkipFirst3Min)
+        if (args.PropertyName is nameof(PluginSettings.ClockFontSize)
+            or nameof(PluginSettings.CourseInfoFontSize)
+            or nameof(PluginSettings.CountFontSize))
+        {
+            // 字号：设置页那边每拖一格就写一次设置，这里立刻搬到界面上。
+            //
+            // 以前字号只靠设置页那根 200 毫秒防抖的「重读一遍」同步，而防抖是「一停手才计时」：
+            // 拖的过程中一直不动，手指打个顿才跳一下 —— 看着就是一卡一卡的。
+            // 位置滑块是即时读设置的（ClockSurface 里直接吃 ClockPositionPercent），
+            // 所以同样在拖，位置丝滑、字号发顿。这里补上这一条即时通道，两边就一样了。
+            ClockFontSize = _settings.ClockFontSize;
+            CourseInfoFontSize = _settings.CourseInfoFontSize;
+            CountFontSize = _settings.CountFontSize;
+        }
+        else if (args.PropertyName is nameof(PluginSettings.SkipFirst3Min)
             or nameof(PluginSettings.SkipFirstMinutes)
             or nameof(PluginSettings.NoisySustainSeconds)
             or nameof(PluginSettings.FallWindowSeconds))

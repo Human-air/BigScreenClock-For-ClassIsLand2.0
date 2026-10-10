@@ -122,11 +122,11 @@ public static class ClockTheme
         TextFaint = "#40FFFFFF",
         Countdown = "#FFFFDD",
         Divider = "#66FFFFFF",
-        // 按钮文字与图标：按钮自身还带 0.5 不透明度，那是唯一的淡化手段
-        // （以前这里再叠一层 #40，黑底上叠完只有 20% 白，字基本看不见）
+        // 按钮文字与图标：不透明。可读性交给字外面那圈同色系的柔光（见 ClockSurface 的 ApplyButtonHalo），
+        // 所以底片只要意思一下，别做成一堆亮色里杵着一块黑砖——那块黑底片 62% 太抢眼了。
         ButtonForeground = "#FFFFFF",
-        ButtonBackground = "#33FFFFFF",
-        ButtonHover = "#66FFFFFF",
+        ButtonBackground = "#59000000",
+        ButtonHover = "#80000000",
         PopupBackground = "#14141F",
         PopupBorder = "#44FFFFFF",
         PopupText = "#DDFFFFFF",
@@ -151,10 +151,10 @@ public static class ClockTheme
         TextFaint = "#40000000",
         Countdown = "#8A6D00",
         Divider = "#55000000",
-        // 按钮文字与图标：同上，按钮自身带 0.5 不透明度，这里用满色
+        // 按钮文字与图标：同上，这里用浅色底片，柔光是白的
         ButtonForeground = "#000000",
-        ButtonBackground = "#1F000000",
-        ButtonHover = "#33000000",
+        ButtonBackground = "#59FFFFFF",
+        ButtonHover = "#80FFFFFF",
         PopupBackground = "#FFFFFF",
         PopupBorder = "#22000000",
         PopupText = "#DD000000",
