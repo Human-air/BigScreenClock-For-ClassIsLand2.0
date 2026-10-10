@@ -11,6 +11,14 @@ public enum ClockThemeMode
 
     /// <summary>固定黑暗</summary>
     Dark = 2,
+
+    /// <summary>
+    /// 自动：按背景图的整体明暗定，方向和「跟着图走」的直觉相反——**亮图配白字**。
+    /// 亮壁纸上垫深色玻璃，等于先把背后那片压暗，白字才立得住；反过来在亮壁上再盖一层白，
+    /// 字和底一起往上飘，最淡的几处（降水提醒那种颜色）最先糊掉。暗图则反之，用黑字。
+    /// 没选背景图时退化成「跟随 ClassIsland」。取值排在最后，是为了不打乱老配置里已存的 0/1/2。
+    /// </summary>
+    Auto = 3,
 }
 
 /// <summary>
@@ -161,12 +169,20 @@ public static class ClockTheme
     };
 
     /// <summary>
-    /// 解析实际生效的调色板变体：固定明亮/黑暗按设置走，跟随档按 CI 当前是不是深色。
+    /// 解析实际生效的调色板变体：固定明亮/黑暗按设置走，跟随档按 CI 当前是不是深色，
+    /// 自动档按背景图明暗（见 <see cref="BackgroundTone"/>）。
     /// </summary>
-    public static int ResolveVariant(ClockThemeMode mode, bool ciIsDark) => mode switch
+    /// <param name="backgroundIsDark">
+    /// 背景图算不算暗。null = 没有背景图 / 读不出来 —— 自动档这时退化成跟随 CI。
+    /// </param>
+    public static int ResolveVariant(ClockThemeMode mode, bool ciIsDark, bool? backgroundIsDark = null) => mode switch
     {
         ClockThemeMode.Light => VariantLight,
         ClockThemeMode.Dark => VariantDark,
+        // 自动：亮图（backgroundIsDark = false）走白字，暗图走黑字，见 ClockThemeMode.Auto 的说明
+        ClockThemeMode.Auto => backgroundIsDark is { } dark
+            ? (dark ? VariantLight : VariantDark)
+            : (ciIsDark ? VariantDark : VariantLight),
         _ => ciIsDark ? VariantDark : VariantLight,
     };
 
@@ -174,7 +190,7 @@ public static class ClockTheme
     public static ClockThemePalette PaletteOf(int variant)
         => variant == VariantLight ? Light : Dark;
 
-    /// <summary>设置里的档位 + CI 当前亮暗 → 生效的调色板。</summary>
-    public static ClockThemePalette Resolve(ClockThemeMode mode, bool ciIsDark)
-        => PaletteOf(ResolveVariant(mode, ciIsDark));
+    /// <summary>设置里的档位 + CI 当前亮暗 + 背景图明暗 → 生效的调色板。</summary>
+    public static ClockThemePalette Resolve(ClockThemeMode mode, bool ciIsDark, bool? backgroundIsDark = null)
+        => PaletteOf(ResolveVariant(mode, ciIsDark, backgroundIsDark));
 }

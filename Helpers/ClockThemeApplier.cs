@@ -8,14 +8,14 @@ namespace EveningSelfStudyClock.Helpers;
 public static class ClockThemeApplier
 {
     /// <summary>
-    /// 按 ThemeMode + CI 当前亮暗解析出目标调色板，把设置里的 6 个颜色换成该主题那一套。
+    /// 按 ThemeMode + CI 当前亮暗 + 背景图明暗解析出目标调色板，把设置里的 6 个颜色换成该主题那一套。
     /// 只在生效变体与上次套用的不同时才动：先把当前这套颜色存回它自己的主题槽位（用户调过的色不丢），
     /// 再读出新主题槽位里那套。某个主题第一次用到时槽位里就是该主题的默认色。
     /// </summary>
     /// <returns>true 表示本次换过颜色设置</returns>
     public static bool Apply(PluginSettings settings, bool ciIsDark)
     {
-        var variant = ClockTheme.ResolveVariant((ClockThemeMode)settings.ThemeMode, ciIsDark);
+        var variant = ClockTheme.ResolveVariant(EffectiveMode(settings), ciIsDark, BackgroundIsDark(settings));
         if (settings.AppliedPaletteVariant == variant) return false;
 
         Capture(settings, settings.AppliedPaletteVariant);   // 旧主题那套先存回自己的槽位
@@ -23,6 +23,31 @@ public static class ClockThemeApplier
         settings.AppliedPaletteVariant = variant;
         return true;
     }
+
+    /// <summary>
+    /// 当前真正说了算的主题档位：背景开关开着就用背景那一套（外观里的「主题」此时整项失效），
+    /// 否则还是用外观里那项。
+    /// </summary>
+    public static ClockThemeMode EffectiveMode(PluginSettings settings)
+        => settings.BackgroundEnabled
+            ? ((BackgroundThemeMode)settings.BackgroundThemeMode).ToClockThemeMode()
+            : (ClockThemeMode)settings.ThemeMode;
+
+    /// <summary>
+    /// 「自动」主题档用的输入：背景图算不算暗。
+    /// null = 没选图 / 图读不出来 —— 自动档这时退化成跟随 ClassIsland。
+    /// </summary>
+    public static bool? BackgroundIsDark(PluginSettings settings)
+    {
+        var path = BackgroundImageStore.ResolvePath(settings.BackgroundImageFile);
+        return BackgroundImageStore.ReadLuminance(path) is { } luminance
+            ? BackgroundTone.IsDark(luminance, settings.BackgroundDim)
+            : null;
+    }
+
+    /// <summary>按设置解析出生效调色板（大屏与设置页预览共用这一条路径）。</summary>
+    public static ClockThemePalette ResolvePalette(PluginSettings settings, bool ciIsDark)
+        => ClockTheme.Resolve(EffectiveMode(settings), ciIsDark, BackgroundIsDark(settings));
 
     /// <summary>
     /// 老配置（没有主题功能那版）升级上来时的迁移：它只有一套颜色，就是用户当时在用的那套

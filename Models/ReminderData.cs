@@ -47,4 +47,11 @@ public class AlertInfo
     /// 摄像头占用那条填自己的图标（见 <see cref="CameraAlertBuilder.AlertIcon"/>）。
     /// </summary>
     public string? IconName { get; init; }
+
+    /// <summary>面板上这条的字号。天气预警用默认值；摄像头占用那条可由设置调（可调范围见
+    /// <see cref="PluginSettings.CameraAlertFontSize"/>）。</summary>
+    public double FontSize { get; init; } = DefaultFontSize;
+
+    /// <summary>预警条目的默认字号（沿用加这个设置项之前的值）。</summary>
+    public const double DefaultFontSize = 15;
 }

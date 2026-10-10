@@ -187,6 +187,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         }
         else if (args.PropertyName is nameof(PluginSettings.ShowAlertsReminder)
             or nameof(PluginSettings.ShowCameraReminder)
+            or nameof(PluginSettings.CameraAlertFontSize)
             or nameof(PluginSettings.MonitoredCameras))
         {
             // 预警/摄像头开关或勾选的设备变了 → 立刻重算条目（集合内容变化不会走上面那支）
@@ -211,6 +212,20 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         {
             // 「显示精确打铃时间」子项：即时把末尾那段加减回去/去掉
             UpdateCourseInfo(NowVirtual);
+        }
+        else if (args.PropertyName is nameof(PluginSettings.BackgroundEnabled)
+                 or nameof(PluginSettings.BackgroundThemeMode))
+        {
+            // 背景开关一拨，说了算的主题就从「外观那项」换成「背景那项」（或反过来）
+            Dispatcher.UIThread.Post(ApplyThemePalette);
+        }
+        else if (args.PropertyName is nameof(PluginSettings.BackgroundImageFile)
+                 or nameof(PluginSettings.BackgroundDim))
+        {
+            // 只有「自动」档要重判：它看的就是背景图明暗，换了图 / 调了遮罩都可能翻主题。
+            // 固定档下拖明暗滑块与主题无关（遮罩本身由背景层自己画），别白刷一遍画刷
+            if (_settings.BackgroundEnabled && _settings.BackgroundThemeMode == (int)BackgroundThemeMode.Auto)
+                Dispatcher.UIThread.Post(ApplyThemePalette);
         }
         else if (args.PropertyName is nameof(PluginSettings.ThemeMode))
         {
@@ -291,6 +306,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         private set { _isWindowVisible = value; OnPropertyChanged(); }
     }
 
+    // 这 6 个颜色就是设置里那套值：主题档只决定「切主题时把哪一套默认色写进来」，不在这里改算。
     public string BackgroundColor => _settings.BackgroundColor;
     public string FontColor => _settings.FontColor;
     public string ProgressColor => _settings.ProgressColor;
@@ -318,13 +334,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private const string DefaultClockFont = "Microsoft YaHei UI, SimHei, sans-serif";
 
     /// <summary>进度条「已进行」部分颜色（深色，不透明）。</summary>
-    public IBrush ProgressFillBrush => new SolidColorBrush(Color.Parse(_settings.ProgressColor));
+    public IBrush ProgressFillBrush => new SolidColorBrush(Color.Parse(ProgressColor));
 
     /// <summary>进度带「未进行」部分颜色（随主题：深色底上的低饱和深蓝 / 浅色底上的浅灰蓝）。</summary>
     public IBrush ProgressTrackBrush => Chrome.VolumeTrack;
 
     /// <summary>降水提醒色（设置项，默认蓝）：降雨提醒块用它，颜色可在设置里调。</summary>
-    public IBrush RainColorBrush => new SolidColorBrush(Color.Parse(_settings.RainColor));
+    public IBrush RainColorBrush => new SolidColorBrush(Color.Parse(RainColor));
 
     /// <summary>当前天气是不是降水类（按 CI 天气码判断；雾/霾/沙尘不算）。</summary>
     private bool IsPrecipitationWeather => _weatherCode is { } code && CiWeatherReader.RainCodes.Contains(code);
@@ -360,7 +376,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>按设置里的主题档位 + CI 当前亮暗刷新界面画刷与语义色（不改动颜色设置）。</summary>
     private void RefreshChrome()
     {
-        Chrome = ClockBrushes.From(ClockTheme.Resolve((ClockThemeMode)_settings.ThemeMode, CiIsDark));
+        Chrome = ClockBrushes.From(ClockThemeApplier.ResolvePalette(_settings, CiIsDark));
         OnPropertyChanged(nameof(Chrome));
         OnPropertyChanged(nameof(NoiseLevelTrackBrush));
         OnPropertyChanged(nameof(ProgressTrackBrush));
@@ -938,7 +954,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         bool text = ShowTextRow;
 
         bool rainMerged = false, countdownMerged = false, textMerged = false;
-        const double spacing = 24;
+        const double spacing = 36;   // 与 XAML 里第一行 StackPanel 的 Spacing 保持一致（玻璃底要占位置）
         var threshold = MergeThreshold;
 
         if (weather)
@@ -1269,7 +1285,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         // 摄像头占用快照由 CameraActivityService 在后台更新，这里取当前快照重算条目
         var cameraAlerts = _settings.ShowCameraReminder
-            ? CameraAlertBuilder.Build(_settings.MonitoredCameras, _cameraService.Occupancy)
+            ? CameraAlertBuilder.Build(_settings.MonitoredCameras, _cameraService.Occupancy,
+                                       _settings.CameraAlertFontSize)
             : new List<AlertInfo>();
 
         var merged = new List<AlertInfo>();
@@ -1279,7 +1296,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         var changed = merged.Count != _reminderData.Alerts.Count
             || !merged.Zip(_reminderData.Alerts).All(p =>
                 p.First.Title == p.Second.Title && p.First.Level == p.Second.Level
-                && p.First.Detail == p.Second.Detail);
+                && p.First.Detail == p.Second.Detail && Math.Abs(p.First.FontSize - p.Second.FontSize) < 0.01);
         if (!changed) return;
 
         AlertItems.Clear();
@@ -1292,6 +1309,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 Level = a.Level,
                 Foreground = AlertBrush(a.Level, Chrome.IsLight),
                 Detail = a.Detail,
+                FontSize = a.FontSize,
             });
 
         _reminderData.Alerts.Clear();
@@ -1355,6 +1373,31 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     public string DisclaimerText
         => "分贝仅供参考，可能受风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况";
+
+    /// <summary>
+    /// 把「平时只在 <see cref="Show"/> 里同步一次」的那几项（字号、音量条/课程信息开关、五个颜色、时钟字体、
+    /// 提醒数据）当场从设置里重读一遍，供设置页的预览调用。
+    ///
+    /// 为什么需要它：预览绑的就是这个实例，但字号、颜色这些平时只有「进大屏」那一刻才从设置里搬过来，
+    /// 不重读的话，在设置页改了字号、拖了颜色，预览要等下一次进大屏才跟上 —— 那就等于没有预览。
+    ///
+    /// 与 <see cref="Show"/> 的区别：这里不碰窗口、不开始监测、不重置计数，纯粹是把显示值刷一遍，
+    /// 所以设置页可以随时调，也能在大屏正开着的时候调（等于顺手帮大屏也刷新一次，没有副作用）。
+    /// </summary>
+    public void RefreshForPreview()
+    {
+        ShowDecibelMeter = _settings.ShowDecibelMeter;
+        ShowCourseInfo = _settings.ShowCourseInfo;
+        ClockFontSize = _settings.ClockFontSize;
+        CourseInfoFontSize = _settings.CourseInfoFontSize;
+        CountFontSize = _settings.CountFontSize;
+
+        // 主题色不在这里 Apply 回设置（那是设置页自己的事），只按当前生效的颜色重算画刷
+        RefreshChrome();
+        RefreshAppearanceBindings();
+        RefreshClockFont();
+        RefreshRemindersNow();
+    }
 
     public void Show()
     {
@@ -2012,6 +2055,12 @@ public class AlertDisplayItem : INotifyPropertyChanged
 
     /// <summary>预警详情全文（alerts[].detail），鼠标悬停该条时显示。</summary>
     public string? Detail { get; init; }
+
+    /// <summary>面板上这条的字号（天气预警用默认值，摄像头占用那条由设置调）。</summary>
+    public double FontSize { get; init; } = AlertInfo.DefaultFontSize;
+
+    /// <summary>图标字号：比正文小一点，与正文一起缩放。</summary>
+    public double IconFontSize => Math.Max(8, FontSize - 1);
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }

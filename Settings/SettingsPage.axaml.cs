@@ -3,7 +3,10 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Timers;
 using System.Windows.Input;
+using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Controls;
@@ -13,6 +16,7 @@ using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.Services;
 using EveningSelfStudyClock.ViewModels;
+using EveningSelfStudyClock.Views;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace EveningSelfStudyClock.Settings;
@@ -25,10 +29,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 {
     private readonly PluginSettings _settings;
     private List<string> _allCourseNames = new();
-    private System.Timers.Timer? _previewTimer;
-
-    private string _previewTime = DateTime.Now.ToString("HH:mm:ss");
-    private string _previewCourseText = "当前课程为 晚自习   18:30 — 21:30";
 
     public ObservableCollection<CourseSelectionItem> SelectedCourses { get; } = new();
 
@@ -55,7 +55,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         LoadAllCourseNames();
         RestoreSelectedCourses();
         LoadCameraDevices();
-        StartPreviewTimer();
+        StartPreviewSync();
 
         // 时钟/音量条的位置会被大屏那边按限位改写（写回实际位置），滑块要跟着动
         _settings.PropertyChanged += (_, e) =>
@@ -76,29 +76,92 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         ActualThemeVariantChanged += (_, _) => ApplyThemeFromSettings();
     }
 
-    private void StartPreviewTimer()
+    // ===== 右栏的实时预览 =====
+    //
+    // 预览放的是大屏那面墙本身（ClockSurface），只是等比缩小塞进预览框 —— 布局、字号、
+    // 颜色、时钟与音量条的位置全出自同一份 XAML，不存在「预览一套、大屏另一套」。
+    // 尺寸按大屏那块屏幕取，预览框整体缩放，所以看到的就是真实比例的观感。
+
+    /// <summary>预览绑的大屏 ViewModel：与大屏用的是 DI 里的同一个单例，
+    /// 所以预览里的数据、颜色、字号就是大屏当时真正会显示的那一套。</summary>
+    public FullScreenClockViewModel? PreviewVm => _clockViewModel;
+
+    private Size _previewSize = new(1920, 1080);
+
+    /// <summary>预览用的逻辑宽度（= 大屏那块屏幕的逻辑宽度；全屏窗口的 Bounds 就是这个值）。</summary>
+    public double PreviewWidth => _previewSize.Width;
+
+    /// <summary>预览用的逻辑高度。</summary>
+    public double PreviewHeight => _previewSize.Height;
+
+    /// <summary>
+    /// 按大屏所在显示器的长宽比定预览尺寸。用逻辑尺寸（物理 ÷ 缩放）而不是物理像素：
+    /// 大屏窗口的实测宽度就是逻辑值，字号、边距全是按它算的，预览要跟它同一把尺子。
+    /// </summary>
+    private void UpdatePreviewSize()
     {
-        _previewTimer = new System.Timers.Timer(1000);
-        _previewTimer.Elapsed += (_, _) => Dispatcher.UIThread.Post(() =>
+        try
         {
-            PreviewTime = DateTime.Now.ToString("HH:mm:ss");
-        });
-        _previewTimer.Start();
+            // 大屏是开在 CI 主窗口所在那块屏幕上的，跟着它取，多屏时预览才对得上
+            var top = TopLevel.GetTopLevel(this);
+            var screens = top?.Screens;
+            var screen = screens?.Primary;
+            if (top is Window window && screens?.ScreenFromWindow(window) is { } own)
+                screen = own;
+
+            if (screen is { } s && s.Bounds.Width > 0 && s.Bounds.Height > 0)
+            {
+                var scale = s.Scaling > 0 ? s.Scaling : 1.0;
+                _previewSize = new Size(s.Bounds.Width / scale, s.Bounds.Height / scale);
+            }
+        }
+        catch
+        {
+            _previewSize = new Size(1920, 1080);   // 取不到就按最常见的班级大屏来
+        }
+
+        OnPropertyChanged(nameof(PreviewWidth));
+        OnPropertyChanged(nameof(PreviewHeight));
     }
 
-    public string PreviewTime
+    /// <summary>
+    /// 预览的刷新：尺寸取一次 + 让 ViewModel 把「平时只在进大屏时才同步一次」的那几项
+    /// （字号、颜色、音量条/课程信息开关）从设置里重读一遍。
+    ///
+    /// 防抖 200 毫秒：拖字号/颜色滑块会连着触发很多次，每次都去读组件与天气缓存太浪费；
+    /// 通知只在 UI 线程上发，所以这里用 DispatcherTimer 而不是 System.Timers.Timer。
+    /// </summary>
+    private void StartPreviewSync()
     {
-        get => _previewTime;
-        set { _previewTime = value; OnPropertyChanged(nameof(PreviewTime)); }
+        UpdatePreviewSize();
+
+        _previewSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _previewSyncTimer.Tick += (_, _) =>
+        {
+            _previewSyncTimer!.Stop();
+            _previewSyncing = true;
+            try { _clockViewModel?.RefreshForPreview(); }
+            finally { _previewSyncing = false; }
+        };
+
+        Loaded += (_, _) => UpdatePreviewSize();
+        _settings.PropertyChanged += (_, _) => SchedulePreviewSync();
+        _clockViewModel?.RefreshForPreview();   // 首次进来先把数据填上（没进过大屏时预览也有内容）
     }
 
-    public string PreviewCourseText
+    private DispatcherTimer? _previewSyncTimer;
+
+    /// <summary>正在刷新预览。刷新过程本身可能牵动设置（换主题那类），别让它再排一轮、来回刷。</summary>
+    private bool _previewSyncing;
+
+    private void SchedulePreviewSync()
     {
-        get => _previewCourseText;
-        set { _previewCourseText = value; OnPropertyChanged(nameof(PreviewCourseText)); }
+        if (_previewSyncing) return;
+        if (_previewSyncTimer is not { } timer) return;
+        timer.Stop();
+        timer.Start();
     }
 
-    public int PreviewFontSize => Math.Max(12, _settings.ClockFontSize / 5);
 
     // ===== 主题 =====
 
@@ -108,7 +171,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// <summary>CI 数据目录（data\），插件配置目录往上三级。</summary>
     private string CiDataDir => Path.GetFullPath(Path.Combine(Plugin.ConfigFolder!, "..", "..", ".."));
 
-    /// <summary>主题档位：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗。</summary>
+    /// <summary>外观主题档位：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗。背景开关打开时整项失效。</summary>
     public int ThemeModeIndex
     {
         get => _settings.ThemeMode;
@@ -124,63 +187,271 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         }
     }
 
-    /// <summary>预览用的界面画刷（整批随主题替换；界面绑 PreviewChrome.Xxx）。</summary>
-    public ClockBrushes PreviewChrome { get; private set; } = ClockBrushes.From(ClockTheme.Dark);
+    /// <summary>背景开关打开后，外观里那项「主题」就不起作用了，置灰。</summary>
+    public bool IsAppearanceThemeEnabled => !_settings.BackgroundEnabled;
 
-    /// <summary>预览里时钟数字的字体（跟随 CI 主界面字体）。</summary>
-    public FontFamily PreviewClockFontFamily { get; private set; } = FontFamily.Parse(CiMainFont.Fallback);
-
-    /// <summary>与全屏时钟一致：数字用表格宽度（tnum）。</summary>
-    public FontFeatureCollection PreviewClockFontFeatures { get; } =
-        new FontFeatureCollection { FontFeature.Parse("tnum") };
-
-    /// <summary>预览里当前档位文字（良好）的档位色。</summary>
-    public IBrush PreviewSlotTextBrush { get; private set; } = Solid("#AED581");
-
-    /// <summary>预览里五档标签的档位色（索引 0–4），与全屏时钟同一套配色。</summary>
-    public IBrush[] PreviewSlotLabelBrushes { get; private set; } =
-        LevelSlotCalculator.SlotTextColors(false).Select(c => Solid("#" + c.ToString("X8"))).ToArray();
-
-    /// <summary>预览里五档标签非当前档位的淡化程度。</summary>
-    public double PreviewSlotFadeOpacity { get; private set; } = 0.35;
-
-    /// <summary>预览里「一般」计数与「正在记录」提示的黄色。</summary>
-    public IBrush PreviewCountBrush { get; private set; } = Solid("#FFFF44");
-
-    /// <summary>预览里预警条目的等级色（预览固定用黄色预警示例）。</summary>
-    public IBrush PreviewAlertBrush { get; private set; } = Solid("#FFDD44");
-
-    /// <summary>按当前设置重新解析主题：刷新预览画刷、语义色与时钟字体。</summary>
-    private void ApplyThemeFromSettings()
+    /// <summary>
+    /// 背景总开关：关着一整组背景/玻璃设置都不生效，外观与没有这套功能时逐像素一致。
+    /// 默认关闭 —— 升级上来的配置没这个字段，默认开着会在用户没点过任何东西的情况下换掉他的主题。
+    /// </summary>
+    public bool BackgroundEnabled
     {
-        PreviewChrome = ClockBrushes.From(ClockTheme.Resolve((ClockThemeMode)_settings.ThemeMode, CiIsDark));
-        PreviewClockFontFamily = ReadCiClockFont();
-
-        // 语义色（档位文字/计数/预警）在两套主题下取值不同，预览要与全屏时钟一致
-        var light = PreviewChrome.IsLight;
-        var slotText = LevelSlotCalculator.SlotTextColors(light);
-        PreviewSlotTextBrush = Solid("#" + slotText[1].ToString("X8"));
-        PreviewSlotLabelBrushes = slotText.Select(c => Solid("#" + c.ToString("X8"))).ToArray();
-        PreviewSlotFadeOpacity = light ? 0.5 : 0.35;
-        PreviewCountBrush = Solid(SemanticColors.CountNormalHex(light));
-        PreviewAlertBrush = Solid(SemanticColors.AlertHex("黄色", light) ?? SemanticColors.CountNormalHex(light));
-
-        OnPropertyChanged(nameof(PreviewChrome));
-        OnPropertyChanged(nameof(PreviewClockFontFamily));
-        OnPropertyChanged(nameof(PreviewSlotTextBrush));
-        OnPropertyChanged(nameof(PreviewSlotLabelBrushes));
-        OnPropertyChanged(nameof(PreviewSlotFadeOpacity));
-        OnPropertyChanged(nameof(PreviewCountBrush));
-        OnPropertyChanged(nameof(PreviewAlertBrush));
+        get => _settings.BackgroundEnabled;
+        set
+        {
+            if (_settings.BackgroundEnabled == value) return;
+            _settings.BackgroundEnabled = value;
+            OnPropertyChanged(nameof(BackgroundEnabled));
+            OnPropertyChanged(nameof(IsAppearanceThemeEnabled));
+            OnPropertyChanged(nameof(BackgroundSectionOpacity));
+            // 打开就把这一组展开，省得再点一下
+            if (value) IsBackgroundSectionExpanded = true;
+            RefreshThemeFromBackground();
+        }
     }
 
-    private static IBrush Solid(string hex) => new SolidColorBrush(Color.Parse(hex));
+    /// <summary>
+    /// 「背景与玻璃」那一组在开关关着时整体压暗用的透明度。
+    /// Expander 上的 IsEnabled=false 只会让下拉、按钮这些模板自带禁用态的控件变灰，
+    /// 那几行说明文字各自写了 Foreground，不跟着变 —— 只靠 IsEnabled 看着像还能调。
+    /// </summary>
+    public double BackgroundSectionOpacity => _settings.BackgroundEnabled ? 1.0 : 0.4;
 
-    private FontFamily ReadCiClockFont()
+    /// <summary>「背景与玻璃」那一组是不是展开着。默认收起，拨开上面的开关会自动展开。</summary>
+    public bool IsBackgroundSectionExpanded
     {
-        var font = CiMainFont.ReadFontString(CiDataDir) ?? CiMainFont.Fallback;
-        try { return FontFamily.Parse(font); }
-        catch { return FontFamily.Parse(CiMainFont.Fallback); }
+        get => _backgroundSectionExpanded;
+        set
+        {
+            if (_backgroundSectionExpanded == value) return;
+            _backgroundSectionExpanded = value;
+            OnPropertyChanged(nameof(IsBackgroundSectionExpanded));
+        }
+    }
+
+    private bool _backgroundSectionExpanded;
+
+    /// <summary>
+    /// 背景主题档位：0 = 自动（跟着背景图），1 = 暗底白字，2 = 亮底黑字。
+    /// 只在背景开关打开时生效——名字按看到的玻璃和字来叫，免得「黑暗」在亮壁纸上反而调出一屏白字。
+    /// </summary>
+    public int BackgroundThemeModeIndex
+    {
+        get => _settings.BackgroundThemeMode;
+        set
+        {
+            if (_settings.BackgroundThemeMode == value) return;
+            _settings.BackgroundThemeMode = value;
+            OnPropertyChanged(nameof(BackgroundThemeModeIndex));
+            RefreshThemeFromBackground();
+        }
+    }
+
+    /// <summary>
+    /// 背景图 / 明暗遮罩变了：「自动」主题档判的就是它俩，可能整批翻主题。
+    /// 没翻就只刷新预览（不然拖遮罩滑块时每格都要重读一次字体等无关东西）。
+    /// </summary>
+    private void RefreshThemeFromBackground()
+    {
+        if (ClockThemeApplier.Apply(_settings, CiIsDark))
+        {
+            NotifyAllColorsChanged();
+            ApplyThemeFromSettings();   // 里面会再刷一次预览
+            return;
+        }
+        SchedulePreviewSync();
+    }
+
+    // ===== 背景图片 =====
+
+    /// <summary>当前背景图的文件名；没选就是空。</summary>
+    public string BackgroundImageSummary
+        => BackgroundImageStore.ResolvePath(_settings.BackgroundImageFile) is null
+            ? "未选择（纯色底）"
+            : _settings.BackgroundImageFile;
+
+    public string BackgroundImageHint { get; private set; } = "选中的图片会复制一份到插件配置目录，原图之后挪走也不影响";
+
+    /// <summary>填充方式：0 铺满裁切 / 1 完整显示 / 2 拉伸。</summary>
+    public int BackgroundImageStretchIndex
+    {
+        get => _settings.BackgroundImageStretch;
+        set
+        {
+            if (_settings.BackgroundImageStretch == value) return;
+            _settings.BackgroundImageStretch = value;
+            OnPropertyChanged(nameof(BackgroundImageStretchIndex));
+            SchedulePreviewSync();
+        }
+    }
+
+    /// <summary>背景明暗：负数把整张背景压暗、正数提亮（0 = 不调），保证背景再花字也读得清。</summary>
+    public double BackgroundDim
+    {
+        get => _settings.BackgroundDim;
+        set
+        {
+            if (Math.Abs(_settings.BackgroundDim - value) < 0.01) return;
+            _settings.BackgroundDim = value;
+            OnPropertyChanged(nameof(BackgroundDim));
+            OnPropertyChanged(nameof(BackgroundDimText));
+            RefreshThemeFromBackground();
+        }
+    }
+
+    public string BackgroundDimText => _settings.BackgroundDim switch
+    {
+        > 0.5 => $"提亮 {_settings.BackgroundDim:0}%",
+        < -0.5 => $"压暗 {-_settings.BackgroundDim:0}%",
+        _ => "不调",
+    };
+
+    private async void PickBackgroundImage_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (TopLevel.GetTopLevel(this) is not { } top) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "选择背景图片",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("图片")
+                    {
+                        Patterns = ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp", "*.gif"],
+                    },
+                ],
+            });
+
+            if (files.Count == 0) return;
+            var source = files[0].TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return;
+
+            BackgroundImageStore.Replace(source, _settings);
+            BackgroundImageHint = $"已复制到插件配置目录：{_settings.BackgroundImageFile}";
+            NotifyBackgroundChanged();
+        }
+        catch (Exception ex)
+        {
+            BackgroundImageHint = "选择失败：" + ex.Message;
+            OnPropertyChanged(nameof(BackgroundImageHint));
+        }
+    }
+
+    private void ClearBackgroundImage_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        BackgroundImageStore.Clear(_settings);
+        BackgroundImageHint = "已清除，回到纯色底";
+        NotifyBackgroundChanged();
+    }
+
+    private void NotifyBackgroundChanged()
+    {
+        OnPropertyChanged(nameof(BackgroundImageSummary));
+        OnPropertyChanged(nameof(BackgroundImageHint));
+        RefreshThemeFromBackground();   // 「自动」主题档要按新图重判一次
+    }
+
+    // ===== 玻璃底 =====
+
+    /// <summary>玻璃档：0 关闭 / 1 半透明 / 2 磨砂 / 3 真•高光折射。</summary>
+    public int GlassModeIndex
+    {
+        get => _settings.GlassMode;
+        set
+        {
+            if (_settings.GlassMode == value) return;
+            _settings.GlassMode = value;
+            OnPropertyChanged(nameof(GlassModeIndex));
+            // 每档各露各的旋钮，换档时三个可见性都得重新通知一遍
+            OnPropertyChanged(nameof(IsOpacityRowVisible));
+            OnPropertyChanged(nameof(IsGrainRowVisible));
+            OnPropertyChanged(nameof(IsLiquidRowVisible));
+            SchedulePreviewSync();
+        }
+    }
+
+    // 每档只露自己用得上的旋钮，省得「磨砂颗粒度」和「雾面浓度」摆在一起分不清谁是谁。
+    // 半透明档只有透明度；磨砂档只有颗粒度；真•◯◯玻璃档是折射强度 + 雾面浓度。
+
+    public bool IsOpacityRowVisible => _settings.GlassMode == (int)GlassMode.Translucent;
+    public bool IsGrainRowVisible => _settings.GlassMode == (int)GlassMode.Frosted;
+    public bool IsLiquidRowVisible => _settings.GlassMode == (int)GlassMode.Liquid;
+
+    /// <summary>折射强度：边缘把背后画面推弯的力度。</summary>
+    public double GlassRefraction
+    {
+        get => _settings.GlassRefraction;
+        set
+        {
+            if (Math.Abs(_settings.GlassRefraction - value) < 0.01) return;
+            _settings.GlassRefraction = value;
+            OnPropertyChanged(nameof(GlassRefraction));
+            OnPropertyChanged(nameof(GlassRefractionText));
+            SchedulePreviewSync();
+        }
+    }
+
+    public string GlassRefractionText => $"{_settings.GlassRefraction:0}";
+
+    /// <summary>雾面浓度：清晰画面里掺多少糊底图，给文字可读性兜底。</summary>
+    public double GlassFrost
+    {
+        get => _settings.GlassFrost;
+        set
+        {
+            if (Math.Abs(_settings.GlassFrost - value) < 0.01) return;
+            _settings.GlassFrost = value;
+            OnPropertyChanged(nameof(GlassFrost));
+            OnPropertyChanged(nameof(GlassFrostText));
+            SchedulePreviewSync();
+        }
+    }
+
+    public string GlassFrostText => $"{_settings.GlassFrost:0}%";
+
+    /// <summary>玻璃浓度：玻璃底色（黑暗主题=黑、明亮主题=白）的不透明度百分比。</summary>
+    public double GlassOpacity
+    {
+        get => _settings.GlassOpacity;
+        set
+        {
+            if (Math.Abs(_settings.GlassOpacity - value) < 0.01) return;
+            _settings.GlassOpacity = value;
+            OnPropertyChanged(nameof(GlassOpacity));
+            OnPropertyChanged(nameof(GlassOpacityText));
+            SchedulePreviewSync();
+        }
+    }
+
+    public string GlassOpacityText => $"{_settings.GlassOpacity:0}%";
+
+    /// <summary>磨砂颗粒度（模糊半径，单位按屏幕像素算）。</summary>
+    public double GlassBlurRadius
+    {
+        get => _settings.GlassBlurRadius;
+        set
+        {
+            if (Math.Abs(_settings.GlassBlurRadius - value) < 0.01) return;
+            _settings.GlassBlurRadius = value;
+            OnPropertyChanged(nameof(GlassBlurRadius));
+            OnPropertyChanged(nameof(GlassBlurRadiusText));
+            SchedulePreviewSync();
+        }
+    }
+
+    public string GlassBlurRadiusText => $"{_settings.GlassBlurRadius:0}";
+
+    /// <summary>
+    /// 换主题后设置页这半边要跟着翻（色块、hex），预览那半边由 ClockSurface 自己盯着 ViewModel 走，
+    /// 不用在这里另刷一遍。
+    /// </summary>
+    private void ApplyThemeFromSettings()
+    {
+        NotifyAllColorsChanged();
+        SchedulePreviewSync();
     }
 
     /// <summary>5 个颜色设置的值/色块/hex 全部重新求值（主题切换、颜色被改写后调用）。</summary>
@@ -210,7 +481,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public double ClockFontSize
     {
         get => _settings.ClockFontSize;
-        set { _settings.ClockFontSize = (int)value; OnPropertyChanged(nameof(ClockFontSize)); OnPropertyChanged(nameof(PreviewFontSize)); OnPropertyChanged(nameof(ClockFontSizeText)); }
+        set { _settings.ClockFontSize = (int)value; OnPropertyChanged(nameof(ClockFontSize)); OnPropertyChanged(nameof(ClockFontSizeText)); }
     }
 
     /// <summary>底部居中的课程信息字号（改完进大屏时钟生效）。</summary>
@@ -390,25 +661,34 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         if (!_settings.CameraListFilled)
         {
             _settings.MonitoredCameras.Clear();
-            foreach (var d in devices) _settings.MonitoredCameras.Add(d.Name);
+            foreach (var d in devices)
+                _settings.MonitoredCameras.Add(new MonitoredCamera(d.Name, d.SymbolicLink).ToSettingValue());
             _settings.CameraListFilled = true;
             Plugin.SaveSettings();
         }
 
-        foreach (var d in devices)
-            CameraDevices.Add(new CameraDeviceItem(d.Name, IsMonitored(d.Name), this));
+        var displayNames = CameraDeviceNaming.DisplayNames(devices);
+        for (var i = 0; i < devices.Count; i++)
+        {
+            var d = devices[i];
+            CameraDevices.Add(new CameraDeviceItem(d, displayNames[i], IsMonitored(d.Name, d.SymbolicLink), this));
+        }
 
         CameraHint = service?.LastError ?? "";
     }
 
-    private bool IsMonitored(string name)
-        => _settings.MonitoredCameras.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+    /// <summary>设置里勾选的项里有没有这一台（按路径认，认不出才退回按名字，见 <see cref="MonitoredCamera.Matches"/>）。</summary>
+    private bool IsMonitored(string name, string link)
+        => _settings.MonitoredCameras
+            .Select(MonitoredCamera.Parse)
+            .Any(m => m.Matches(name, link));
 
     /// <summary>勾选/取消勾选设备后，把当前勾选写回设置（供 <see cref="CameraDeviceItem"/> 调用）。</summary>
     internal void SaveCameraSelection()
     {
         _settings.MonitoredCameras.Clear();
-        foreach (var d in CameraDevices.Where(d => d.IsSelected)) _settings.MonitoredCameras.Add(d.Name);
+        foreach (var d in CameraDevices.Where(d => d.IsSelected))
+            _settings.MonitoredCameras.Add(d.SettingValue);
         _settings.CameraListFilled = true;
         Plugin.SaveSettings(); // 强制写盘
     }
@@ -763,6 +1043,21 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set { _settings.ShowCameraReminder = value; OnPropertyChanged(nameof(ShowCameraReminder)); }
     }
 
+    /// <summary>「摄像头使用中」那一条的字号。范围就是「默认 ~ 天气提醒字号」。</summary>
+    public double CameraAlertFontSize
+    {
+        get => _settings.CameraAlertFontSize;
+        set
+        {
+            if (Math.Abs(_settings.CameraAlertFontSize - value) < 0.01) return;
+            _settings.CameraAlertFontSize = value;
+            OnPropertyChanged(nameof(CameraAlertFontSize));
+            OnPropertyChanged(nameof(CameraAlertFontSizeText));
+        }
+    }
+
+    public string CameraAlertFontSizeText => $"{_settings.CameraAlertFontSize:0}px";
+
     /// <summary>地震提醒（读「地震预警」插件的实时状态，在时钟正上方弹出）。</summary>
     public bool ShowEarthquakeReminder
     {
@@ -814,7 +1109,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public Color RainColorValue
     {
-        get => Color.Parse(_settings.RainColor);
+        get => DisplayColor(_settings.RainColor);
         set
         {
             _settings.RainColor = value.ToString();
@@ -824,9 +1119,16 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         }
     }
 
+    /// <summary>色块上显示的值（就是设置里存的那个；解析不了就按黑色显示）。</summary>
+    private static Color DisplayColor(string hex)
+    {
+        try { return Color.Parse(hex); }
+        catch { return Colors.Black; }
+    }
+
     public Color BackgroundColorValue
     {
-        get => Color.Parse(_settings.BackgroundColor);
+        get => DisplayColor(_settings.BackgroundColor);
         set
         {
             _settings.BackgroundColor = value.ToString();
@@ -838,7 +1140,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public Color FontColorValue
     {
-        get => Color.Parse(_settings.FontColor);
+        get => DisplayColor(_settings.FontColor);
         set
         {
             _settings.FontColor = value.ToString();
@@ -850,7 +1152,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public Color ProgressColorValue
     {
-        get => Color.Parse(_settings.ProgressColor);
+        get => DisplayColor(_settings.ProgressColor);
         set
         {
             _settings.ProgressColor = value.ToString();
@@ -862,7 +1164,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public Color CourseInfoColorValue
     {
-        get => Color.Parse(_settings.CourseInfoColor);
+        get => DisplayColor(_settings.CourseInfoColor);
         set
         {
             _settings.CourseInfoColor = value.ToString();
@@ -874,7 +1176,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public Color NoiseTitleColorValue
     {
-        get => Color.Parse(_settings.NoiseTitleColor);
+        get => DisplayColor(_settings.NoiseTitleColor);
         set
         {
             _settings.NoiseTitleColor = value.ToString();
@@ -922,9 +1224,18 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 public class CameraDeviceItem : INotifyPropertyChanged
 {
     private readonly SettingsPage _parent;
+    private readonly CameraDevice _device;
     private bool _isSelected;
 
+    /// <summary>列表上显示的名字。同名设备（一体机 + 展台）各带一小段设备路径，
+    /// 免得两行同样文字分不出哪个是哪个。</summary>
     public string Name { get; }
+
+    /// <summary>悬停提示：设备名 + 完整设备路径。</summary>
+    public string PathTip { get; }
+
+    /// <summary>写回设置的一行（名字 + 接口路径，见 <see cref="MonitoredCamera.ToSettingValue"/>）。</summary>
+    internal string SettingValue => new MonitoredCamera(_device.Name, _device.SymbolicLink).ToSettingValue();
 
     public bool IsSelected
     {
@@ -938,9 +1249,11 @@ public class CameraDeviceItem : INotifyPropertyChanged
         }
     }
 
-    public CameraDeviceItem(string name, bool isSelected, SettingsPage parent)
+    public CameraDeviceItem(CameraDevice device, string displayName, bool isSelected, SettingsPage parent)
     {
-        Name = name;
+        _device = device;
+        Name = displayName;
+        PathTip = device.SymbolicLink.Length == 0 ? device.Name : device.SymbolicLink;
         _isSelected = isSelected;
         _parent = parent;
     }

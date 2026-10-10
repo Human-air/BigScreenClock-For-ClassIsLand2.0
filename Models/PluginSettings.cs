@@ -39,6 +39,16 @@ public class PluginSettings : INotifyPropertyChanged
     private int _countFontSize = 24;
     private int _themeMode;
     private int _appliedPaletteVariant = ClockTheme.VariantUnknown;
+    private bool _backgroundEnabled;
+    private int _backgroundThemeMode;
+    private string _backgroundImageFile = "";
+    private int _backgroundImageStretch;
+    private double _backgroundDim;
+    private int _glassMode;
+    private double _glassOpacity = 35;
+    private double _glassBlurRadius = 24;
+    private double _glassRefraction = 50;
+    private double _glassFrost = 45;
     private string _windowTitle = "大屏时钟";
     private bool _showReminderPanel = true;
     private bool _showWeatherReminder = true;
@@ -49,6 +59,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showEmojiSubtitles = true;
     private bool _showTrayMenuEntry = true;
     private bool _showCameraReminder = true;
+    private double _cameraAlertFontSize = MinCameraAlertFontSize;
     private bool _showEarthquakeReminder = true;
     private bool _cameraListFilled;
     private ObservableCollection<string> _monitoredCameras = new();
@@ -123,7 +134,7 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 主题：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗（见 <see cref="ClockThemeMode"/>）。
+    /// 主题：0 = 跟随 ClassIsland，1 = 明亮，2 = 黑暗，3 = 自动（按背景图明暗，见 <see cref="ClockThemeMode"/>）。
     /// 切换主题会把颜色换成该主题那套（见 <see cref="LightColors"/> / <see cref="DarkColors"/>）。
     /// </summary>
     public int ThemeMode
@@ -142,6 +153,107 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _appliedPaletteVariant;
         set { _appliedPaletteVariant = value; OnPropertyChanged(); }
+    }
+
+    // ===== 背景图片与玻璃底 =====
+    // 选中的图片会被复制一份到插件配置目录，这里只记副本的文件名（原图被挪走/删掉也不影响）。
+    // 没选图片时下面这些项全部不生效，外观与以前逐像素一致。
+
+    /// <summary>
+    /// 背景总开关：关着的时候下面这一整组（背景图 + 玻璃 + 背景主题）全部不生效，
+    /// 外观与「没有这套功能」时逐像素一致，主题也仍由外观里那项决定。
+    ///
+    /// 默认关闭 —— 升级上来的配置没有这个字段，默认开着的话会在用户没点过任何东西的情况下
+    /// 把他的主题换成背景那套。
+    /// </summary>
+    public bool BackgroundEnabled
+    {
+        get => _backgroundEnabled;
+        set { _backgroundEnabled = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 背景主题档位（0 自动 / 1 暗底白字 / 2 亮底黑字，见 <see cref="BackgroundThemeMode"/>）。
+    /// 只在「背景」开关打开时生效，此时 <see cref="ThemeMode"/> 整项失效。
+    /// </summary>
+    public int BackgroundThemeMode
+    {
+        get => _backgroundThemeMode;
+        set { _backgroundThemeMode = Math.Clamp(value, 0, 2); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 背景图片文件名（相对插件配置目录）。空 = 仍用纯色底。
+    /// </summary>
+    public string BackgroundImageFile
+    {
+        get => _backgroundImageFile;
+        set { _backgroundImageFile = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 背景图片填充方式：0 = 铺满裁切，1 = 完整显示（留白），2 = 拉伸。
+    /// </summary>
+    public int BackgroundImageStretch
+    {
+        get => _backgroundImageStretch;
+        set { _backgroundImageStretch = Math.Clamp(value, 0, 2); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 背景明暗遮罩：负值压暗、正值提亮（-100 ~ 100），0 = 不改。
+    /// 花壁纸上文字读不清时用它压一压。
+    /// </summary>
+    public double BackgroundDim
+    {
+        get => _backgroundDim;
+        set { _backgroundDim = Math.Clamp(value, -100, 100); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 玻璃底：0 = 关闭，1 = 半透明，2 = 磨砂模糊，3 = 真•高光折射。
+    /// </summary>
+    public int GlassMode
+    {
+        get => _glassMode;
+        set { _glassMode = Math.Clamp(value, 0, 3); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 玻璃浓度：玻璃那层底色（黑暗主题=黑、明亮主题=白）的不透明度百分比。
+    /// </summary>
+    public double GlassOpacity
+    {
+        get => _glassOpacity;
+        set { _glassOpacity = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 磨砂颗粒度（模糊半径），决定糊底图本身糊得多细。仅「磨砂」档用它。
+    /// </summary>
+    public double GlassBlurRadius
+    {
+        get => _glassBlurRadius;
+        set { _glassBlurRadius = Math.Clamp(value, 0, 64); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 折射强度，仅「真•高光折射」档生效。越大边缘把画面推得越弯。
+    /// </summary>
+    public double GlassRefraction
+    {
+        get => _glassRefraction;
+        set { _glassRefraction = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 雾面浓度，仅「真•高光折射」档生效。清晰画面里掺多少糊底图：0 = 纯清玻璃，100 = 全糊。
+    /// 背后那张花壁纸原样透过去会把压在上面的字淹掉，这条给可读性兜底。
+    /// </summary>
+    public double GlassFrost
+    {
+        get => _glassFrost;
+        set { _glassFrost = Math.Clamp(value, 0, 100); OnPropertyChanged(); }
     }
 
     /// <summary>
@@ -436,6 +548,26 @@ public class PluginSettings : INotifyPropertyChanged
         get => _showCameraReminder;
         set { _showCameraReminder = value; OnPropertyChanged(); }
     }
+
+    /// <summary>
+    /// 「摄像头使用中」那一条的字号。可调范围就是「默认字号 ~ 天气提醒的字号」——
+    /// 比默认小会更看不清，比天气还大就压过其它提醒了。
+    /// </summary>
+    public double CameraAlertFontSize
+    {
+        get => _cameraAlertFontSize;
+        set
+        {
+            _cameraAlertFontSize = Math.Clamp(value, MinCameraAlertFontSize, MaxCameraAlertFontSize);
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>摄像头提醒字号下限：不设这个设置项时那条的字号。</summary>
+    public const double MinCameraAlertFontSize = AlertInfo.DefaultFontSize;
+
+    /// <summary>摄像头提醒字号上限：顶部天气温度提醒的字号。</summary>
+    public const double MaxCameraAlertFontSize = 19;
 
     /// <summary>
     /// 是否显示地震提醒（读「地震预警」插件的实时状态，在时钟正上方弹出，见 <see cref="Services.EarthquakeReader"/>）。

@@ -27,20 +27,21 @@ public sealed class CameraActivityService : IDisposable
     private const uint MfStartupLite = 1;
 
     /// <summary>空的占用快照（未监控/无占用时用）。</summary>
-    private static readonly IReadOnlyDictionary<string, string> Empty =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly IReadOnlyList<CameraActivity> Empty = Array.Empty<CameraActivity>();
 
     private IMFSensorActivitiesReportCallback? _callback;
     private IMFSensorActivityMonitor? _monitor;
     private bool _mfStarted;
     private bool _started;
 
-    /// <summary>当前占用快照：设备名 → 正在使用它的程序名（忽略大小写）。
-    /// MF 回调在后台线程整体替换这个引用，读方（UI 线程）拿到的一直是完整快照。</summary>
-    private volatile IReadOnlyDictionary<string, string> _occupancy = Empty;
+    /// <summary>当前占用快照。MF 回调在后台线程整体替换这个引用，读方（UI 线程）拿到的一直是完整快照。</summary>
+    private volatile IReadOnlyList<CameraActivity> _occupancy = Empty;
 
-    /// <summary>当前有进程在用的设备（设备名 → 程序名）。</summary>
-    public IReadOnlyDictionary<string, string> Occupancy => _occupancy;
+    /// <summary>
+    /// 当前有进程在用的设备。名字与接口路径都带着：设备名不保证唯一（两个摄像头可能同名），
+    /// 认设备得靠路径，见 <see cref="MonitoredCamera.Matches"/>。
+    /// </summary>
+    public IReadOnlyList<CameraActivity> Occupancy => _occupancy;
 
     /// <summary>摄像头检测是否可用（MF 平台起得来、监视器建得出来）。</summary>
     public bool IsSupported { get; private set; }
@@ -151,7 +152,7 @@ public sealed class CameraActivityService : IDisposable
     /// <summary>MF 活动上报回调（MF 的后台线程调用）：把上报整理解成占用快照。</summary>
     private void OnActivitiesReport(IMFSensorActivitiesReport report)
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<CameraActivity>();
         try
         {
             report.GetCount(out var deviceCount);
@@ -161,8 +162,8 @@ public sealed class CameraActivityService : IDisposable
                 if (device == null) continue;
 
                 var name = ReadString(device.GetFriendlyName).Trim();
-                if (name.Length == 0) name = ReadString(device.GetSymbolicLink).Trim();   // 兜底：拿不到名字就用设备路径
-                if (name.Length == 0) continue;
+                var link = ReadString(device.GetSymbolicLink).Trim();
+                if (name.Length == 0 && link.Length == 0) continue;
 
                 // 一个设备可能被多个进程用（如相机 App + 后台预览）；优先记「正在推流」的那个
                 string? process = null;
@@ -183,7 +184,7 @@ public sealed class CameraActivityService : IDisposable
                     process ??= processName;   // 只打开没推流（暂停预览等）也算占用
                 }
 
-                if (process != null) map[name] = process;
+                if (process != null) list.Add(new CameraActivity(name, link, process));
             }
         }
         catch (Exception ex)
@@ -191,7 +192,7 @@ public sealed class CameraActivityService : IDisposable
             System.Diagnostics.Debug.WriteLine($"[摄像头] 处理活动上报失败：{ex.Message}");
         }
 
-        _occupancy = map;
+        _occupancy = list;
     }
 
     /// <summary>起 MF 平台。传感器接口属于 Media Foundation，没初始化直接返回 0xC00D3E85。</summary>
