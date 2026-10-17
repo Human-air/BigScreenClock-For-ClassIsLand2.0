@@ -163,7 +163,7 @@ public partial class ClockSurface : UserControl
                 new() { Visual = DateBlock },
                 new() { Visual = ClockText, InsetX = 16, InsetY = 8, Radius = 16 },
                 new() { Visual = VolumePanel, InsetX = 16, InsetY = 8, Radius = 16 },
-                new() { Visual = CounterContent },
+                new() { Visual = CounterStrip },
                 new() { Visual = CourseInfoBox },
                 new() { Visual = ButtonBar },
                 new() { Visual = ReminderPanel },
@@ -175,7 +175,7 @@ public partial class ClockSurface : UserControl
                      {
                          WeatherBlock, RainBlock, CountdownBlock, ReminderTextBlock,
                          AlertDetailScroll, DateBlock, ClockText, VolumePanel,
-                         CounterContent, CourseInfoBox, ButtonBar, ReminderPanel,
+                         CounterStrip, CourseInfoBox, ButtonBar, ReminderPanel,
                      })
             {
                 target.PropertyChanged += OnGlassTargetPropertyChanged;

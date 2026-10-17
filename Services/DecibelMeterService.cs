@@ -145,9 +145,10 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             var bufferMs = (int)Math.Clamp(_settings.SamplingIntervalSeconds * 1000, 100, 1000);
             foreach (var idx in Enumerable.Range(0, count))
             {
+                WaveInEvent? wi = null;
                 try
                 {
-                    var wi = new WaveInEvent
+                    wi = new WaveInEvent
                     {
                         DeviceNumber = idx,
                         WaveFormat = new WaveFormat(44100, 16, 1),
@@ -163,7 +164,14 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
                     _lastDataReceived = DateTime.Now;
                     return;
                 }
-                catch { }
+                catch
+                {
+                    // 这台打不开就试下一台，但**这一台的实例必须放掉**：只 catch 不清理的话，
+                    // 失败路径上开出去的设备句柄与缓冲会一直挂着；看门狗每 5 秒重启一轮，
+                    // 设备被人占着的时候就会一轮攒一个，越攒越多。
+                    try { wi?.StopRecording(); } catch { }
+                    try { wi?.Dispose(); } catch { }
+                }
             }
 
             NoiseLevelText = "无法打开任何麦克风";
@@ -314,7 +322,17 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
     // ===== 调试日志（开发工具，设置项开关） =====
 
+    // 音频回调线程在写日志，UI 线程（停监测 / 拨开关 / 看门狗）在关日志，同一支 StreamWriter
+    // 两头一起碰就是「写一半被 Dispose」。所有碰 _logWriter 的地方都走这把锁。
+    private readonly object _logGate = new();
+
     private void EnsureLogWriter()
+    {
+        lock (_logGate) EnsureLogWriterLocked();
+    }
+
+    /// <summary>已持有 <see cref="_logGate"/> 时用这个。</summary>
+    private void EnsureLogWriterLocked()
     {
         if (_logWriter != null) return;
         if (!_settings.EnableNoiseDebugLog) return;
@@ -347,7 +365,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             _logLines = 0;
             _logFirstSample = null;
             _logLastSample = null;
-            WriteLogHeader();
+            WriteLogHeaderLocked();
         }
         catch { }
     }
@@ -357,6 +375,11 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     /// 没有这段就得回头猜当时阈值填的是多少，数据没法比对。
     /// </summary>
     private void WriteLogHeader()
+    {
+        lock (_logGate) WriteLogHeaderLocked();
+    }
+
+    private void WriteLogHeaderLocked()
     {
         if (_logWriter == null) return;
         var s = _settings;
@@ -371,12 +394,15 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     /// <summary>关闭当前日志文件。judge = true 时按保留规则决定去留（见 TryDeleteUnqualifiedLog）。</summary>
     private void CloseLogWriter(bool judge = true)
     {
-        try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
-        _logWriter = null;
-        if (judge && _logPath != null) TryDeleteUnqualifiedLog(_logPath);
-        _logPath = null;
-        _logFirstSample = null;
-        _logLastSample = null;
+        lock (_logGate)
+        {
+            try { _logWriter?.Flush(); _logWriter?.Dispose(); } catch { }
+            _logWriter = null;
+            if (judge && _logPath != null) TryDeleteUnqualifiedLog(_logPath);
+            _logPath = null;
+            _logFirstSample = null;
+            _logLastSample = null;
+        }
     }
 
     /// <summary>
@@ -410,38 +436,42 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
     private void WriteDebugLog(double rawRms, double peak, SampleResult result)
     {
-        // 开关中途拨动也即时生效：刚打开就补建文件，刚关闭就把这份结算掉（不必重进大屏时钟）
-        if (_logWriter == null) EnsureLogWriter();
-        if (_logWriter == null) return;
-        if (!_settings.EnableNoiseDebugLog) { CloseLogWriter(); return; }
-
-        string eventState = !_detector.IsSegmentActive ? "无段"
-            : _detector.SegmentLevel.HasValue ? "已起算" : "记录中";
-        string episodeLevel = _detector.SegmentLevel?.ToString() ?? "";
-
-        var now = DateTime.Now;
-        _logFirstSample ??= now;
-        _logLastSample = now;
-
-        _logWriter.WriteLine(
-            $"{now:HH:mm:ss.fff},{rawRms:F4},{peak:F4},{result.SmoothedRms:F4}," +
-            $"{result.Level},{episodeLevel},{eventState},{result.EventFired}");
-        if (++_logLines >= 20)
+        // 整段都在锁里：音频回调这条线程在写，UI 线程随时可能来关文件
+        lock (_logGate)
         {
-            _logWriter.Flush();
-            _logLines = 0;
-            // 到这个硬上限就换新文件（换掉的这一份同样过一遍保留规则）
-            if (_logPath != null)
+            // 开关中途拨动也即时生效：刚打开就补建文件，刚关闭就把这份结算掉（不必重进大屏时钟）
+            if (_logWriter == null) EnsureLogWriterLocked();
+            if (_logWriter == null) return;
+            if (!_settings.EnableNoiseDebugLog) { CloseLogWriter(); return; }
+
+            string eventState = !_detector.IsSegmentActive ? "无段"
+                : _detector.SegmentLevel.HasValue ? "已起算" : "记录中";
+            string episodeLevel = _detector.SegmentLevel?.ToString() ?? "";
+
+            var now = DateTime.Now;
+            _logFirstSample ??= now;
+            _logLastSample = now;
+
+            _logWriter.WriteLine(
+                $"{now:HH:mm:ss.fff},{rawRms:F4},{peak:F4},{result.SmoothedRms:F4}," +
+                $"{result.Level},{episodeLevel},{eventState},{result.EventFired}");
+            if (++_logLines >= 20)
             {
-                try
+                _logWriter.Flush();
+                _logLines = 0;
+                // 到这个硬上限就换新文件（换掉的这一份同样过一遍保留规则）
+                if (_logPath != null)
                 {
-                    if (new FileInfo(_logPath).Length > LogRollThresholdKb * 1024L)
+                    try
                     {
-                        CloseLogWriter();
-                        EnsureLogWriter();
+                        if (new FileInfo(_logPath).Length > LogRollThresholdKb * 1024L)
+                        {
+                            CloseLogWriter();
+                            EnsureLogWriterLocked();
+                        }
                     }
+                    catch { }
                 }
-                catch { }
             }
         }
     }

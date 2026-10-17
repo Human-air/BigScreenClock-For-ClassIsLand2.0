@@ -155,7 +155,8 @@
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0" Text="提醒字号" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding CameraAlertFontSize}" Minimum="15" Maximum="19"
+                                <Slider x:Name="CameraAlertFontSlider" Grid.Column="1"
+                                        Value="{Binding CameraAlertFontSize}" Minimum="15" Maximum="19"
                                         TickFrequency="1" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding CameraAlertFontSizeText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40"
@@ -504,7 +505,8 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <Slider Grid.Column="1" Value="{Binding ClockFontSize}" Minimum="60" Maximum="400"
+                        <Slider x:Name="ClockFontSlider" Grid.Column="1"
+                                Value="{Binding ClockFontSize}" Minimum="60" Maximum="400"
                                 TickFrequency="20" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding ClockFontSizeText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -512,7 +514,8 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="课程信息字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <Slider Grid.Column="1" Value="{Binding CourseInfoFontSize}" Minimum="14" Maximum="72"
+                        <Slider x:Name="CourseInfoFontSlider" Grid.Column="1"
+                                Value="{Binding CourseInfoFontSize}" Minimum="14" Maximum="72"
                                 TickFrequency="2" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding CourseInfoFontSizeText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -520,7 +523,8 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="计数字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <Slider Grid.Column="1" Value="{Binding CountFontSize}" Minimum="12" Maximum="72"
+                        <Slider x:Name="CountFontSlider" Grid.Column="1"
+                                Value="{Binding CountFontSize}" Minimum="12" Maximum="72"
                                 TickFrequency="2" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding CountFontSizeText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -530,7 +534,8 @@
                         <TextBlock Grid.Column="0" Text="时钟位置" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                         <!-- 上下限跟着大屏那边的限位走：拖到头就是屏幕上能到的最上/最下，不进死区 -->
-                        <Slider Grid.Column="1" Minimum="{Binding ClockPositionMin}" Maximum="{Binding ClockPositionMax}"
+                        <Slider x:Name="ClockPositionSlider" Grid.Column="1"
+                                Minimum="{Binding ClockPositionMin}" Maximum="{Binding ClockPositionMax}"
                                 Value="{Binding ClockPositionPercent}"
                                 TickFrequency="5" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding ClockPositionPercentText}" FontSize="12"
@@ -539,7 +544,8 @@
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="音量条位置" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                        <Slider Grid.Column="1" Minimum="{Binding VolumePositionMin}" Maximum="{Binding VolumePositionMax}"
+                        <Slider x:Name="VolumePositionSlider" Grid.Column="1"
+                                Minimum="{Binding VolumePositionMin}" Maximum="{Binding VolumePositionMax}"
                                 Value="{Binding VolumePositionPercent}"
                                 TickFrequency="5" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding VolumePositionPercentText}" FontSize="12"

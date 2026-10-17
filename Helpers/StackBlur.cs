@@ -16,11 +16,22 @@ namespace EveningSelfStudyClock.Helpers;
 public static unsafe class StackBlur
 {
     /// <summary>
+    /// 模糊半径的硬上限。
+    ///
+    /// 下面那张除法查找表是 <c>256 × (radius+1)²</c> 个 <c>short</c>，**随半径平方涨**：
+    /// 半径 88 时约 4 MB，半径 625 时 200 MB，半径 1667 时 1.4 GB —— 单个数组就能顶爆
+    /// CI 那条 1.40 GiB 的内存看门狗。而半径一放大几十倍，恰恰是「极长条图片」能干出来的事
+    /// （底图按它自己的像素烘，屏幕上一屏才多少个像素）。所以这里兜一道底。
+    /// </summary>
+    public const int MaxRadius = 88;
+
+    /// <summary>
     /// 就地模糊。<paramref name="pixels"/> 是行优先、连续排布的 BGRA 像素。
     /// </summary>
-    /// <param name="radius">模糊半径（像素）。小于 1 直接返回。</param>
+    /// <param name="radius">模糊半径（像素）。小于 1 直接返回；大于 <see cref="MaxRadius"/> 按上限算。</param>
     public static void Apply(uint[] pixels, int width, int height, int radius)
     {
+        if (radius > MaxRadius) radius = MaxRadius;   // 见 MaxRadius：防的是查找表按平方涨
         if (radius < 1 || width < 2 || height < 2) return;
         if (pixels.Length < width * height) return;
 

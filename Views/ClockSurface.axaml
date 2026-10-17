@@ -191,6 +191,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- 「正在记录」提示：平时贴在音量条下方。这么放是为了让它不跟计数片段共处一个
+                         「只缩不放大」的 Viewbox —— 计数一变长就把整行连它一起缩小，字号忽大忽小。
+                         而且它每次出现/消失都要重烘那块玻璃，现在它自己占一块、字数变化只重烘它自己。
+                         音量条被关掉时回到左下角计数行（见 RecordingInCounter）。 -->
+                    <TextBlock Text="{Binding RecordingText}"
+                               Foreground="{Binding RecordingForeground}"
+                               IsVisible="{Binding RecordingUnderMeter}"
+                               FontSize="20" FontWeight="Bold"
+                               HorizontalAlignment="Center"/>
                 </StackPanel>
             </Grid>
 
@@ -206,9 +215,10 @@
                         x:Name="CounterAreaBorder"
                         PointerEntered="CounterArea_PointerEntered"
                         PointerExited="CounterArea_PointerExited">
-                    <Viewbox x:Name="CounterContent" HorizontalAlignment="Left" VerticalAlignment="Center"
-                             Stretch="Uniform" StretchDirection="DownOnly">
-                        <StackPanel Orientation="Horizontal">
+                    <!-- 左对齐、宽度贴合内容：它是新的玻璃目标，Stretch 的话玻璃会盖满整列 -->
+                    <StackPanel x:Name="CounterStrip" Orientation="Horizontal" HorizontalAlignment="Left">
+                        <Viewbox x:Name="CounterContent" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                 Stretch="Uniform" StretchDirection="DownOnly">
                             <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -230,12 +240,16 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="{Binding RecordingText}"
-                                       Foreground="{Binding RecordingForeground}"
-                                       IsVisible="{Binding IsRecordingVisible}"
-                                       FontWeight="Bold" Margin="16,0,0,0"/>
-                        </StackPanel>
-                    </Viewbox>
+                        </Viewbox>
+                        <!-- 「正在记录」只在音量条被关掉时回退到这儿（平时贴在音量条下方）。
+                             刻意留在缩放框**外面**：进了那个框就会跟着计数的长短一起缩字，
+                             行高忽大忽小。代价是列宽不够时它会被裁掉一截。 -->
+                        <TextBlock Text="{Binding RecordingText}"
+                                   Foreground="{Binding RecordingForeground}"
+                                   IsVisible="{Binding RecordingInCounter}"
+                                   FontWeight="Bold" Margin="16,0,0,0"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
                 </Border>
                 <!-- 课程信息：与计数、按钮同处一行，居中对齐到屏幕正中。
                      最多占整行一半宽（CourseInfoMaxWidth，窗口按尺寸算），比这还长就由 Viewbox 等比缩字

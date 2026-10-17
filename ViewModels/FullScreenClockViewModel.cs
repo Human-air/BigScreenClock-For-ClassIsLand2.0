@@ -564,9 +564,30 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (_isRecordingVisible == value) return;
             _isRecordingVisible = value;
             OnPropertyChanged();
+            NotifyRecordingPlacement();
             // 它一亮，「暂未记录到吵闹」就得让位（见 AddIdleSegment），左边计数片段要跟着重算
             UpdateNoisyDisplay();
         }
+    }
+
+    /// <summary>
+    /// 「正在记录」提示的位置：默认贴在音量条下方（那一行只跟噪音有关，凑在一起正好），
+    /// 音量条被关掉时回退到左下角计数行。两处共用一个 <see cref="RecordingText"/>，
+    /// 可见性互补 —— Avalonia 的绑定做不了 AND 与取反，所以在 VM 里算好。
+    ///
+    /// 为什么不留在计数行不动：它原本和计数片段共处一个「只缩不放大」的 Viewbox，
+    /// 计数一变长就把整行连它一起缩小（字号忽大忽小），而且它一出现/消失就要重烘那块玻璃。
+    /// 挪出来以后两边互不相干。
+    /// </summary>
+    public bool RecordingUnderMeter => IsRecordingVisible && ShowDecibelMeter;
+
+    /// <summary>见 <see cref="RecordingUnderMeter"/>：音量条关掉时「正在记录」回到计数行。</summary>
+    public bool RecordingInCounter => IsRecordingVisible && !ShowDecibelMeter;
+
+    private void NotifyRecordingPlacement()
+    {
+        OnPropertyChanged(nameof(RecordingUnderMeter));
+        OnPropertyChanged(nameof(RecordingInCounter));
     }
 
     /// <summary>「正在记录：一般」/「正在记录：吵闹」。</summary>
@@ -610,7 +631,14 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public bool ShowDecibelMeter
     {
         get => _showDecibelMeter;
-        set { _showDecibelMeter = value; OnPropertyChanged(); }
+        set
+        {
+            if (_showDecibelMeter == value) return;
+            _showDecibelMeter = value;
+            OnPropertyChanged();
+            // 音量条在不在，决定「正在记录」站哪儿（见 RecordingUnderMeter/RecordingInCounter）
+            NotifyRecordingPlacement();
+        }
     }
 
     public bool ShowCourseInfo
@@ -1438,6 +1466,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 _window.Closed += (_, _) =>
                 {
                     IsWindowVisible = false;
+                    StopAntiScreensaver();   // 窗口是用户直接关的（不走 Hide）时，也得把屏幕睡眠限制撤掉
                     StopUpdateTimer();
                     _decibelService.StopMonitoring();
                     _cameraService.StopMonitoring();
@@ -1954,23 +1983,32 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private const uint ES_DISPLAY_REQUIRED = 0x00000002;
     private const uint ES_SYSTEM_REQUIRED = 0x00000001;
 
+    /// <summary>
+    /// 大屏开着期间别让屏幕睡过去。注意：这个 API **挡不住屏保**（屏保另有系统策略），
+    /// 只能阻止「显示器/系统进入睡眠」—— 所以文案上别写成「防屏保」。
+    ///
+    /// ES_CONTINUOUS 记的是**调用线程**的执行状态：在 A 线程设、B 线程清是清不掉的。
+    /// 所以刷新必须回到 UI 线程，与 Start/Stop 同一个线程，才能保证停的时候真能撤掉。
+    /// </summary>
     private void StartAntiScreensaver()
     {
         _antiScreensaverTimer?.Dispose();
-        _antiScreensaverTimer = new System.Timers.Timer(25 * 60 * 1000); // 每 25 分钟
-        _antiScreensaverTimer.Elapsed += (_, _) =>
-        {
-            SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
-        };
+        _antiScreensaverTimer = new System.Timers.Timer(25 * 60 * 1000); // 每 25 分钟续一次
+        _antiScreensaverTimer.Elapsed += (_, _) => Dispatcher.UIThread.Post(ApplyAntiScreensaver);
         _antiScreensaverTimer.Start();
-        // 立即执行一次
-        SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
+        ApplyAntiScreensaver();   // 立即执行一次
     }
+
+    private static void ApplyAntiScreensaver()
+        => SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
 
     private void StopAntiScreensaver()
     {
         _antiScreensaverTimer?.Dispose();
         _antiScreensaverTimer = null;
+        // 光停定时器是不够的：之前设的执行状态会一直挂在系统上，屏幕从此不许关。
+        // 必须显式清成 ES_CONTINUOUS（= 不再阻止睡眠）。
+        SetThreadExecutionState(ES_CONTINUOUS);
     }
 
     public void ExitFullScreen() => Hide();

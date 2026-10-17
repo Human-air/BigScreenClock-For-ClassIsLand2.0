@@ -39,12 +39,31 @@ public static class BackgroundImageStore
         if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("插件配置目录不可用");
 
         Directory.CreateDirectory(folder);
-        RemoveExisting();
 
         var name = BaseName + "-" + DateTime.Now.ToString("yyyyMMddHHmmssfff")
                    + Path.GetExtension(sourcePath).ToLowerInvariant();
-        File.Copy(sourcePath, Path.Combine(folder, name), overwrite: true);
+        var target = Path.Combine(folder, name);
+        var temp = target + ".tmp";
+
+        // 先写临时文件、成功了再换成正式名字；**绝不先删旧图**。
+        // 以前是「先删旧图 → 再拷新图」，源文件读不了 / 磁盘满的时候，用户就既没新图也没旧图，
+        // 背景直接退回纯色。大文件拷到一半也不会被当成背景图读（名字还不叫正式名）。
+        try
+        {
+            File.Copy(sourcePath, temp, overwrite: true);
+            if (File.Exists(target)) File.Delete(target);
+            File.Move(temp, target);   // 同一目录内的改名，原子
+        }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* 删不掉就留给下次清理 */ }
+            throw;
+        }
+
         settings.BackgroundImageFile = name;
+
+        // 新图已经落位、设置也指过去了，才收拾上一张
+        RemoveExisting(exceptName: name);
     }
 
     /// <summary>清掉副本并清空设置（回到纯色底）。</summary>
@@ -131,7 +150,8 @@ public static class BackgroundImageStore
         return pixels;
     }
 
-    private static void RemoveExisting()
+    /// <param name="exceptName">这张别删（刚放进去的那张）。</param>
+    private static void RemoveExisting(string? exceptName = null)
     {
         var folder = Plugin.ConfigFolder;
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
@@ -142,6 +162,8 @@ public static class BackgroundImageStore
             var name = Path.GetFileName(file);
             if (!name.StartsWith(BaseName + ".", StringComparison.OrdinalIgnoreCase) &&
                 !name.StartsWith(BaseName + "-", StringComparison.OrdinalIgnoreCase)) continue;
+            if (exceptName is not null && string.Equals(name, exceptName, StringComparison.OrdinalIgnoreCase))
+                continue;
 
             try { File.Delete(file); }
             catch { /* 正被占用就留着，下次换图再删 */ }

@@ -29,6 +29,84 @@
         </PackageReference>
     </ItemGroup>
 
+    <!--
+      内部开发版号：manifest.yml 里永远只写四位对外版本号（如 1.1.1.8），
+      本机每次 build 自动在打包产物（bin 里那份 manifest.yml 与 cipx）上盖一位递增序号 ——
+      1.1.1.8.1、1.1.1.8.2 …… 源码和 GitHub 上传夹里看不到它。
+
+      为什么这么放：对外发的包必须与内部开发版分得清（2026-10-12 之前，本机改了十几版
+      全都叫 1.1.1.7，结果希沃上装错包都判断不出来是包的问题还是系统的问题）。
+      五位号 ClassIsland 能正常加载、日志里照原样显示；而它的更新检查走 Version.TryParse，
+      五位号解析失败会被自动跳过 —— 内部开发版天然流不出去。
+      另外 devbuild.txt 里记着上一次的号，换个四位号（如 1.2.0.0）自动从 .1 重新数。
+
+      要出对外那份：dotnet build -c Release -t:Rebuild -p:DevBuild=0
+    -->
+    <PropertyGroup>
+        <DevBuildCounterFile>$(MSBuildProjectDirectory)/devbuild.txt</DevBuildCounterFile>
+    </PropertyGroup>
+
+    <UsingTask TaskName="StampDevBuild"
+               TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <ManifestFile ParameterType="System.String" Required="true" />
+            <CounterFile ParameterType="System.String" Required="true" />
+            <IsRelease ParameterType="System.Boolean" Required="true" />
+            <StampedVersion ParameterType="System.String" Output="true" />
+        </ParameterGroup>
+        <Task>
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                var lines = System.IO.File.ReadAllLines(ManifestFile);
+                var baseVersion = "";
+                foreach (var line in lines)
+                    if (line.StartsWith("version:")) { baseVersion = line.Substring("version:".Length).Trim(); break; }
+                if (baseVersion.Length == 0)
+                    throw new Exception("manifest.yml 里没找到 version 行");
+
+                var version = baseVersion;
+                if (!IsRelease)
+                {
+                    var count = 1;
+                    if (System.IO.File.Exists(CounterFile))
+                    {
+                        var saved = System.IO.File.ReadAllLines(CounterFile);
+                        // 存着上一个四位号与它数到第几：换了四位号就从 .1 重新数
+                        if (saved.Length >= 2 && saved[0].Trim() == baseVersion &&
+                            int.TryParse(saved[1].Trim(), out var last))
+                            count = last + 1;
+                    }
+                    version = baseVersion + "." + count;
+                    System.IO.File.WriteAllLines(CounterFile, new[] { baseVersion, count.ToString() });
+                }
+
+                for (var i = 0; i < lines.Length; i++)
+                    if (lines[i].StartsWith("version:")) lines[i] = "version: " + version;
+                System.IO.File.WriteAllLines(ManifestFile, lines);
+                StampedVersion = version;
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="StampManifestVersion" BeforeTargets="CreateCipx">
+        <!-- 属性只在 Condition 里求值，任务参数拿到的是纯文本，所以先算好再传 -->
+        <PropertyGroup>
+            <_IsReleaseBuild>false</_IsReleaseBuild>
+            <_IsReleaseBuild Condition="'$(DevBuild)' == '0'">true</_IsReleaseBuild>
+        </PropertyGroup>
+
+        <!-- 一律从源清单重拷一份、再盖号：OutputPath 里那份可能是上一次开发版盖过号的 -->
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/manifest.yml"
+              DestinationFiles="$(OutputPath)manifest.yml"
+              SkipUnchangedFiles="false" />
+        <StampDevBuild ManifestFile="$(OutputPath)manifest.yml"
+                       CounterFile="$(DevBuildCounterFile)"
+                       IsRelease="$(_IsReleaseBuild)">
+            <Output TaskParameter="StampedVersion" PropertyName="_StampedVersion" />
+        </StampDevBuild>
+        <Message Importance="high" Text="插件版本：$(_StampedVersion)" />
+    </Target>
+
     <ItemGroup>
         <None Update="manifest.yml">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

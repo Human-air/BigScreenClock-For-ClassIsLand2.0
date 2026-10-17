@@ -94,6 +94,23 @@ public static class BackgroundImageMap
     }
 
     /// <summary>
+    /// 视口里 1 个像素对应图上多少像素。
+    ///
+    /// 用来把「屏幕上多少像素」的模糊半径换成底图自己的像素：图缩小着铺（比屏大）就大于 1，
+    /// 放大着铺（比屏小）就小于 1。**必须按实际落位算**，拿「图宽 ÷ 视口宽」比是不对的：
+    /// 「铺满裁切」是按短边定比例、长边溢出视口的，一条十万像素宽的截图在 3840 宽的层上
+    /// 会被放大约 200 倍，宽度比却是 26 —— 半径直接放大几十倍，StackBlur 的查找表按平方涨，
+    /// 一张图就能吃掉上 GB 内存。
+    /// </summary>
+    /// <returns>图为空 / 视口为空时返回 1（不做换算）。</returns>
+    public static double ImagePixelsPerViewportPixel(PixelSize imageSize, Size viewportSize, int stretch)
+    {
+        var dest = ComputeDestRect(imageSize, viewportSize, stretch);
+        if (dest.Width <= 0.5) return 1;
+        return imageSize.Width / dest.Width;
+    }
+
+    /// <summary>
     /// 这张底图该解成多大的像素。两条规矩：
     ///
     /// 1. **绝不放大**。解码器不管原图多大，给多宽就解多宽 —— 一张 1600×1600 的壁纸给它 2560
