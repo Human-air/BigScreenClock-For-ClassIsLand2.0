@@ -44,7 +44,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
         // 这几项订阅的都是**页面外面**的对象（设置、ViewModel），页面一收起就必须摘掉：
         // CI 每打开一次设置页都可能新建一个页面，不摘的话旧页面永远活着，还接着干 UI 活。
-        Loaded += (_, _) => { HookPositionLimits(); HookLayoutSliders(); SubscribeSharedEvents(); };
+        Loaded += (_, _) =>
+        {
+            HookPositionLimits();
+            HookLayoutSliders();
+            SubscribeSharedEvents();
+            ShowLetterIfNeeded();
+        };
         Unloaded += (_, _) => { UnhookPositionLimits(); StopLayoutAdjust(); UnsubscribeSharedEvents(); };
 
         DataContext = this;
@@ -63,6 +69,30 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
         // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
         ActualThemeVariantChanged += (_, _) => ApplyThemeFromSettings();
+    }
+
+    /// <summary>
+    /// 打开设置页时弹「致所有用户的一封信」：每次启动 CI 只弹一次；
+    /// 勾了「不再显示」就再也不弹（见 <see cref="LetterWindow"/>）。
+    /// 延到版面排完之后再弹，免得页面切过来时和弹窗抢焦点。
+    /// </summary>
+    private void ShowLetterIfNeeded()
+    {
+        if (!LetterWindow.ShouldShow()) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+
+        LetterWindow.MarkShown();
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                new LetterWindow().Show(owner);
+            }
+            catch
+            {
+                // 弹窗起不来不该把设置页拖下水
+            }
+        }, DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -1276,6 +1306,26 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         get => _settings.ShowTrayMenuEntry;
         set { _settings.ShowTrayMenuEntry = value; OnPropertyChanged(nameof(ShowTrayMenuEntry)); }
     }
+
+    /// <summary>最小化超过设定时间后暂停运行（不关窗口，任务栏入口保留）。</summary>
+    public bool PauseWhenMinimized
+    {
+        get => _settings.PauseWhenMinimized;
+        set { _settings.PauseWhenMinimized = value; OnPropertyChanged(nameof(PauseWhenMinimized)); }
+    }
+
+    public int MinimizePauseMinutes
+    {
+        get => _settings.MinimizePauseMinutes;
+        set
+        {
+            _settings.MinimizePauseMinutes = value;
+            OnPropertyChanged(nameof(MinimizePauseMinutes));
+            OnPropertyChanged(nameof(MinimizePauseMinutesText));
+        }
+    }
+
+    public string MinimizePauseMinutesText => $"{_settings.MinimizePauseMinutes} 分钟";
 
     // ===== 外观颜色（HSV 颜色选择器，Avalonia.Controls.ColorPicker 双向绑定） =====
 

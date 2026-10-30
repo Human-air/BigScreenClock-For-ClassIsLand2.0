@@ -56,6 +56,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>当前主题下「吵闹」计数色。</summary>
     private IBrush CountNoisy => Chrome.IsLight ? CountNoisyLightBrush : CountNoisyBrush;
 
+    /// <summary>给设置页预览的「一般」示意文字用，跟真实计数同一份语义色。</summary>
+    public IBrush CountNormalForeground => CountNormal;
+
+    /// <summary>给设置页预览的「吵闹」示意文字用。</summary>
+    public IBrush CountNoisyForeground => CountNoisy;
+
     // 计数区「暂未记录到吵闹」前的对勾图标字形（矢量）
     private static readonly string CheckIcon = IconGlyph.Of(LucideIconKind.CircleCheck);
 
@@ -110,6 +116,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private DateTime _classStartTime;
     private string _courseInfoText = "";
     private List<TimeSlot> _todaySlots = new();
+    private DateTime _scheduleDate;   // _todaySlots 是哪一天的课表（跨天要重读）
     private System.Timers.Timer? _antiScreensaverTimer;
     private string _noisyDisplaySignature = "";
     private bool _showCountRules;
@@ -208,7 +215,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (args.PropertyName is nameof(PluginSettings.ShowCameraReminder))
             {
                 // 大屏正开着时改开关：立即开始/停止监视（没开大屏则等 Show() 时再起）
-                if (_settings.ShowCameraReminder && IsWindowVisible) _cameraService.StartMonitoring();
+                // 最小化暂停期间不因为改设置把监视重新拉起来（点回时 Resume 会统一恢复）
+                if (_settings.ShowCameraReminder && IsWindowVisible && !_pausedForMinimize)
+                    _cameraService.StartMonitoring();
                 else if (!_settings.ShowCameraReminder) _cameraService.StopMonitoring();
             }
             UpdateAlertItems();
@@ -419,6 +428,10 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _noisyDisplaySignature = "";
         UpdateNoisyDisplay();
         RefreshRecordingColor();
+
+        // 预览里的示意计数直接绑这两个（不经过片段列表），换主题得单独通知
+        OnPropertyChanged(nameof(CountNormalForeground));
+        OnPropertyChanged(nameof(CountNoisyForeground));
     }
 
     /// <summary>档位文字：换主题时同时换「未达到/已达到」两色与淡化程度（浅底要淡得少些）。</summary>
@@ -571,22 +584,25 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 「正在记录」提示的位置：默认贴在音量条下方（那一行只跟噪音有关，凑在一起正好），
-    /// 音量条被关掉时回退到左下角计数行。两处共用一个 <see cref="RecordingText"/>，
+    /// 「正在记录」提示的位置：平时在音量条标题行的正中间（左边「教室音量」、右边当前档位，
+    /// 中间正好空着）；音量条被关掉时回退到左下角计数行。两处共用一个 <see cref="RecordingText"/>，
     /// 可见性互补 —— Avalonia 的绑定做不了 AND 与取反，所以在 VM 里算好。
     ///
-    /// 为什么不留在计数行不动：它原本和计数片段共处一个「只缩不放大」的 Viewbox，
-    /// 计数一变长就把整行连它一起缩小（字号忽大忽小），而且它一出现/消失就要重烘那块玻璃。
-    /// 挪出来以后两边互不相干。
+    /// 为什么占「标题行」而不是另起一行：它一出现/消失，那一整行（连玻璃）的尺寸都会变，
+    /// 得重烘一块玻璃，看着就是「没有过渡、直接闪一下」。塞进本来就空着的中间，
+    /// 出现/消失一个像素都不挪，一次都不用重烘。
+    ///
+    /// 为什么不留在计数行：它原本和计数片段共处一个「只缩不放大」的 Viewbox，
+    /// 计数一变长就把整行连它一起缩小（字号忽大忽小）。挪出来以后两边互不相干。
     /// </summary>
-    public bool RecordingUnderMeter => IsRecordingVisible && ShowDecibelMeter;
+    public bool RecordingInMeterTitle => IsRecordingVisible && ShowDecibelMeter;
 
-    /// <summary>见 <see cref="RecordingUnderMeter"/>：音量条关掉时「正在记录」回到计数行。</summary>
+    /// <summary>见 <see cref="RecordingInMeterTitle"/>：音量条关掉时「正在记录」回到计数行。</summary>
     public bool RecordingInCounter => IsRecordingVisible && !ShowDecibelMeter;
 
     private void NotifyRecordingPlacement()
     {
-        OnPropertyChanged(nameof(RecordingUnderMeter));
+        OnPropertyChanged(nameof(RecordingInMeterTitle));
         OnPropertyChanged(nameof(RecordingInCounter));
     }
 
@@ -636,7 +652,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (_showDecibelMeter == value) return;
             _showDecibelMeter = value;
             OnPropertyChanged();
-            // 音量条在不在，决定「正在记录」站哪儿（见 RecordingUnderMeter/RecordingInCounter）
+            // 音量条在不在，决定「正在记录」站哪儿（见 RecordingInMeterTitle/RecordingInCounter）
             NotifyRecordingPlacement();
         }
     }
@@ -1411,12 +1427,6 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 底部固定显示的免责声明（前面的警告图标由 XAML 用矢量图标画，不在文本里）。
-    /// </summary>
-    public string DisclaimerText
-        => "分贝仅供参考，可能受风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况";
-
-    /// <summary>
     /// 把「平时只在 <see cref="Show"/> 里同步一次」的那几项（字号、音量条/课程信息开关、五个颜色、时钟字体、
     /// 提醒数据）当场从设置里重读一遍，供设置页的预览调用。
     ///
@@ -1466,6 +1476,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 _window.Closed += (_, _) =>
                 {
                     IsWindowVisible = false;
+                    CancelMinimizePause();
+                    _pausedForMinimize = false;
                     StopAntiScreensaver();   // 窗口是用户直接关的（不走 Hide）时，也得把屏幕睡眠限制撤掉
                     StopUpdateTimer();
                     _decibelService.StopMonitoring();
@@ -1493,6 +1505,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 // 最小化时把 CI 主界面拉了出来（见 Minimize），回到大屏就得收回去，
                 // 否则主界面一直留在大屏时钟后面/旁边
                 SetMainWindowVisible(false);
+                ResumeFromMinimizePause();   // 最小化超过设定时间被暂停的话，这里恢复运行
                 RefreshAll();
                 return;
             }
@@ -1527,8 +1540,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 最小化到任务栏（收进任务栏可点回）。只收起画面，不停任何定时器/分贝/防休眠：
-    /// 收起 ≠ 退出，计时、计数全程持续，点回任务栏图标即恢复全屏。
+    /// 最小化到任务栏（收进任务栏可点回）。收起本身不停运行；只有按设置「最小化超过 N 分钟」
+    /// 才暂停（见 <see cref="ScheduleMinimizePause"/>），点回任务栏图标即恢复全屏与运行。
     /// </summary>
     public void Minimize()
     {
@@ -1537,7 +1550,77 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (_window == null || !IsWindowVisible) return;
             _window.WindowState = WindowState.Minimized;
             ShowCiMainWindow();
+            ScheduleMinimizePause();
         });
+    }
+
+    // ===== 最小化暂停 =====
+
+    private System.Timers.Timer? _minimizePauseTimer;
+    private bool _pausedForMinimize;
+
+    /// <summary>按设置排一个「最小化够久了就暂停」的闹钟。没开这项设置就直接不排。</summary>
+    private void ScheduleMinimizePause()
+    {
+        CancelMinimizePause();
+        if (!_settings.PauseWhenMinimized) return;
+
+        var minutes = Math.Clamp(_settings.MinimizePauseMinutes, 1, 30);
+        var timer = new System.Timers.Timer(minutes * 60_000.0) { AutoReset = false };
+        timer.Elapsed += (_, _) =>
+        {
+            timer.Dispose();
+            Dispatcher.UIThread.Post(() =>
+            {
+                // 中途点回任务栏会把这支闹钟取消掉（CancelMinimizePause），落地前再确认一次
+                if (!ReferenceEquals(_minimizePauseTimer, timer)) return;
+                _minimizePauseTimer = null;
+                if (_window is null || !IsWindowVisible) return;
+                if (_window.WindowState != WindowState.Minimized) return;
+                PauseForMinimize();
+            });
+        };
+        _minimizePauseTimer = timer;
+        timer.Start();
+    }
+
+    private void CancelMinimizePause()
+    {
+        _minimizePauseTimer?.Dispose();
+        _minimizePauseTimer = null;
+    }
+
+    /// <summary>
+    /// 停掉所有「跟着大屏跑」的后台工作，**不关窗口、不动任务栏入口** ——
+    /// 与 <see cref="Hide"/>（退出大屏）的区别就在这里：人暂时不在，先歇着，点回就继续。
+    /// </summary>
+    private void PauseForMinimize()
+    {
+        if (_pausedForMinimize) return;
+        _pausedForMinimize = true;
+
+        StopUpdateTimer();
+        StopAntiScreensaver();
+        _decibelService.StopMonitoring();
+        _cameraService.StopMonitoring();
+        UnsubscribeToClassEvents();
+        _progressAnimTimer?.Stop();
+    }
+
+    /// <summary>点回任务栏（或从托盘/设置页再次打开）时，把最小化期间暂停掉的运行恢复回来。</summary>
+    private void ResumeFromMinimizePause()
+    {
+        if (!_pausedForMinimize) return;
+        _pausedForMinimize = false;
+        CancelMinimizePause();
+
+        LoadTodaySchedule();          // 期间可能已经换课
+        SubscribeToClassEvents();     // 顺带立刻按当前时间状态重算一次
+        StartUpdateTimer();
+        StartAntiScreensaver();
+        _decibelService.StartMonitoring();
+        if (_settings.ShowCameraReminder) _cameraService.StartMonitoring();
+        RefreshAll();
     }
 
     /// <summary>
@@ -1560,6 +1643,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         if (_window == null || !IsWindowVisible || !_window.IsVisible) return;
         if (_window.WindowState is WindowState.FullScreen or WindowState.Minimized) return;
+        ResumeFromMinimizePause();   // 从任务栏点回：最小化暂停过的运行在这里恢复（没暂停则什么都不做）
         _window.Show();   // 幂等：窗口已可见时再次 Show 把后台/非活动窗口置前
         _window.WindowState = WindowState.FullScreen;
         // 从任务栏点回也算「回到大屏」：最小化时拉出来的 CI 主界面同样要收回去
@@ -1570,6 +1654,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     {
         Dispatcher.UIThread.Post(() =>
         {
+            CancelMinimizePause();
+            _pausedForMinimize = false;
             _window?.Hide();
             StopUpdateTimer();
             StopAntiScreensaver();
@@ -1633,6 +1719,33 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             _lastWeatherRead = DateTime.Now;
             RefreshWeather();
         }
+    }
+
+    /// <summary>CI 的虚拟当前时间（含时间偏移）。课前预烘要跟大屏用同一口钟。</summary>
+    public DateTime VirtualNow => NowVirtual;
+
+    /// <summary>
+    /// 今天还没开始的目标课程里最早的那节的上课时刻；没有目标课、或者正在上的就是目标课，返回 null。
+    /// 课前预烘（<see cref="Services.BackdropPreloadService"/>）靠它判断「离点亮就剩两分钟了」。
+    /// 课表按天缓存，跨天才重读（每 20 秒读一遍 Settings.json + 课表太浪费）。
+    /// </summary>
+    public DateTime? GetNextTargetCourseStart()
+    {
+        var now = NowVirtual;
+        if (_scheduleDate != now.Date)
+        {
+            LoadTodaySchedule();
+            // 课表读失败（没有 profile 文件）也记下日期，免得每轮都重读一遍
+            _scheduleDate = now.Date;
+        }
+
+        if (_todaySlots.Count == 0) return null;
+
+        var slots = new List<ClassStartSchedule.Slot>(_todaySlots.Count);
+        foreach (var s in _todaySlots)
+            slots.Add(new ClassStartSchedule.Slot(s.Start, s.End, s.IsClass, s.SubjectName));
+
+        return ClassStartSchedule.NextTargetStart(slots, _settings.IsTargetCourse, now);
     }
 
     private void LoadTodaySchedule()

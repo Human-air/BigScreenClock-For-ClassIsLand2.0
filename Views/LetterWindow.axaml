@@ -1,0 +1,90 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
+        xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
+        x:Class="EveningSelfStudyClock.Views.LetterWindow"
+        Title="致所有用户的一封信"
+        Width="680" Height="620"
+        SystemDecorations="None"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        FontFamily="Microsoft YaHei,SimHei,sans-serif">
+
+    <Window.Styles>
+        <Style Selector="TextBlock.icon">
+            <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
+        </Style>
+        <!-- 正文段落：行距放宽一点，长信才不挤 -->
+        <Style Selector="TextBlock.body">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="LineHeight" Value="24"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Styles>
+
+    <Border x:Name="PanelBorder" CornerRadius="16" BorderThickness="1" Padding="28,20,28,16">
+        <Grid RowDefinitions="Auto,*,Auto">
+
+            <!-- 顶栏：标题 + 右上角关闭 -->
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleIcon" Classes="icon" Text="{ci:LI Mail}" FontSize="20"
+                               VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TitleText" Text="大屏时钟插件制作者致所有用户的一封信"
+                               FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button x:Name="CloseButton" Grid.Column="1" Width="32" Height="32"
+                        Background="Transparent" BorderThickness="0" CornerRadius="8"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        Cursor="Hand" Click="CloseButton_Click">
+                    <TextBlock x:Name="CloseIcon" Classes="icon" Text="{ci:LI X}" FontSize="16"/>
+                </Button>
+            </Grid>
+
+            <!-- 正文 -->
+            <ScrollViewer Grid.Row="1" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="BodyStack" Spacing="12" Margin="0,0,8,0">
+                    <TextBlock x:Name="TextFont" Classes="body">大家好，我是大屏时钟插件的作者 sokumei。</TextBlock>
+
+                    <TextBlock x:Name="TextIntro" Classes="body">自大屏时钟插件上架 ClassIsland 2.0 插件市场至今，已经过去了两个月。短短两个月，插件市场的下载量就达到了 5.3K。我是第一次做插件开发并把它上架到市场，5.3K——这对我来说是非常鼓舞人心的数字，谢谢大家的支持！</TextBlock>
+
+                    <TextBlock x:Name="TextVersions" Classes="body">在这两个月的时间里，我陆续更新了十个版本，修复并新增了不少功能：</TextBlock>
+
+                    <StackPanel Spacing="4" Margin="14,0,0,0">
+                        <TextBlock x:Name="TextVer2" Classes="body">比如 9 月 12 日的 1.1.1.2 版本，把设置页、大屏和关于窗口里的 emoji 统一换成了 ClassIsland 自带的 Lucide 图标字体；</TextBlock>
+                        <TextBlock x:Name="TextVer5" Classes="body">10 月 1 日的 1.1.1.5 版本，在设置的外观里加入了明亮 / 黑暗主题；</TextBlock>
+                        <TextBlock x:Name="TextVer8" Classes="body">10 月 10 日的 1.1.1.8 版本更进一步，加入了自定义背景图设置，并一并添加了组件的液态玻璃底等选项……</TextBlock>
+                    </StackPanel>
+
+                    <TextBlock x:Name="TextAi" Classes="body">得益于 AI 的帮助，这两个月我几乎保持着一周一版的更新节奏，其中大部分 Bug 都是我自己在班级电脑上使用时发现的。</TextBlock>
+
+                    <TextBlock x:Name="TextEnd" Classes="body">大屏时钟发展到现在，其实已经走到了开发的终点：我能发现的问题基本都已解决，功能也趋于完善。继续盲目地堆叠新功能，只会让插件变得臃肿。</TextBlock>
+
+                    <TextBlock x:Name="TextPlan" Classes="body">因此，从 1.2.0.0 版本起，大屏时钟将不再添加新功能，今后只围绕现有功能做修复更新。且当不再有人反馈问题时，这个项目也会正式停止更新。同时，考虑到自身学业，后续的更新速度也会放缓。</TextBlock>
+
+                    <TextBlock x:Name="TextContact" Classes="body">如遇到 Bug，欢迎在 GitHub 仓库提交 issue，或在演示视频评论区留言反馈。</TextBlock>
+
+                    <TextBlock x:Name="TextThanks" Classes="body" FontWeight="Bold">再次感谢大家！</TextBlock>
+
+                    <StackPanel Margin="0,4,0,0" HorizontalAlignment="Right">
+                        <TextBlock x:Name="SignName" Text="sokumei" FontSize="14" HorizontalAlignment="Right"/>
+                        <TextBlock x:Name="SignDate" Text="2026/10/31" FontSize="12" HorizontalAlignment="Right"
+                                   Opacity="0.7"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 底栏：不再显示 + 关闭 -->
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+                <CheckBox x:Name="DontShowAgainBox" Content="不再显示" FontSize="13"
+                          VerticalAlignment="Center" Cursor="Hand"/>
+                <Button x:Name="OkButton" Grid.Column="1" Padding="22,8" CornerRadius="8" BorderThickness="0"
+                        FontSize="14" FontWeight="Bold" Cursor="Hand" Click="CloseButton_Click" Content="我知道了"/>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

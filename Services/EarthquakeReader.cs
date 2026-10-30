@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using ClassIsland.Core.Abstractions.Services;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -87,10 +88,19 @@ public sealed class EarthquakeReader
             var calculator = settings.GetType().Assembly.GetType(CalculatorTypeName);
             var distance = Calc(calculator, "GetDistance", myLat, myLon, quakeLat.Value, quakeLon.Value)
                            ?? HaversineKm(myLat, myLon, quakeLat.Value, quakeLon.Value);
-            var intensity = Calc(calculator, "GetIntensity", magnitude, distance)
+
+            // 深度缺失或为 0 时按 10 km 处理，与对方 DataMonitor 里的写法一致
+            var depthKm = depth is > 0 ? depth.Value : 10.0;
+
+            // 对方有两个 GetIntensity 重载：4 个参数的（汪素云分区衰减，带深度与震中经度）才是
+            // 它自己判断「要不要弹」用的那个，2 个参数那个是中西部通用兜底。先按它自己的算法算，
+            // 拿不到再退 2 参数版，最后才用本地经验公式。
+            var intensity = Calc(calculator, "GetIntensity", magnitude, distance, depthKm, quakeLon.Value)
+                            ?? Calc(calculator, "GetIntensity", magnitude, distance)
                             ?? FallbackIntensity(magnitude, distance);
-            var countdown = Calc(calculator, "GetCountDownSeconds", depth ?? 10.0, distance)
-                            ?? FallbackCountdownSeconds(depth ?? 10.0, distance);
+
+            var countdown = Calc(calculator, "GetCountDownSeconds", depthKm, distance)
+                            ?? FallbackCountdownSeconds(depthKm, distance);
 
             var alert = EarthquakeAlertBuilder.Build(placeName, magnitude, shockTime, intensity, threshold,
                 countdown, now);
@@ -148,14 +158,24 @@ public sealed class EarthquakeReader
         return null;
     }
 
-    /// <summary>调用对方计算器上的静态方法；找不到就返回 null（由调用方走兜底算法）。</summary>
+    /// <summary>
+    /// 调用对方计算器上的静态方法；找不到就返回 null（由调用方走兜底算法）。
+    ///
+    /// **按参数个数挑重载**：对方后来给 GetIntensity 加了一个 4 参数的重载，
+    /// 原来的 GetMethod(名字) 一碰上重载就抛 AmbiguousMatchException。那个异常被 Read 的外层
+    /// catch 吞成了「没有地震」，于是大屏上永远不弹——连它自己的「测试预警」也弹不出来
+    /// （2026-10-30 用户反馈：本地演练时大屏毫无反应）。
+    /// </summary>
     private static double? Calc(Type? calculator, string methodName, params double[] args)
     {
-        var method = calculator?.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
-        if (method is null || method.GetParameters().Length != args.Length) return null;
+        if (calculator is null) return null;
+
+        var method = FindOverload(calculator, methodName, args.Length);
+        if (method is null) return null;
+
         try
         {
-            var result = method.Invoke(null, args.Cast<object>().ToArray());
+            var result = method.Invoke(null, args.Cast<object?>().ToArray());
             return result is null ? null : Convert.ToDouble(result);
         }
         catch
@@ -163,6 +183,10 @@ public sealed class EarthquakeReader
             return null;
         }
     }
+
+    /// <summary>在类型上找「名字对、参数个数对、参数都是 double/double?、返回值是 double」的静态方法。</summary>
+    internal static MethodInfo? FindOverload(Type? calculator, string methodName, int arity)
+        => StaticOverloadFinder.Find(calculator, methodName, arity, typeof(double), typeof(double));
 
     /// <summary>读属性值。默认只找公开属性；<paramref name="isPublic"/> 为 false 时也允许 internal。</summary>
     private static object? GetProp(object? target, string name, bool isPublic = true)

@@ -8,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Media.Transformation;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.ViewModels;
 
@@ -55,19 +56,20 @@ public partial class ClockSurface : UserControl
         {
             UpdateSizeDependentLayout();
             SetupBackdrop();
+            UpdatePreviewPlaceholders();
         };
 
         // 时钟/音量条的上下位置：主体区或两块自身的尺寸一变（换字号、开关注音条、内容行数变化）就重算
-        // 地震提醒的「左右绽开」：横向从中间展开，不从下往上冒
+        // 地震提醒的「左右绽开」：横向从中间展开，不从下往上冒。
+        // 显示与否在外层那格上（整屏正中的覆盖层），卡片本身一直存在，所以盯的是外层。
         EarthquakeAlertBlock.RenderTransformOrigin = RelativePoint.Center;
-        EarthquakeAlertBlock.PropertyChanged += OnEarthquakeAlertPropertyChanged;
+        EarthquakeAlertLayer.PropertyChanged += OnEarthquakeAlertPropertyChanged;
 
         BodyArea.SizeChanged += (_, _) => ApplyBodyPositions();
         ClockText.SizeChanged += (_, _) => ApplyBodyPositions();
         VolumePanel.SizeChanged += (_, _) => ApplyBodyPositions();
-        EarthquakeAlertBlock.SizeChanged += (_, _) => ApplyBodyPositions();
         Loaded += (_, _) => ApplyBodyPositions();
-
+        Loaded += (_, _) => UpdatePreviewPlaceholders();
     }
 
     // ===== 生命周期：挂上/摘掉那几根「全局事件」的线 =====
@@ -103,6 +105,7 @@ public partial class ClockSurface : UserControl
         if (_hookedVm is null && DataContext is FullScreenClockViewModel vm)
         {
             vm.PropertyChanged += OnClockViewModelPropertyChanged;
+            vm.NoisyDisplaySegments.CollectionChanged += OnNoisySegmentsChanged;
             _hookedVm = vm;
         }
     }
@@ -114,9 +117,15 @@ public partial class ClockSurface : UserControl
         _settingsHooked = false;
 
         if (_hookedVm is { } vm)
+        {
             vm.PropertyChanged -= OnClockViewModelPropertyChanged;
+            vm.NoisyDisplaySegments.CollectionChanged -= OnNoisySegmentsChanged;
+        }
         _hookedVm = null;
     }
+
+    private void OnNoisySegmentsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => UpdatePreviewPlaceholders();
 
     private void OnPluginSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -126,6 +135,15 @@ public partial class ClockSurface : UserControl
             or nameof(PluginSettings.ShowDecibelMeter))
         {
             ApplyBodyPositions();
+            UpdatePreviewPlaceholders();
+            return;
+        }
+
+        // 预览里的假内容跟着这两项开关走；它们不进玻璃，不用重烘
+        if (e.PropertyName is nameof(PluginSettings.ShowNoisyCounter)
+            or nameof(PluginSettings.ShowCourseInfo))
+        {
+            UpdatePreviewPlaceholders();
             return;
         }
 
@@ -151,8 +169,12 @@ public partial class ClockSurface : UserControl
         {
             _backdropBound = true;
 
-            // 全部独立组件各垫一块；地震提醒块刻意不垫（保留它的实心烈度色），
-            // 底部全宽进度带与免责声明也不垫（语义色带 / 太窄，垫了反而糊）。
+            // 全部独立组件各垫一块；地震提醒块刻意不垫 —— 它在整屏正中，底下正好压着时钟，
+            // 登记进来磨砂会跑到时钟下面、时钟的字反而浮在磨砂上面。
+            // 它自己从背景层那张模糊图上裁一块（见 FrostedCardBackdrop）。
+            // 底部全宽进度带不垫（语义色带，垫了反而糊）。
+            EqFrost.Layer = Backdrop;
+            QuakeSheet.Layer = Backdrop;   // 整屏那层磨砂，同一张模糊图
             Backdrop.GlassTargets = new GlassTarget[]
             {
                 new() { Visual = WeatherBlock },
@@ -208,6 +230,33 @@ public partial class ClockSurface : UserControl
             ApplyButtonHalo();
             ApplyBackdrop();
         }
+
+        // 预览占位内容跟着这些状态走（上课了就把假内容撤掉）
+        if (e.PropertyName is nameof(FullScreenClockViewModel.CourseInfoText)
+            or nameof(FullScreenClockViewModel.IsRecordingVisible)
+            or nameof(FullScreenClockViewModel.ShowDecibelMeter))
+        {
+            UpdatePreviewPlaceholders();
+        }
+    }
+
+    /// <summary>
+    /// 设置页预览专供：补一份「假内容」。
+    ///
+    /// 预览不是另画的小样，而是把大屏这面墙原样缩小 —— 所以没在上课时，课程信息、左下角计数、
+    /// 「正在记录」本来就是空的，想调这几项字号，预览里什么也看不到。这里在**预览那一份**里
+    /// 补一行示意文字，只在真实内容为空时显示。
+    /// 不碰 ViewModel：大屏与预览共用同一个实例，往 VM 里塞假数据会污染真实大屏。
+    /// </summary>
+    private void UpdatePreviewPlaceholders()
+    {
+        var vm = DataContext as FullScreenClockViewModel;
+        var preview = IsPreview && vm is not null;
+
+        var counterOn = Plugin.Settings?.ShowNoisyCounter ?? true;
+        PreviewCounterPlaceholder.IsVisible = preview && counterOn && vm!.NoisyDisplaySegments.Count == 0;
+        PreviewCoursePlaceholder.IsVisible = preview && string.IsNullOrWhiteSpace(vm!.CourseInfoText);
+        PreviewRecordingPlaceholder.IsVisible = preview && vm!.ShowDecibelMeter && !vm.IsRecordingVisible;
     }
 
     /// <summary>
@@ -261,11 +310,30 @@ public partial class ClockSurface : UserControl
         var on = settings.BackgroundEnabled;
 
         Backdrop.SetPalette(vm.Chrome, ParseColorOrDefault(vm.BackgroundColor, Colors.Black));
+        ApplyQuakeFrost(vm);
         Backdrop.Apply(on ? BackgroundImageStore.ResolvePath(settings.BackgroundImageFile) : null,
                        settings.BackgroundImageStretch, settings.BackgroundDim,
                        on ? settings.GlassMode : (int)GlassMode.Off,
                        settings.GlassOpacity, settings.GlassBlurRadius, settings.GlassRefraction,
                        settings.GlassFrost, settings.AdjustingLayout);
+    }
+
+    /// <summary>
+    /// 地震预警那层「整屏磨砂」的压色：磨砂本身用背景层早烘好的模糊图（现成的，只多画一遍），
+    /// 这里只负责在它上面按亮/暗主题压一档，卡片（不压）才跳得出来。
+    /// QuakeVeil 是没有背景图时的兜底：近乎不透明，把别的都盖住。
+    /// </summary>
+    private void ApplyQuakeFrost(FullScreenClockViewModel vm)
+    {
+        var light = vm.Chrome.IsLight;
+
+        QuakeSheet.Tint = new SolidColorBrush(light
+            ? Color.FromArgb(0x3D, 0xFF, 0xFF, 0xFF)
+            : Color.FromArgb(0x59, 0x00, 0x00, 0x00));
+
+        QuakeVeil.Background = new SolidColorBrush(light
+            ? Color.FromArgb(0xE8, 0xFF, 0xFF, 0xFF)
+            : Color.FromArgb(0xE8, 0x08, 0x08, 0x0C));
     }
 
     private static Color ParseColorOrDefault(string? hex, Color fallback)
@@ -289,9 +357,6 @@ public partial class ClockSurface : UserControl
         vm.EarthquakeAlertMaxWidth = Math.Max(240, Bounds.Width - 80 - 72);
         ApplyBodyPositions();
     }
-
-    /// <summary>地震提醒块固定在主体区顶部，这里留的余量（主体区本身就在顶部那行提醒下面，不会挡到弹幕）。</summary>
-    private const double QuakeAlertTop = 8;
 
     /// <summary>
     /// 地震提醒弹出动画：整块横向从中间向两侧绽开。
@@ -322,12 +387,7 @@ public partial class ClockSurface : UserControl
     {
         if (e.Property != Visual.IsVisibleProperty) return;
 
-        if (!EarthquakeAlertBlock.IsVisible)
-        {
-            // 提醒收起：SizeChanged 不一定来，这里补一刀，让给过位的时钟当场回原位
-            ApplyBodyPositions();
-            return;
-        }
+        if (!EarthquakeAlertLayer.IsVisible) return;
 
         EarthquakeAlertBlock.RenderTransform = QuakeScale(0.04);   // 先归零，免得动画起来前闪一帧整块
         try
@@ -340,9 +400,6 @@ public partial class ClockSurface : UserControl
         }
     }
 
-    /// <summary>地震提醒块底边与时钟上沿之间至少留出的距离（时钟限位的依据）。</summary>
-    private const double QuakeAlertGap = 26;
-
     /// <summary>时钟与音量条之间至少留出的距离（音量条顶上来时的联动依据）。</summary>
     private const double ClockVolumeGap = 24;
 
@@ -353,15 +410,13 @@ public partial class ClockSurface : UserControl
     /// 时钟、音量条各自的上下位置。设置里存的是「该块中心落在主体区高度的百分之几」（0 最上、100 最下），
     /// 这里按主体区的实测高度换算成上边距，再钳进这一轮算出来的可落范围（滑块的范围也是同一个）。
     ///
-    /// 三块从上到下依次是：地震提醒（钉在主体区顶部，不随时钟移动）、时钟、音量条，谁都不许越界：
-    /// - 提醒块不会顶进上面那行（主体区本来就在它下面）；
-    /// - 时钟上不到提醒块里（下沿再留 QuakeAlertGap）；
-    /// - 音量条上不了时钟头顶（顶到头时时钟正好贴住提醒块），下不出主体区——
-    ///   再往下就压到「最小化 / 退出」那一行了。三条里这条和「时钟不越提醒」是硬要求。
+    /// 两块从上到下依次是：时钟、音量条，谁都不许越界：
+    /// - 时钟不出主体区（顶不出上沿、底不出下沿）；
+    /// - 音量条上不了时钟头顶，下不出主体区——再往下就压到「最小化 / 退出」那一行了。
     ///
     /// 音量条的下限是固定的，时钟的下限跟着音量条走——所以音量条往上顶，时钟的可落范围就收紧、
-    /// 被一并顶上去，一直顶到贴住提醒块为止；反过来往下拖时钟，时钟停在音量条上沿，
-    /// 不会把音量条挤下去。不用另记「这次拖的是哪一个」。
+    /// 被一并顶上去；反过来往下拖时钟，时钟停在音量条上沿，不会把音量条挤下去。
+    /// 不用另记「这次拖的是哪一个」。
     ///
     /// 钳完的位置会写回设置，滑块范围也同步过去：滑块显示的、能拖的就是屏幕上的实际情况。
     /// 预览那一份（<see cref="IsPreview"/>）只照这套摆位，既不改设置、也不动滑块范围——
@@ -377,28 +432,22 @@ public partial class ClockSurface : UserControl
         _applyingLayout = true;
         try
         {
-            // 提醒块固定：贴着主体区顶部摆，并给时钟让出下沿
-            var alertVisible = EarthquakeAlertBlock.IsVisible;
-            var clockMinTop = 0.0;
-            if (alertVisible)
-            {
-                SetTop(EarthquakeAlertBlock, QuakeAlertTop);
-                clockMinTop = QuakeAlertTop + EarthquakeAlertBlock.Bounds.Height + QuakeAlertGap;
-            }
+            // 地震提醒是整屏正中的浮层，不参与这里的限位：它来去都不该把时钟顶走
+            const double clockMinTop = 0.0;
 
             var clockHeight = ClockText.Bounds.Height;
             var volumeVisible = VolumePanel.IsVisible;
             var volumeHeight = VolumePanel.Bounds.Height;
 
-            // 音量条：上不了「顶到头时正好把时钟顶到提醒块下沿」那条线，
-            // 下不出主体区（再往下就压到「最小化 / 退出」那一行去了，这条优先守住）
+            // 音量条：上不了时钟头顶，下不出主体区
+            // （再往下就压到「最小化 / 退出」那一行去了，这条优先守住）
             var volumeMinTop = clockMinTop + clockHeight + ClockVolumeGap;
             var volumeMaxTop = Math.Max(0, areaHeight - volumeHeight);
             var volumeTop = volumeVisible
                 ? Math.Min(Math.Max(TopFor(settings.VolumePositionPercent, areaHeight, volumeHeight), volumeMinTop), volumeMaxTop)
                 : 0.0;
 
-            // 时钟：上不到提醒块里（这条也是硬要求），下压不到音量条上。装不下时宁可两块挨上也别越界
+            // 时钟：上不出主体区，下压不到音量条上。装不下时宁可两块挨上也别越界
             var clockRoomTop = volumeVisible ? volumeTop - ClockVolumeGap - clockHeight : areaHeight - clockHeight;
             var clockMaxTop = Math.Max(clockMinTop, clockRoomTop);
             var clockTop = Math.Clamp(TopFor(settings.ClockPositionPercent, areaHeight, clockHeight), clockMinTop, clockMaxTop);
@@ -408,21 +457,16 @@ public partial class ClockSurface : UserControl
 
             if (IsPreview) return;   // 预览到此为止：位置摆好了，剩下的都是真实大屏才该做的事
 
-            // 滑块范围按「没有提醒块」的那套限位算（下限用 0 = 主体区最上面）：
-            // 提醒是临时来客，地震过去后时钟要回原位，滑块范围不能跟着它一起挤小——
-            // 范围一挤小，滑块会把设置里存的位置一起改掉，那就真回不去了。
             if (DataContext is FullScreenClockViewModel vm)
             {
                 vm.SetPositionLimits(
-                    PercentOf(0, areaHeight, clockHeight),
+                    PercentOf(clockMinTop, areaHeight, clockHeight),
                     PercentOf(clockMaxTop, areaHeight, clockHeight),
                     volumeVisible ? PercentOf(Math.Min(clockHeight + ClockVolumeGap, volumeMaxTop), areaHeight, volumeHeight) : 0,
                     volumeVisible ? PercentOf(volumeMaxTop, areaHeight, volumeHeight) : 100);
             }
 
-            // 提醒块在的时候不写回：这会儿被顶下去是临时的，写回就把原位置丢了（提醒一撤，时钟回不去）
-            if (!alertVisible)
-                WriteBack(settings, areaHeight, clockTop, clockHeight, volumeTop, volumeHeight, volumeVisible);
+            WriteBack(settings, areaHeight, clockTop, clockHeight, volumeTop, volumeHeight, volumeVisible);
         }
         finally
         {
@@ -678,8 +722,32 @@ public partial class ClockSurface : UserControl
     {
         if (_aboutWindow != null && _aboutWindow.IsVisible) return;
         if (TopLevel.GetTopLevel(this) is not Window owner) return;   // 预览那份不在窗口里，点了也不弹
-        _aboutWindow = new AboutPopupWindow();
-        _aboutWindow.Closed += (_, _) => _aboutWindow = null;
+
+        var vm = DataContext as FullScreenClockViewModel;
+        var settings = Plugin.Settings;
+
+        // 有烘好的模糊底图（磨砂 / 真•◯◯玻璃档）→ 把整面墙实时糊掉，大屏内容还看得见轮廓，
+        // 关于窗口浮在上面。就糊这一阵子（弹出期间），关掉立刻撤掉 Effect，不留常驻开销。
+        var frosted = Backdrop.HasBlurredBackdrop;
+        if (frosted)
+        {
+            var radius = settings?.GlassBlurRadius ?? 24;
+            Effect = new BlurEffect { Radius = Math.Clamp(radius, 4, 48) };
+        }
+
+        // 窗口底色跟**背景图明暗**走：暗图黑底白字、亮图白底黑字（不是跟界面主题走——
+        // 暗色界面压在一张很亮的壁上时，深色方片会突兀得像贴上去的）。
+        // 没有背景图时才退回界面主题。
+        var light = vm?.Chrome.IsLight ?? false;
+        if (settings?.BackgroundEnabled == true && ClockThemeApplier.BackgroundIsDark(settings) is { } imageDark)
+            light = !imageDark;
+
+        _aboutWindow = new AboutPopupWindow(light, frosted);
+        _aboutWindow.Closed += (_, _) =>
+        {
+            Effect = null;
+            _aboutWindow = null;
+        };
         _aboutWindow.Show(owner); // 以全屏窗口为 Owner（置顶、随主窗口关闭）
     }
 
@@ -699,7 +767,7 @@ public partial class ClockSurface : UserControl
         if (DataContext is FullScreenClockViewModel vm) vm.ShowCountRules = true;
     }
 
-    /// <summary>鼠标离开计数区域：隐藏记录规则，仅留免责声明</summary>
+    /// <summary>鼠标离开计数区域：隐藏记录规则</summary>
     private void CounterArea_PointerExited(object? sender, PointerEventArgs e)
     {
         if (DataContext is FullScreenClockViewModel vm) vm.ShowCountRules = false;

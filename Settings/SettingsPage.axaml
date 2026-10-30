@@ -224,6 +224,39 @@
                 </StackPanel>
                 </Border>
 
+                <!-- 运行 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="运行" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <CheckBox IsChecked="{Binding PauseWhenMinimized}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Pause}" FontSize="13"/>
+                            <TextBlock Text="最小化超过设定时间后暂停" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"
+                          IsEnabled="{Binding PauseWhenMinimized}">
+                        <Slider Grid.Column="0" Value="{Binding MinimizePauseMinutes}"
+                                Minimum="1" Maximum="30" TickFrequency="1"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding MinimizePauseMinutesText}"
+                                   FontSize="12" Width="52" TextAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                    </Grid>
+                    <TextBlock Text="暂停后停止计时、音量检测、摄像头检测与防休眠；窗口不关，任务栏入口保留，点回即恢复。"
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                </StackPanel>
+                </Border>
+
                 <!-- 音量检测 -->
                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"

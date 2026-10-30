@@ -61,14 +61,10 @@ public sealed class BackdropLayer : Control
     private IBrush _themeBgBrush = Brushes.Black;   // 留白处的底色
     private IBrush? _veilBrush;                     // 明暗遮罩（|dim| < 0.5 时为 null）
 
-    private Bitmap? _sharp;          // 清晰背景图（按窗口的物理像素宽解码，不把 4K 原图整张解进内存）
-    private WriteableBitmap? _blur;  // 同一张图的模糊副本（磨砂档用），尺寸与 _sharp 一模一样
-
-    // 清晰图的像素快照。折射要用它在 CPU 上逐像素采样，而 Bitmap 每次读都得先 Lock 一遍，
-    // 所以在烘图的时候顺手倒出来一份，之后重算玻璃就不用再碰那张位图了。
-    private uint[]? _sharpPixels;
-    private PixelSize _sharpPixelsSize;
-    private uint[]? _blurPixels;     // 模糊底图的像素快照，磨砂那一档用
+    // 清晰背景图 + 模糊副本 + 两份像素快照，打成一包（BackdropImageSet）。
+    // 折射要用快照在 CPU 上逐像素采样，而 Bitmap 每次读都得先 Lock 一遍，
+    // 所以在烘图的时候顺手倒成数组，之后重算玻璃就不用再碰位图。
+    private BackdropImageSet? _image;
 
     // 「真•◯◯玻璃」的折射图：**一块一张小位图**，按控件块缓存、改到哪块才重烘哪块。
     //
@@ -147,6 +143,7 @@ public sealed class BackdropLayer : Control
         }
 
         InvalidateVisual();
+        NotifyBackdropChanged();
     }
 
     /// <summary>套用设置。只有「换图」和「磨砂半径」动到那张烘好的位图，其余都是画的时候现算的。</summary>
@@ -218,6 +215,69 @@ public sealed class BackdropLayer : Control
         }
         if (rebuild) RequestRebuild();
         InvalidateVisual();
+        NotifyBackdropChanged();
+    }
+
+    /// <summary>
+    /// 底图 / 明暗遮罩 / 留白底色 / 换图之后模糊半径变了：上层自己画磨砂的那些控件
+    /// （如居中的地震提醒卡片，见 <see cref="FrostedCardBackdrop"/>）得跟着重画一遍。
+    /// 它们在内容层，不在这一层的 Render 里，不通知就只能停在旧图上。
+    /// </summary>
+    public event EventHandler? BackdropChanged;
+
+    /// <summary>
+    /// 手上有没有烘好的模糊底图。只有「磨砂 / 真•◯◯玻璃」档（或「完整显示」的留白填充）才烘它。
+    /// 关于窗口拿它决定：能不能把大屏整个糊掉再弹（没有模糊图时只能走纯色底）。
+    /// </summary>
+    public bool HasBlurredBackdrop => _image?.Blur is not null;
+
+    private void NotifyBackdropChanged()
+    {
+        if (BackdropChanged is null) return;
+
+        // Adopt 可能是在 Render 里被调到的（课前预烘命中缓存那条路径）。这时让订阅者标脏，
+        // 就会撞上「Visual was invalidated during the render pass」——CI 判插件严重错误并禁用插件。
+        // 挪到这一帧之后再去通知。
+        if (_inRenderPass) Dispatcher.UIThread.Post(() => BackdropChanged?.Invoke(this, EventArgs.Empty));
+        else BackdropChanged.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// 给内容层上的卡片画一块磨砂底：把整张模糊背景按**同一套映射**裁出这一块。
+    ///
+    /// 与玻璃层里的磨砂（<see cref="DrawBlurredBackdrop"/>）算式一致，只是坐标系换成卡片自己的局部坐标，
+    /// 所以卡片里外透出来的画面对得上。没有模糊图（玻璃关着、也没开「完整显示」）时什么也不画，
+    /// 由卡片自己的底���色兜着。
+    /// </summary>
+    public void DrawFrostedCard(DrawingContext context, Rect rectInLayer, double radius, IBrush? tint)
+    {
+        if (_image?.Blur is not { } blur) return;
+
+        var size = Bounds.Size;
+        if (size.Width < 2 || size.Height < 2) return;
+
+        var local = new Rect(rectInLayer.Size);
+        var rounded = new RoundedRect(local, Math.Max(0, radius));
+
+        using (context.PushClip(rounded))
+        {
+            context.FillRectangle(_themeBgBrush, local);
+
+            var src = BackgroundImageMap.MapToImage(rectInLayer, blur.PixelSize, size, _stretch);
+            var visible = src.Intersect(new Rect(ToSize(blur.PixelSize)));
+            if (visible.Width > 0.5 && visible.Height > 0.5 && src.Width > 0 && src.Height > 0)
+            {
+                var kx = rectInLayer.Width / src.Width;
+                var ky = rectInLayer.Height / src.Height;
+                var dest = new Rect((visible.X - src.X) * kx, (visible.Y - src.Y) * ky,
+                                    visible.Width * kx, visible.Height * ky);
+                context.DrawImage(blur, visible, dest);
+            }
+
+            if (_veilBrush is { } veil) context.FillRectangle(veil, local);
+        }
+
+        if (tint is not null) context.DrawRectangle(tint, null, rounded);
     }
 
     /// <summary>组件被拖动/内容变化后，玻璃要跟着走。窗口那边在布局变化的钩子里调。</summary>
@@ -264,12 +324,8 @@ public sealed class BackdropLayer : Control
         }
 
         _releasePending = false;
-        _sharp?.Dispose();
-        _sharp = null;
-        _blur?.Dispose();
-        _blur = null;
-        _sharpPixels = null;
-        _blurPixels = null;
+        _image?.Dispose();
+        _image = null;
 
         foreach (var panel in _panels) panel.Dispose();
         _panels.Clear();
@@ -311,13 +367,31 @@ public sealed class BackdropLayer : Control
         if (size.Width < 2 || size.Height < 2) return;
 
         var want = WantedPixelSize(size);
-        if ((_busy ? _reqPixel : _builtPixel) != want) _needsRebuild = true;
+        if (!SamePixelBudget(_busy ? _reqPixel : _builtPixel, want)) _needsRebuild = true;
 
-        if (_sheetPixel != want)
+        if (!SamePixelBudget(_sheetPixel, want))
         {
             _sheetPixel = want;
             MarkGlassDirty();
         }
+    }
+
+    /// <summary>
+    /// 两套像素预算差一点点还算同一份。
+    ///
+    /// 以前这里是**精确相等**：差一个像素就整张 4K 重烘（几百兆的临时内存）。课前预烘是按
+    /// 屏幕尺寸估的，真开窗时取整可能差一两个像素，于是刚取回来的那一套下一帧就被判成「尺寸不对」
+    /// 又烘一遍 —— 预烘白干，撞的还是内存看门狗。画的时候按位图自己的尺寸落位、采样也按快照
+    /// 自己的尺寸算，差这么点完全自洽，只是分辨率略微不同。
+    /// 容差比 <see cref="BackdropImageSet.Matches"/> 那个 10% 紧得多：那个管的是「跨开屏拿别人的图」，
+    /// 这里只是同一窗口开屏过程中的抖动。
+    /// </summary>
+    private static bool SamePixelBudget(PixelSize have, PixelSize want)
+    {
+        if (have.Width <= 0 || have.Height <= 0) return false;
+
+        static bool Near(int a, int b) => Math.Abs(a - b) <= Math.Max(8, a / 50);
+        return Near(have.Width, want.Width) && Near(have.Height, want.Height);
     }
 
     // 底下这几张图各自多大，一律按**物理像素**记（逻辑尺寸在设置页预览那种缩放的场合会骗人）
@@ -386,36 +460,57 @@ public sealed class BackdropLayer : Control
         var size = Bounds.Size;
         if (size.Width < 2 || size.Height < 2) return;
 
-        // 画之前再核一次倍率：排布那一刻层可能刚挂上视觉树，外面那层缩放（设置页预览的 Viewbox）
-        // 还没落定，照着排布时的倍率就会烘出一张整屏大的图白占内存。这里核出来不对就当场重来一遍，
-        // 大屏上这一步永远是对上的，不会多做工。
-        SyncPixelBudget(size);
-
-        if (_needsRebuild) TryStartRebuild(size);
-        if (_panels.Count == 0) SyncPanels();   // 头一帧（布局钩子还没轮到）先按当前布局把块建出来
-        if (_glassDirty) TryStartBake();
-
-        if (CornerRadius == default)
+        // Render 是在 Avalonia 的渲染循环里被调用的。这个循环里**不能再对任何 Visual 标脏**
+        // （InvalidateVisual 会抛 InvalidOperationException: Visual was invalidated during the render pass），
+        // 所以下面一路调下去的东西要能看出「现在正在渲染」。见 Adopt 里的那一处。
+        _inRenderPass = true;
+        try
         {
-            RenderCore(context, size);
-            return;
-        }
+            // 画之前再核一次倍率：排布那一刻层可能刚挂上视觉树，外面那层缩放（设置页预览的 Viewbox）
+            // 还没落定，照着排布时的倍率就会烘出一张整屏大的图白占内存。这里核出来不对就当场重来一遍，
+            // 大屏上这一步永远是对上的，不会多做工。
+            SyncPixelBudget(size);
 
-        using (context.PushClip(new RoundedRect(new Rect(size), CornerRadius)))
-            RenderCore(context, size);
+            if (_needsRebuild) TryStartRebuild(size);
+            if (_panels.Count == 0) SyncPanels();   // 头一帧（布局钩子还没轮到）先按当前布局把块建出来
+            if (_glassDirty) TryStartBake();
+
+            if (CornerRadius == default)
+            {
+                RenderCore(context, size);
+                return;
+            }
+
+            using (context.PushClip(new RoundedRect(new Rect(size), CornerRadius)))
+                RenderCore(context, size);
+        }
+        finally
+        {
+            _inRenderPass = false;
+        }
     }
+
+    /// <summary>
+    /// 当前这次调用是不是发生在 <see cref="Render"/> 里面。
+    ///
+    /// 课前预烘的那套图是在 <see cref="TryStartRebuild"/> 里同步挂上去的，而 TryStartRebuild 是
+    /// 在 Render 里被调的 —— 那时候再标脏就会抛异常。CI 会把这个异常当成插件严重错误，
+    /// 当场停掉应用，重启后还会因为 <c>CorruptPluginsDisabledLastSession</c> 把插件自动禁用
+    /// （1.1.1.9 在学校上课点名那一刻报错、重启、大屏不见了，就是这个）。
+    /// </summary>
+    private bool _inRenderPass;
 
     private void RenderCore(DrawingContext context, Size size)
     {
         // 兜底底色：图还没解出来、或读不出来时，整屏就是它
-        if (_sharp is not null)
+        if (_image?.Sharp is not null)
             context.FillRectangle(_themeBgBrush, new Rect(size));
 
-        if (_sharp is { } image)
+        if (_image?.Sharp is { } image)
         {
             // 「完整显示」上下/左右会空出一块。空着一条纯色不好看，改成把同一张图放大到铺满、
             // 再糊掉垫在底下 —— 壁纸播放器里那种两侧虚化填充，接缝自然。
-            if (_stretch == (int)BackgroundImageStretch.Fit && _blur is { } fill)
+            if (_stretch == (int)BackgroundImageStretch.Fit && _image.Blur is { } fill)
             {
                 var cover = BackgroundImageMap.ComputeDestRect(
                     fill.PixelSize, size, (int)BackgroundImageStretch.FillCrop);
@@ -467,7 +562,7 @@ public sealed class BackdropLayer : Control
 
             // 磨砂档：玻璃里透出的就是「整张模糊背景按同一套映射铺开、被这块裁掉」的那片，
             // 与玻璃外那张清晰图走的是同一个 ComputeDestRect —— 里外必然严丝合缝。
-            if (frosted && _blur is { } blur)
+            if (frosted && _image?.Blur is { } blur)
                 DrawBlurredBackdrop(context, blur, p.Rect, rr, size, veil);
 
             // 底色渐变 + 1px 亮边 + 外投影/内亮边（后者是「玻璃厚度感」的来源）。
@@ -899,25 +994,28 @@ public sealed class BackdropLayer : Control
     private LayerBackdrop BuildBackdrop(double scale, int layerW, int layerH)
     {
         var device = new Size(layerW, layerH);
-        var blurImageSize = _blur?.PixelSize ?? default;
+        var blurImageSize = _image?.Blur?.PixelSize ?? default;
+        var sharpPixels = _image?.SharpPixels;
+        var sharpPixelsSize = _image?.SharpPixelsSize ?? default;
+        var blurPixels = _image?.BlurPixels;
 
         // 折射采样必须走跟外面那张清晰图**同一套** ComputeDestRect，里外才能严丝合缝。
         return new LayerBackdrop
         {
-            Sharp = _sharpPixels,
-            SharpSize = _sharpPixelsSize,
-            SharpDest = _sharpPixels is null
+            Sharp = sharpPixels,
+            SharpSize = sharpPixelsSize,
+            SharpDest = sharpPixels is null
                 ? default
-                : BackgroundImageMap.ComputeDestRect(_sharpPixelsSize, device, _stretch),
-            Blur = _blurPixels,
+                : BackgroundImageMap.ComputeDestRect(sharpPixelsSize, device, _stretch),
+            Blur = blurPixels,
             BlurSize = blurImageSize,
-            BlurDest = _blurPixels is null
+            BlurDest = blurPixels is null
                 ? default
                 : BackgroundImageMap.ComputeDestRect(blurImageSize, device, _stretch),
             // 留白处的填充与模糊那一路是同一张快照，别再拷一份（拷一次就是 8 MB 垃圾）
-            Fill = _blurPixels,
-            FillSize = _blurPixels is null ? default : blurImageSize,
-            FillDest = _blurPixels is null
+            Fill = blurPixels,
+            FillSize = blurPixels is null ? default : blurImageSize,
+            FillDest = blurPixels is null
                 ? default
                 : BackgroundImageMap.ComputeDestRect(blurImageSize, device, (int)BackgroundImageStretch.FillCrop),
             ThemeBackground = _themeBg,
@@ -1135,7 +1233,6 @@ public sealed class BackdropLayer : Control
         if (size.Width < 2 || size.Height < 2) return;   // 还没排布，等 ArrangeOverride 再来
 
         _needsRebuild = false;
-        _busy = true;
 
         var path = _imagePath;
         var radius = _blurRadius;
@@ -1146,44 +1243,20 @@ public sealed class BackdropLayer : Control
         var pixels = WantedPixelSize(size);
         _reqPixel = pixels;
 
+        // 课前两分钟已经预烘好的那一套：直接拿来用，省掉这一刻的整张解码 + 模糊
+        // （4K 一张图是几百兆的瞬时开销，刚好撞上 CI 的内存看门狗）。
+        // 参数对不上（换了图 / 改了半径 / 尺寸差太多）就取不到，照旧自己烘。
+        if (BackdropPreloadCache.TryTake(path, pixels, stretch, radius, wantBlur) is { } ready)
+        {
+            Adopt(ready, pixels, wantBlur, path, radius);
+            return;
+        }
+
+        _busy = true;
+
         Task.Run(() =>
         {
-            Bitmap? sharp = null;
-            WriteableBitmap? blur = null;
-            uint[]? sharpPixels = null;
-            uint[]? blurPixels = null;
-            var sharpPixelsSize = default(PixelSize);
-            try
-            {
-                if (path.Length > 0 && File.Exists(path))
-                {
-                    // 解码尺寸要按**原图**多大来定：解码器给多宽就解多宽，小图会被放大着解，
-                    // 白白多占一倍半内存还多插一遍值。原图尺寸只读文件头，不解码。
-                    var native = ImageHeader.ReadSize(path) ?? pixels;
-                    var decode = BackgroundImageMap.DecodeSize(native, pixels, stretch);
-
-                    using var stream = File.OpenRead(path);
-                    sharp = Bitmap.DecodeToWidth(stream, decode.Width, BitmapInterpolationMode.HighQuality);
-                    // 折射要在 CPU 上逐像素采样，顺手把像素倒成连续数组（位图每次读都得先 Lock，太贵）
-                    sharpPixels = ReadPixels(sharp);
-                    sharpPixelsSize = sharp.PixelSize;
-                    if (wantBlur)
-                    {
-                        blur = BakeBlur(sharp, BlurRadiusInImagePixels(radius, sharp.PixelSize, pixels, stretch));
-                        if (blur is not null) blurPixels = ReadPixels(blur);
-                    }
-                }
-            }
-            catch
-            {
-                // 图片读不了/格式不支持：当作没有背景图，别把整个大屏拖垮
-                sharp?.Dispose();
-                sharp = null;
-                blur?.Dispose();
-                blur = null;
-                sharpPixels = null;
-                blurPixels = null;
-            }
+            var set = BackdropImageSet.Build(path, pixels, stretch, radius, wantBlur);
 
             Dispatcher.UIThread.Post(() =>
             {
@@ -1191,8 +1264,7 @@ public sealed class BackdropLayer : Control
                 if (_releasePending)
                 {
                     // 这期间离开了视觉树：结果扔掉，位图也一并放掉
-                    sharp?.Dispose();
-                    blur?.Dispose();
+                    set.Dispose();
                     ReleaseBitmaps();
                     return;
                 }
@@ -1206,109 +1278,37 @@ public sealed class BackdropLayer : Control
 
                 if (stale)
                 {
-                    sharp?.Dispose();
-                    blur?.Dispose();
+                    set.Dispose();
                 }
                 else
                 {
                     _needsRebuild = false;
-                    _sharp?.Dispose();
-                    _blur?.Dispose();
-                    _sharp = sharp;
-                    _blur = blur;
-                    _sharpPixels = sharpPixels;
-                    _sharpPixelsSize = sharpPixelsSize;
-                    _blurPixels = blurPixels;
-                    _builtPixel = pixels;
-                    _builtWantBlur = wantBlur;
-                    _builtPath = path;
-                    _builtRadius = radius;
-                    _contentVersion++;   // 底下的画面换了一张：手上那些块的折射像素全不作数了
-                    MarkGlassDirty();
-                    InvalidateVisual();
+                    Adopt(set, pixels, wantBlur, path, radius);
+
+                    // 这一份是自己烘的，缓存里那份同样参数的就多余了（后台别一直攥着上百兆）
+                    BackdropPreloadCache.ReleaseIfMatches(path, pixels, stretch, radius, wantBlur);
                 }
                 TryStartRebuild(Bounds.Size);
             });
         });
     }
 
-    /// <summary>
-    /// 把「屏幕上多少像素」的模糊半径换成底图自己的像素。
-    ///
-    /// 两个尺寸都得按**实际落位**算：底图（<paramref name="imageSize"/>）铺在这一层上占
-    /// <see cref="BackgroundImageMap.ComputeDestRect"/> 算出来的那块矩形，占多大就缩放多少倍。
-    /// 以前的写法只用宽度比（图宽 / 层宽），遇上极端长条图会算出几十上百倍：比如一张
-    /// 100000×10 的截图，铺满整屏时缩短边定比例、宽度要溢出十几屏，宽度比是几十；
-    /// 而「完整显示」档下一条 1×2160 的竖图更是能到 46 倍。半径两百多，StackBlur 那张
-    /// 查找表就上百兆，一张图足以把内存看门狗顶爆（于是 <see cref="StackBlur.MaxRadius"/> 再兜一道）。
-    ///
-    /// 正常图片（图与屏比例在 1 附近）算出来和旧写法一致。
-    /// </summary>
-    private static double BlurRadiusInImagePixels(double radius, PixelSize imageSize, PixelSize layerPixels, int stretch)
+    /// <summary>把烘好的一套（预烘的或自己烘的）挂上去，顶掉旧的那一套。</summary>
+    private void Adopt(BackdropImageSet set, PixelSize pixels, bool wantBlur, string path, double radius)
     {
-        if (radius <= 0) return 0;
+        _image?.Dispose();
+        _image = set;
+        _builtPixel = pixels;
+        _builtWantBlur = wantBlur;
+        _builtPath = path;
+        _builtRadius = radius;
+        _contentVersion++;   // 底下的画面换了一张：手上那些块的折射像素全不作数了
+        MarkGlassDirty();
 
-        var ratio = BackgroundImageMap.ImagePixelsPerViewportPixel(
-            imageSize, new Size(layerPixels.Width, layerPixels.Height), stretch);
-
-        // 硬上限见 StackBlur.MaxRadius：换算再怎么离谱，也不让它把查找表撑爆
-        return Math.Clamp(radius * ratio, 0, StackBlur.MaxRadius);
-    }
-
-    /// <summary>
-    /// 烘一张模糊底图：把清晰图的像素整张拷出来、做一遍 Stack Blur。尺寸与清晰图一模一样。
-    ///
-    /// 为什么是「模糊整张图」而不是「按窗口尺寸烘一张模糊的全屏画面」：
-    /// 全屏画面得靠 RenderTargetBitmap 渲，那是渲染后端相关的（换后端、在后台线程上渲都可能出岔子），
-    /// 一旦抛异常整块背景图就没了。模糊整张图是纯 CPU 的，不碰渲染器。
-    /// 至于「玻璃里透着模糊、玻璃外是清晰」两者对得上，靠的是绘制时共用同一个
-    /// <see cref="BackgroundImageMap.ComputeDestRect"/>，与底图尺寸无关。
-    /// </summary>
-    private static WriteableBitmap? BakeBlur(Bitmap sharp, double radius)
-    {
-        var pixels = sharp.PixelSize;
-        if (pixels.Width < 2 || pixels.Height < 2) return null;
-
-        var blur = new WriteableBitmap(pixels, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        using var framebuffer = blur.Lock();
-        sharp.CopyPixels(framebuffer, AlphaFormat.Premul);
-        BlurFramebuffer(framebuffer, pixels.Width, pixels.Height, (int)Math.Round(radius));
-        return blur;
-    }
-
-    /// <summary>
-    /// 把一张位图的像素倒进连续数组。位图每行可能带对齐 padding，必须逐行拷，
-    /// 不能把首地址直接当成 width×height 的连续内存。
-    /// </summary>
-    private static uint[]? ReadPixels(Bitmap source)
-    {
-        var size = source.PixelSize;
-        if (size.Width < 1 || size.Height < 1) return null;
-
-        // CopyPixels 得先有个锁住的缓冲当落脚点，借一张临时位图用一下
-        var staging = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        try
-        {
-            using var frame = staging.Lock();
-            source.CopyPixels(frame, AlphaFormat.Premul);
-            return CopyOut(frame, size);
-        }
-        finally { staging.Dispose(); }
-    }
-
-    private static unsafe uint[] CopyOut(ILockedFramebuffer frame, PixelSize size)
-    {
-        var stride = frame.RowBytes;
-        var origin = (byte*)frame.Address;
-        var rowBytes = (long)size.Width * 4;
-        var pixels = new uint[size.Width * size.Height];
-
-        fixed (uint* dst = pixels)
-        {
-            for (var y = 0; y < size.Height; y++)
-                Buffer.MemoryCopy(origin + (long)y * stride, dst + (long)y * size.Width, rowBytes, rowBytes);
-        }
-        return pixels;
+        // 正在 Render 里（课前预烘命中缓存那条路径）：这一帧本来就会拿新图重画，不需要再标脏。
+        // 在渲染循环里标脏会抛 InvalidOperationException，CI 会判成插件严重错误并禁用插件。
+        if (!_inRenderPass) InvalidateVisual();
+        NotifyBackdropChanged();
     }
 
     private static unsafe void CopyInto(ILockedFramebuffer frame, uint[] pixels, int width, int height)
@@ -1324,25 +1324,4 @@ public sealed class BackdropLayer : Control
         }
     }
 
-    /// <summary>把锁住的缓冲倒进连续数组、模糊、再倒回去（缓冲的每行可能带 padding，不能直接当连续内存用）。</summary>
-    private static unsafe void BlurFramebuffer(ILockedFramebuffer framebuffer, int width, int height, int radius)
-    {
-        if (radius < 1) return;
-
-        var stride = framebuffer.RowBytes;
-        var origin = (byte*)framebuffer.Address;
-        var rowBytes = (long)width * 4;
-        var pixels = new uint[width * height];
-
-        fixed (uint* buffer = pixels)
-        {
-            for (var y = 0; y < height; y++)
-                Buffer.MemoryCopy(origin + (long)y * stride, buffer + (long)y * width, rowBytes, rowBytes);
-
-            StackBlur.Apply(pixels, width, height, radius);
-
-            for (var y = 0; y < height; y++)
-                Buffer.MemoryCopy(buffer + (long)y * width, origin + (long)y * stride, rowBytes, rowBytes);
-        }
-    }
 }

@@ -4,42 +4,56 @@
         xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
         x:Class="EveningSelfStudyClock.Views.AboutPopupWindow"
         Title="关于 大屏时钟"
-        Width="460" Height="240"
+        Width="460" Height="262"
         SystemDecorations="None"
         ShowInTaskbar="False"
         Topmost="True"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Background="#14141f"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
         FontFamily="Microsoft YaHei,SimHei,sans-serif">
 
     <Window.Styles>
         <Style Selector="TextBlock.icon">
             <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
         </Style>
+        <!-- 两个链接：下划线 + 手型，颜色由 code-behind 按背景明暗给 -->
+        <Style Selector="TextBlock.link">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="TextDecorations" Value="Underline"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
     </Window.Styles>
 
-    <StackPanel Margin="24,18" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-            <TextBlock Classes="icon" Text="{ci:LI Clock}" FontSize="22" Foreground="#ffffff"
-                       VerticalAlignment="Center"/>
-            <TextBlock Text="大屏时钟" FontSize="22" FontWeight="Bold" Foreground="#ffffff"
-                       VerticalAlignment="Center"/>
+    <!-- 窗口本身透明，圆角与底色都画在这个 Border 上（底色、描边由 code-behind 按背景图明暗给） -->
+    <Border x:Name="PanelBorder" CornerRadius="16" BorderThickness="1">
+        <StackPanel Margin="24,20" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <TextBlock x:Name="TitleIcon" Classes="icon" Text="{ci:LI Clock}" FontSize="22" Foreground="#ffffff"
+                           VerticalAlignment="Center"/>
+                <TextBlock x:Name="TitleText" Text="大屏时钟" FontSize="22" FontWeight="Bold" Foreground="#ffffff"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock x:Name="AuthorText" Text="制作者：sokumei" FontSize="15" Foreground="#ccffffff"
+                       HorizontalAlignment="Center"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
+                <TextBlock x:Name="VersionNumberText" FontSize="15" Foreground="#ffffff"
+                           VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionTypeText" FontSize="13" FontWeight="Bold"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- 两个链接同一行，中间一条竖线隔开 -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="12">
+                <TextBlock x:Name="RepoLinkText" Classes="link" Text="项目仓库"/>
+                <Rectangle x:Name="DividerLine" Width="1" Height="12" Fill="#40ffffff" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VideoLinkText" Classes="link" Text="演示视频"/>
+            </StackPanel>
+
+            <TextBlock x:Name="HintText" Text="点击名称打开链接，点击窗口外关闭" FontSize="11" Foreground="#66ffffff"
+                       HorizontalAlignment="Center"/>
         </StackPanel>
-        <TextBlock Text="制作者：Human-air" FontSize="15" Foreground="#ccffffff"
-                   HorizontalAlignment="Center"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
-            <TextBlock x:Name="VersionNumberText" FontSize="15" Foreground="#ffffff"
-                       VerticalAlignment="Center"/>
-            <TextBlock x:Name="VersionTypeText" FontSize="13" FontWeight="Bold"
-                       VerticalAlignment="Center"/>
-        </StackPanel>
-        <TextBlock x:Name="GitHubLinkText"
-                   Text="https://github.com/Human-air/BigScreenClock-For-ClassIsLand2.0"
-                   FontSize="12" Foreground="#0066cc" TextDecorations="Underline"
-                   HorizontalAlignment="Center" Cursor="Hand"
-                   TextWrapping="Wrap" TextAlignment="Center"/>
-        <TextBlock Text="点击链接打开仓库，点击窗口外自动关闭" FontSize="11" Foreground="#66ffffff"
-                   HorizontalAlignment="Center"/>
-    </StackPanel>
+    </Border>
 </Window>

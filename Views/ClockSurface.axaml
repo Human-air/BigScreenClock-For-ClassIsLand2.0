@@ -30,7 +30,7 @@
         <views:BackdropLayer x:Name="Backdrop" Grid.Row="0" Grid.RowSpan="2"/>
 
         <!-- 主内容（原有布局，Margins 保持不变） -->
-        <Grid Grid.Row="0" RowDefinitions="Auto,*,Auto,Auto"
+        <Grid Grid.Row="0" RowDefinitions="Auto,*,Auto"
               Margin="40,30,40,18">
 
             <!-- 顶部第一行：主位提醒块（天气 + 可并入的降雨/倒计时/文本，颜文字在各块正下方）+ 预警详情弹幕（自适应）+ 日期。
@@ -103,33 +103,6 @@
                  （数值 = 该块中心在主体区高度的百分之几），像素值由 code-behind 按主体区实测高度算，
                  见 ClockSurface.ApplyBodyPositions()。 -->
             <Grid Grid.Row="1" x:Name="BodyArea">
-                <!-- 地震提醒：贴在主体区顶部弹出（内容读自「地震预警」插件，见 EarthquakeReader）。
-                     第一行是横波倒计时、第二行是震中和震级，两行都居中；等级色（本地烈度分档）
-                     同时用在文字、描边和底色上；字号随时钟字号缩放，再长由 Viewbox 等比缩，保证整屏塞得下。
-                     位置固定在主体区顶部、不随时钟移动（ApplyBodyPositions），主体区本就在顶部那行
-                     提醒（天气/日期/弹幕）下面，所以不会挡到弹幕；出现时横向绽开（OnEarthquakeAlertPropertyChanged）。 -->
-                <Border x:Name="EarthquakeAlertBlock"
-                        IsVisible="{Binding ShowEarthquakeAlert}"
-                        HorizontalAlignment="Center" VerticalAlignment="Top"
-                        Background="{Binding EarthquakeAlertBackground}"
-                        BorderBrush="{Binding EarthquakeAlertBorder}"
-                        BorderThickness="2" CornerRadius="14" Padding="30,18">
-                    <Viewbox Stretch="Uniform" StretchDirection="DownOnly"
-                             MaxWidth="{Binding EarthquakeAlertMaxWidth}"
-                             HorizontalAlignment="Center">
-                        <StackPanel Spacing="6" HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding EarthquakeLine1}"
-                                       FontSize="{Binding EarthquakeLine1FontSize}" FontWeight="Bold"
-                                       Foreground="{Binding EarthquakeAlertBrush}"
-                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
-                            <TextBlock Text="{Binding EarthquakeLine2}"
-                                       FontSize="{Binding EarthquakeLine2FontSize}" FontWeight="Bold"
-                                       Foreground="{Binding EarthquakeAlertBrush}"
-                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
-                        </StackPanel>
-                    </Viewbox>
-                </Border>
-
                 <!-- 时间：字体跟随 CI 主界面字体，数字用表格宽度（tnum）免得秒数跳动时整行抖 -->
                 <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
                            FontSize="{Binding ClockFontSize}"
@@ -144,15 +117,30 @@
                             HorizontalAlignment="Center" VerticalAlignment="Top"
                             IsVisible="{Binding ShowDecibelMeter}">
                     <!-- 标题行：左「教室音量」，右当前档位文字（档位色；不配强度图标——
-                         安静时只有一格反而像颗像素点） -->
-                    <Grid ColumnDefinitions="Auto,*">
+                         安静时只有一格反而像颗像素点），中间留给「正在记录」。
+                         放这一行而不另起一行：出现/消失都不改这块玻璃的尺寸，一次都不用重烘，
+                         也就没有以前那种「没有过渡、直接闪一下」的突兀感。 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="20"
                                        Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
                             <TextBlock Text="教室音量" FontSize="20" FontWeight="Bold"
                                        Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
                         </StackPanel>
-                        <TextBlock Grid.Column="1" Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
+                        <TextBlock Grid.Column="1" Text="{Binding RecordingText}"
+                                   Foreground="{Binding RecordingForeground}"
+                                   IsVisible="{Binding RecordingInMeterTitle}"
+                                   FontSize="20" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"/>
+                        <!-- 设置页预览专用：没在上课时假装正在记录，好让这一行在预览里也看得见 -->
+                        <TextBlock x:Name="PreviewRecordingPlaceholder" Grid.Column="1"
+                                   Text="正在记录：一般" Foreground="{Binding RecordingForeground}"
+                                   IsVisible="False"
+                                   FontSize="20" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"/>
+                        <TextBlock Grid.Column="2" Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
                                    Foreground="{Binding NoiseLevelTextBrush}"
                                    HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
@@ -191,15 +179,6 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <!-- 「正在记录」提示：平时贴在音量条下方。这么放是为了让它不跟计数片段共处一个
-                         「只缩不放大」的 Viewbox —— 计数一变长就把整行连它一起缩小，字号忽大忽小。
-                         而且它每次出现/消失都要重烘那块玻璃，现在它自己占一块、字数变化只重烘它自己。
-                         音量条被关掉时回到左下角计数行（见 RecordingInCounter）。 -->
-                    <TextBlock Text="{Binding RecordingText}"
-                               Foreground="{Binding RecordingForeground}"
-                               IsVisible="{Binding RecordingUnderMeter}"
-                               FontSize="20" FontWeight="Bold"
-                               HorizontalAlignment="Center"/>
                 </StackPanel>
             </Grid>
 
@@ -215,8 +194,30 @@
                         x:Name="CounterAreaBorder"
                         PointerEntered="CounterArea_PointerEntered"
                         PointerExited="CounterArea_PointerExited">
-                    <!-- 左对齐、宽度贴合内容：它是新的玻璃目标，Stretch 的话玻璃会盖满整列 -->
-                    <StackPanel x:Name="CounterStrip" Orientation="Horizontal" HorizontalAlignment="Left">
+                    <!-- 左对齐、宽度贴合内容：它是玻璃目标，Stretch 的话玻璃会盖满整列。
+                         用 DockPanel 而不是 StackPanel：横向 StackPanel 量子项时给的是**无限宽**，
+                         Viewbox 永远量不出「放不下」，保护提示那种长句就只会被右边裁掉。
+                         DockPanel 先把右边「正在记录」的宽度扣掉，剩下的有限宽度交给 Viewbox，
+                         放不下时它才会照着「只缩不放大」的老规矩把字缩下来。 -->
+                    <DockPanel x:Name="CounterStrip" HorizontalAlignment="Left">
+                        <!-- 注意顺序：DockPanel 只有**最后一个**子项拿来填剩余空间，
+                             右边那条必须写在前面。 -->
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingText}"
+                                   Foreground="{Binding RecordingForeground}"
+                                   IsVisible="{Binding RecordingInCounter}"
+                                   FontWeight="Bold" Margin="16,0,0,0"
+                                   VerticalAlignment="Center"/>
+                        <!-- 设置页预览专用：没在上课时假装有计数，好让计数字号在预览里也调得动。
+                             放在 DockPanel 里面而不是外面：它撑起来的宽度就是 CounterStrip 的宽度，
+                             玻璃照着 CounterStrip 烘，预览里这块自然也有液态玻璃。
+                             分段着色跟真实计数一致（一般=黄、吵闹=红），字号在预览里才看得出效果。 -->
+                        <StackPanel x:Name="PreviewCounterPlaceholder" DockPanel.Dock="Left"
+                                    Orientation="Horizontal" IsVisible="False" VerticalAlignment="Center">
+                            <TextBlock Text="一般 3 次" FontWeight="Bold"
+                                       Foreground="{Binding CountNormalForeground}"/>
+                            <TextBlock Text="吵闹 1 次" FontWeight="Bold" Margin="16,0,0,0"
+                                       Foreground="{Binding CountNoisyForeground}"/>
+                        </StackPanel>
                         <Viewbox x:Name="CounterContent" HorizontalAlignment="Left" VerticalAlignment="Center"
                                  Stretch="Uniform" StretchDirection="DownOnly">
                             <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}">
@@ -241,15 +242,7 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </Viewbox>
-                        <!-- 「正在记录」只在音量条被关掉时回退到这儿（平时贴在音量条下方）。
-                             刻意留在缩放框**外面**：进了那个框就会跟着计数的长短一起缩字，
-                             行高忽大忽小。代价是列宽不够时它会被裁掉一截。 -->
-                        <TextBlock Text="{Binding RecordingText}"
-                                   Foreground="{Binding RecordingForeground}"
-                                   IsVisible="{Binding RecordingInCounter}"
-                                   FontWeight="Bold" Margin="16,0,0,0"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
+                    </DockPanel>
                 </Border>
                 <!-- 课程信息：与计数、按钮同处一行，居中对齐到屏幕正中。
                      最多占整行一半宽（CourseInfoMaxWidth，窗口按尺寸算），比这还长就由 Viewbox 等比缩字
@@ -259,9 +252,17 @@
                          Stretch="Uniform" StretchDirection="DownOnly"
                          MaxWidth="{Binding CourseInfoMaxWidth}"
                          IsVisible="{Binding ShowCourseInfo}">
-                    <TextBlock Text="{Binding CourseInfoText}"
-                               FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
-                               Foreground="{Binding CourseInfoColor}"/>
+                    <Panel>
+                        <TextBlock Text="{Binding CourseInfoText}"
+                                   FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
+                                   Foreground="{Binding CourseInfoColor}"/>
+                        <!-- 设置页预览专用：没在上课时假装有课程信息，
+                             否则「课程信息字号」在预览里根本看不出效果 -->
+                        <TextBlock x:Name="PreviewCoursePlaceholder" IsVisible="False"
+                                   Text="晚自习（1）"
+                                   FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
+                                   Foreground="{Binding CourseInfoColor}"/>
+                    </Panel>
                 </Viewbox>
 
                 <StackPanel x:Name="ButtonBar" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
@@ -303,23 +304,11 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 免责声明（进度带已移至窗口最底部独立层；课程信息已并入上面的底部行） -->
-            <StackPanel Grid.Row="3" Margin="0,10,0,0">
-                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" HorizontalAlignment="Center">
-                    <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="11"
-                               Foreground="{Binding Chrome.TextFaint}" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="{Binding DisclaimerText}"
-                               FontSize="10" Foreground="{Binding Chrome.TextFaint}"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"/>
-                </Grid>
-            </StackPanel>
-
             <!-- 左上角提醒面板（无边框无背景纯文字：未并入第一行的 降雨/倒计时/文本 + 预警。天气在顶部行主位，预警始终单开）
                  上边距是给玻璃留的：这一块与上面第一行各垫一块玻璃，玻璃各往外探 6px，
                  而这两行原本严丝合缝地贴着，两块玻璃就会叠出 12px 的错位边。
                  Margin 加在这一块上（面板是 VerticalAlignment=Top，所在行是 *，不影响任何别的东西的位置） -->
-            <Border x:Name="ReminderPanel" Grid.Row="1" Grid.RowSpan="3" HorizontalAlignment="Left" VerticalAlignment="Top"
+            <Border x:Name="ReminderPanel" Grid.Row="1" Grid.RowSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top"
                     Margin="0,16,0,0"
                     MaxWidth="{Binding ReminderPanelMaxWidth}" MaxHeight="400"
                     IsHitTestVisible="True"
@@ -400,5 +389,46 @@
                 </ControlTemplate>
             </ProgressBar.Template>
         </ProgressBar>
+
+        <!-- 地震提醒：整屏正中弹出（内容读自「地震预警」插件，见 EarthquakeReader）。
+             这一层压在全部内容上面、跨两行、不吃鼠标事件。
+             弹出时整块屏幕先被一层磨砂蒙住（QuakeSheet），别的什么都看不清，只剩正中这张卡片——
+             预警的最高重要性就是这么来的；卡片自己的磨砂也是从同一张模糊图上裁的（FrostedCardBackdrop）。
+             磨砂用的是背景层早烘好的那张模糊图，不再对整屏做一次实时模糊：
+             4K 上后者每次重绘几十毫秒，而这张图是现成的，只多画一遍。
+             第一行是横波倒计时、第二行是震中和震级，等级色（本地烈度分档）用在文字、描边和底色上；
+             字号随时钟字号缩放，再长由 Viewbox 等比缩，保证整屏塞得下。 -->
+        <Grid x:Name="EarthquakeAlertLayer" Grid.Row="0" Grid.RowSpan="2"
+              IsHitTestVisible="False" IsVisible="{Binding ShowEarthquakeAlert}">
+            <!-- 兜底：没有背景图、也就没有模糊图时，靠这层近乎不透明的底色把别的盖掉 -->
+            <Border x:Name="QuakeVeil"/>
+            <!-- 整屏磨砂：有模糊图时它盖掉 QuakeVeil，整块屏幕变成一张磨砂玻璃 -->
+            <views:FrostedCardBackdrop x:Name="QuakeSheet" Radius="0"/>
+            <Border x:Name="EarthquakeAlertBlock"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{Binding EarthquakeAlertBackground}"
+                    BorderBrush="{Binding EarthquakeAlertBorder}"
+                    BorderThickness="2" CornerRadius="14">
+                <Panel>
+                    <!-- 磨砂底：有背景图时盖掉上面的纯色底，没图时（画不出）就留着纯色底兜底 -->
+                    <views:FrostedCardBackdrop x:Name="EqFrost" Radius="12"
+                                               Tint="{Binding EarthquakeAlertBackground}"/>
+                    <Viewbox Margin="30,18" Stretch="Uniform" StretchDirection="DownOnly"
+                             MaxWidth="{Binding EarthquakeAlertMaxWidth}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel Spacing="6" HorizontalAlignment="Center">
+                            <TextBlock Text="{Binding EarthquakeLine1}"
+                                       FontSize="{Binding EarthquakeLine1FontSize}" FontWeight="Bold"
+                                       Foreground="{Binding EarthquakeAlertBrush}"
+                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
+                            <TextBlock Text="{Binding EarthquakeLine2}"
+                                       FontSize="{Binding EarthquakeLine2FontSize}" FontWeight="Bold"
+                                       Foreground="{Binding EarthquakeAlertBrush}"
+                                       HorizontalAlignment="Center" TextWrapping="NoWrap"/>
+                        </StackPanel>
+                    </Viewbox>
+                </Panel>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

@@ -23,6 +23,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showCourseInfo = true;
     private bool _showBellTime = true;
     private bool _showNoisyCounter = true;
+    private bool _letterDismissed;
     private bool _skipFirst3Min = true;
     private int _skipFirstMinutes = 3;
     private double _noisySustainSeconds = 1.0;
@@ -60,6 +61,8 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showRainReminder = true;
     private bool _showEmojiSubtitles = true;
     private bool _showTrayMenuEntry = true;
+    private bool _pauseWhenMinimized = true;
+    private int _minimizePauseMinutes = 5;
     private bool _showCameraReminder = true;
     private double _cameraAlertFontSize = MinCameraAlertFontSize;
     private bool _showEarthquakeReminder = true;
@@ -349,6 +352,16 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 致用户的一封信已经勾了「不再显示」：勾过就再也不会弹（没勾的话每次启动 CI 只在
+    /// 第一次打开设置页时弹一次）。
+    /// </summary>
+    public bool LetterDismissed
+    {
+        get => _letterDismissed;
+        set { _letterDismissed = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
     /// 是否显示课程信息
     /// </summary>
     public bool ShowCourseInfo
@@ -577,6 +590,23 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _showTrayMenuEntry;
         set { _showTrayMenuEntry = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 大屏时钟最小化超过 <see cref="MinimizePauseMinutes"/> 分钟后是否暂停运行
+    /// （停计时、音量检测、摄像头检测、防休眠与课程事件）。暂停不关窗口，任务栏入口保留，点回即恢复。
+    /// </summary>
+    public bool PauseWhenMinimized
+    {
+        get => _pauseWhenMinimized;
+        set { _pauseWhenMinimized = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>最小化多久后暂停（分钟，1~30）。</summary>
+    public int MinimizePauseMinutes
+    {
+        get => _minimizePauseMinutes;
+        set { _minimizePauseMinutes = Math.Clamp(value, 1, 30); OnPropertyChanged(); }
     }
 
     /// <summary>是否显示「摄像头使用中」提醒（设备被程序占用时，在预警那一行出一条）。</summary>
