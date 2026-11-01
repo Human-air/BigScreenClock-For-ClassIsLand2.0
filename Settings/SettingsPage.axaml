@@ -693,6 +693,140 @@
                 </StackPanel>
                 </Border>
 
+                <!-- 飞书推送 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI Send}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="飞书推送" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <CheckBox IsChecked="{Binding EnableFeishuNotify}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Bell}" FontSize="13"/>
+                            <TextBlock Text="启用飞书推送（噪音提醒 / 进出大屏时钟）" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+
+                    <StackPanel Spacing="6" IsEnabled="{Binding EnableFeishuNotify}">
+                        <TextBlock Text="Webhook 地址：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，复制其中的地址填到这里"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding FeishuWebhookUrl}" FontSize="12" Padding="6,4"
+                                 Watermark="https://open.feishu.cn/open-apis/bot/v2/hook/..."/>
+                        <TextBlock Text="签名密钥（机器人开启「签名校验」时填，未开启留空）" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding FeishuSecret}" PasswordChar="●" FontSize="12" Padding="6,4"
+                                 Watermark="签名密钥"/>
+                        <TextBlock Text="设备 / 班级名称（多台机器区分用，可留空）" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding DeviceName}" FontSize="12" Padding="6,4" Watermark="如 高一(3)班"/>
+
+                        <CheckBox IsChecked="{Binding FeishuNotifyNoise}" Content="推送噪音提醒（一般 / 吵闹）" FontSize="13"/>
+                        <CheckBox IsChecked="{Binding FeishuNotifyNormal}" IsEnabled="{Binding FeishuNotifyNoise}"
+                                  Content="「一般」等级也推送（关闭则只在「吵闹」时推送）" FontSize="13" Margin="20,0,0,0"/>
+                        <CheckBox IsChecked="{Binding FeishuNotifyEnterExit}" Content="推送进入 / 退出大屏时钟" FontSize="13"/>
+                        <CheckBox IsChecked="{Binding FeishuDirectConnection}"
+                                  Content="直连（不走系统代理；插件发送超时可勾选）" FontSize="13"/>
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="同级冷却" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                            <Slider Grid.Column="1" Value="{Binding FeishuCooldownSeconds}"
+                                    Minimum="0" Maximum="600" TickFrequency="10" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding FeishuCooldownSecondsText}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="66"
+                                       TextAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="请求超时" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                            <Slider Grid.Column="1" Value="{Binding FeishuTimeoutSeconds}"
+                                    Minimum="5" Maximum="120" TickFrequency="5" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding FeishuTimeoutSecondsText}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="66"
+                                       TextAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="同级冷却：同一等级（一般 / 吵闹）两条消息的最小间隔，0 = 不限制，默认 30 秒。"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+
+                        <!-- 抓拍附图 -->
+                        <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="0,1,0,0" Margin="0,6,0,0" Padding="0,8,0,0">
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Classes="icon" Text="{ci:LI Camera}" FontSize="15"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                    <TextBlock Text="抓拍附图" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="开启后，每次推送消息前自动抓拍一张教室照片一并发送。照片需要「飞书自建应用」凭据才能上传，未填写时自动降级为纯文字（照片仍会存到本地）。"
+                                           FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                <CheckBox IsChecked="{Binding EnableSnapshot}" Content="推送时自动抓拍并附带照片" FontSize="13"/>
+
+                                <StackPanel Spacing="6" IsEnabled="{Binding EnableSnapshot}">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                        <TextBlock Grid.Column="0" Text="摄像头" VerticalAlignment="Center" FontSize="13"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Cameras}"
+                                                  SelectedItem="{Binding SelectedCamera}"
+                                                  HorizontalAlignment="Stretch" PlaceholderText="（点右侧刷新扫描）"/>
+                                        <Button Grid.Column="2" Content="刷新" Click="RefreshSnapshotCameras_Click"
+                                                CornerRadius="6" Padding="8,4" Cursor="Hand"/>
+                                    </Grid>
+
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                        <TextBlock Grid.Column="0" Text="分辨率" VerticalAlignment="Center" FontSize="13"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Resolutions}"
+                                                  SelectedItem="{Binding SelectedResolution}"
+                                                  HorizontalAlignment="Stretch"/>
+                                    </Grid>
+
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <Button Content="测试抓拍" Click="TestSnapshot_Click"
+                                                CornerRadius="6" Padding="10,5" Cursor="Hand"/>
+                                        <TextBlock Text="{Binding SnapshotStatus}" VerticalAlignment="Center" FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1" CornerRadius="6" Padding="2"
+                                            HorizontalAlignment="Left">
+                                        <Image Source="{Binding SnapshotPreview}" Width="240" Height="135"
+                                               Stretch="UniformToFill"/>
+                                    </Border>
+
+                                    <TextBlock Text="飞书自建应用凭据（上传照片用；不填则只发文字）" FontSize="12" Margin="0,6,0,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                    <TextBox Text="{Binding FeishuAppId}" FontSize="12" Padding="6,4"
+                                             Watermark="App ID，如 cli_a1b2c3d4e5f6g7h8"/>
+                                    <TextBox Text="{Binding FeishuAppSecret}" PasswordChar="●" FontSize="12" Padding="6,4"
+                                             Watermark="App Secret"/>
+                                    <TextBlock Text="配置路径：飞书开放平台 → 创建企业自建应用 → 权限管理开通「获取与上传图片 im:resource」→ 创建版本并发布 → 把 App ID / App Secret 填到上面。不需要把应用拉进群。"
+                                               FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+                                    <Button Content="测试发送" Click="TestFeishu_Click" CornerRadius="6" Padding="10,5" Cursor="Hand"/>
+                                    <TextBlock Text="{Binding FeishuTestStatus}" VerticalAlignment="Center" FontSize="12"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
 

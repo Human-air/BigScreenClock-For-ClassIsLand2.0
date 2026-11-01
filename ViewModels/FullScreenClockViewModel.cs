@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Timers;
 using Avalonia;
 using Avalonia.Controls;
@@ -32,12 +33,22 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly PluginSettings _settings;
     private readonly DecibelMeterService _decibelService;
     private readonly CameraActivityService _cameraService;
+    private readonly FeishuNotifier _feishu;
+    private readonly SnapshotService _snapshot;
     private readonly IServiceProvider _serviceProvider;
     private readonly EarthquakeReader _earthquakeReader;
     private readonly NoiseCounter _counter = new();
     private readonly Lazy<IExactTimeService?> _exactTimeService;
     private System.Timers.Timer? _updateTimer;
     private FullScreenClockWindow? _window;
+
+    // ===== 飞书推送会话状态 =====
+    private bool _feishuSessionActive;
+    private DateTime _feishuSessionStart;
+    private int _sessionNormal;
+    private int _sessionNoisy;
+    private DateTime _lastNoiseNotifyNormal = DateTime.MinValue;
+    private DateTime _lastNoiseNotifyNoisy = DateTime.MinValue;
 
     /// <summary>
     /// CI 里设置的时间偏移（秒）。正 = 打铃提前，负 = 打铃延后。
@@ -132,11 +143,15 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         PluginSettings settings,
         DecibelMeterService decibelService,
         CameraActivityService cameraService,
+        FeishuNotifier feishu,
+        SnapshotService snapshot,
         IServiceProvider serviceProvider)
     {
         _settings = settings;
         _decibelService = decibelService;
         _cameraService = cameraService;
+        _feishu = feishu;
+        _snapshot = snapshot;
         _serviceProvider = serviceProvider;
         _earthquakeReader = new EarthquakeReader(serviceProvider);
 
@@ -289,7 +304,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// 持续事件（一般/吵闹）→ 计数。事件在音频线程引发，这里调度到 UI 线程。
-    /// 事件等级已由探测器按段内一般/吵闹占比判定，计数层只应用 冷却/保护 规则。
+    /// 结算为有效记录时，同时累加「会话汇总」并按需推送飞书。
     /// </summary>
     private void OnNoiseEventRaised(object? sender, NoiseEventRaisedEventArgs e)
     {
@@ -298,7 +313,111 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             var decision = _counter.OnEvent(e.Level, IsInProtection());
             if (decision != CountDecision.None)
                 UpdateNoisyDisplay();
+
+            // 会话累计：与屏幕计数同口径（仅上课、保护期外、非课间），供退出时的本节汇总
+            if (decision == CountDecision.CountNoisy) _sessionNoisy++;
+            else if (decision == CountDecision.CountNormal) _sessionNormal++;
+
+            TrySendNoiseNotification(e.Level, e.SmoothedRms);
         });
+    }
+
+    /// <summary>按开关与同级冷却策略推送噪音提醒（一般 / 吵闹）。</summary>
+    private void TrySendNoiseNotification(NoiseLevel level, double smoothedRms)
+    {
+        if (!_feishuSessionActive) return;
+        if (!_settings.EnableFeishuNotify || !_settings.FeishuNotifyNoise) return;
+        if (level == NoiseLevel.Normal && !_settings.FeishuNotifyNormal) return;
+        if (level != NoiseLevel.Noisy && level != NoiseLevel.Normal) return;
+
+        var now = DateTime.Now;
+        var cooldown = TimeSpan.FromSeconds(Math.Max(0, _settings.FeishuCooldownSeconds));
+        var last = level == NoiseLevel.Noisy ? _lastNoiseNotifyNoisy : _lastNoiseNotifyNormal;
+        if (cooldown > TimeSpan.Zero && now - last < cooldown) return;
+
+        if (level == NoiseLevel.Noisy) _lastNoiseNotifyNoisy = now;
+        else _lastNoiseNotifyNormal = now;
+
+        // 异步发送，不阻塞 UI 线程；开启抓拍时先拍再发
+        _ = SendWithSnapshotAsync((img, path) => _feishu.SendNoiseAsync(
+            level, smoothedRms, CurrentCourseNameSafe(), _counter.NormalCount, _counter.NoisyCount,
+            img, path));
+    }
+
+    /// <summary>按设置抓拍一帧（同时存本地），再把照片交给发送动作。</summary>
+    private async Task SendWithSnapshotAsync(
+        Func<byte[]?, string?, Task<(bool Ok, string Message)>> send)
+    {
+        byte[]? jpeg = null;
+        string? localPath = null;
+
+        if (_settings.EnableSnapshot)
+        {
+            try
+            {
+                var (data, _) = await _snapshot.CaptureAsync().ConfigureAwait(false);
+                if (data is { Length: > 0 })
+                {
+                    jpeg = data;
+                    localPath = SnapshotService.TrySaveLocal(data, DateTime.Now);
+                }
+            }
+            catch
+            {
+                // 抓拍失败不影响文字推送
+            }
+        }
+
+        try
+        {
+            await send(jpeg, localPath).ConfigureAwait(false);
+        }
+        catch
+        {
+            // 发送失败静默，避免影响大屏时钟主流程
+        }
+    }
+
+    /// <summary>当前课程名：优先用已定位的课程名，否则直接向 ILessonsService 取。</summary>
+    private string CurrentCourseNameSafe()
+    {
+        if (!string.IsNullOrEmpty(_currentClassName)) return _currentClassName;
+        try { return _serviceProvider.GetRequiredService<ILessonsService>().CurrentSubject?.Name ?? ""; }
+        catch { return ""; }
+    }
+
+    /// <summary>开始一次大屏时钟会话：重置汇总并发送「进入」通知。</summary>
+    private void BeginFeishuSession()
+    {
+        _feishuSessionActive = true;
+        _feishuSessionStart = DateTime.Now;
+        _sessionNormal = 0;
+        _sessionNoisy = 0;
+        _lastNoiseNotifyNormal = DateTime.MinValue;
+        _lastNoiseNotifyNoisy = DateTime.MinValue;
+
+        if (_settings.EnableFeishuNotify && _settings.FeishuNotifyEnterExit)
+        {
+            var course = CurrentCourseNameSafe();
+            _ = SendWithSnapshotAsync((img, path) => _feishu.SendEnterAsync(course, img, path));
+        }
+    }
+
+    /// <summary>结束会话：发送「退出」通知（附本节汇总）。幂等，重复调用只发一次。</summary>
+    private void EndFeishuSession()
+    {
+        if (!_feishuSessionActive) return;
+        _feishuSessionActive = false;
+
+        if (_settings.EnableFeishuNotify && _settings.FeishuNotifyEnterExit)
+        {
+            var duration = DateTime.Now - _feishuSessionStart;
+            var course = CurrentCourseNameSafe();
+            var normal = _sessionNormal;
+            var noisy = _sessionNoisy;
+            _ = SendWithSnapshotAsync((img, path) =>
+                _feishu.SendExitAsync(course, duration, normal, noisy, img, path));
+        }
     }
 
     private bool IsInProtection()
@@ -1484,6 +1603,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     _cameraService.StopMonitoring();
                     UnsubscribeToClassEvents();
                     SetMainWindowVisible(true);
+                    EndFeishuSession();      // 用户直接关窗口也要发「退出」通知
                     _window = null;
                 };
                 // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
@@ -1536,6 +1656,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             _window.Show();
             IsWindowVisible = true;
             SetMainWindowVisible(false);
+            BeginFeishuSession();   // 进入大屏时钟：发「进入」通知（附抓拍）
         });
     }
 
@@ -1664,6 +1785,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             UnsubscribeToClassEvents();
             IsWindowVisible = false;
             SetMainWindowVisible(true);
+            EndFeishuSession();   // 退出大屏时钟：发「退出」通知（附本节汇总 + 抓拍）
         });
     }
 

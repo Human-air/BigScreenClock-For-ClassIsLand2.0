@@ -13,9 +13,13 @@ public sealed class NoiseEventRaisedEventArgs : EventArgs
 {
     public NoiseLevel Level { get; }
 
-    public NoiseEventRaisedEventArgs(NoiseLevel level)
+    /// <summary>事件结算时的平滑 RMS（给飞书消息显示实时音量用）。</summary>
+    public double SmoothedRms { get; }
+
+    public NoiseEventRaisedEventArgs(NoiseLevel level, double smoothedRms = 0)
     {
         Level = level;
+        SmoothedRms = smoothedRms;
     }
 }
 
@@ -304,7 +308,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             if (result.EventFired && result.EventLevel.HasValue)
             {
                 NoiseEventRaised?.Invoke(this,
-                    new NoiseEventRaisedEventArgs(result.EventLevel.Value));
+                    new NoiseEventRaisedEventArgs(result.EventLevel.Value, result.SmoothedRms));
             }
 
             // 「正在记录」实时状态：段归属变化（起算/切换/结束）时通知 UI

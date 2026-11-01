@@ -69,6 +69,26 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _cameraListFilled;
     private ObservableCollection<string> _monitoredCameras = new();
 
+    // ===== 飞书推送（噪音 / 进出大屏时钟）=====
+    private bool _enableFeishuNotify;
+    private string _feishuWebhookUrl = "";
+    private string _feishuSecret = "";
+    private string _deviceName = "";
+    private int _feishuCooldownSeconds = 30;
+    private int _feishuTimeoutSeconds = 30;
+    private bool _feishuDirectConnection;
+    private bool _feishuNotifyNoise = true;
+    private bool _feishuNotifyNormal = true;
+    private bool _feishuNotifyEnterExit = true;
+
+    // ===== 抓拍附图（OpenCvSharp）=====
+    private bool _enableSnapshot;
+    private int _snapshotCameraIndex;
+    private int _snapshotWidth = 1280;
+    private int _snapshotHeight = 720;
+    private string _feishuAppId = "";
+    private string _feishuAppSecret = "";
+
     public PluginSettings()
     {
         _targetCourseNames.CollectionChanged += (_, _) => OnPropertyChanged(nameof(TargetCourseNames));
@@ -663,6 +683,118 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _cameraListFilled;
         set { _cameraListFilled = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否启用飞书推送（噪音提醒 / 进出大屏时钟）。</summary>
+    public bool EnableFeishuNotify
+    {
+        get => _enableFeishuNotify;
+        set { _enableFeishuNotify = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书自定义机器人 Webhook 地址（https://open.feishu.cn/open-apis/bot/v2/hook/...）。</summary>
+    public string FeishuWebhookUrl
+    {
+        get => _feishuWebhookUrl;
+        set { _feishuWebhookUrl = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书机器人「签名校验」密钥。机器人开启签名校验时必填，未开启则留空。</summary>
+    public string FeishuSecret
+    {
+        get => _feishuSecret;
+        set { _feishuSecret = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>设备 / 班级名称，用于多台机器区分显示（可留空）。</summary>
+    public string DeviceName
+    {
+        get => _deviceName;
+        set { _deviceName = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>同一等级噪音消息的最小发送间隔（秒）。0 表示不限制，默认 30。</summary>
+    public int FeishuCooldownSeconds
+    {
+        get => _feishuCooldownSeconds;
+        set { _feishuCooldownSeconds = Math.Clamp(value, 0, 600); OnPropertyChanged(); }
+    }
+
+    /// <summary>是否推送噪音提醒（一般 / 吵闹）。</summary>
+    public bool FeishuNotifyNoise
+    {
+        get => _feishuNotifyNoise;
+        set { _feishuNotifyNoise = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>「一般」等级是否也推送。关闭后仅在「吵闹」时推送。</summary>
+    public bool FeishuNotifyNormal
+    {
+        get => _feishuNotifyNormal;
+        set { _feishuNotifyNormal = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否推送进入 / 退出大屏时钟通知。</summary>
+    public bool FeishuNotifyEnterExit
+    {
+        get => _feishuNotifyEnterExit;
+        set { _feishuNotifyEnterExit = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>单次请求超时秒数，默认 30（范围 5~120）。</summary>
+    public int FeishuTimeoutSeconds
+    {
+        get => _feishuTimeoutSeconds;
+        set { _feishuTimeoutSeconds = Math.Clamp(value, 5, 120); OnPropertyChanged(); }
+    }
+
+    /// <summary>true = 不使用系统代理直连；false（默认）= 跟随系统代理。</summary>
+    public bool FeishuDirectConnection
+    {
+        get => _feishuDirectConnection;
+        set { _feishuDirectConnection = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>推送消息时是否自动抓拍教室照片。</summary>
+    public bool EnableSnapshot
+    {
+        get => _enableSnapshot;
+        set { _enableSnapshot = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>抓拍使用的摄像头索引（0 开始）。</summary>
+    public int SnapshotCameraIndex
+    {
+        get => _snapshotCameraIndex;
+        set { _snapshotCameraIndex = Math.Max(0, value); OnPropertyChanged(); }
+    }
+
+    /// <summary>抓拍宽度（像素）。</summary>
+    public int SnapshotWidth
+    {
+        get => _snapshotWidth;
+        set { _snapshotWidth = Math.Clamp(value, 320, 3840); OnPropertyChanged(); }
+    }
+
+    /// <summary>抓拍高度（像素）。</summary>
+    public int SnapshotHeight
+    {
+        get => _snapshotHeight;
+        set { _snapshotHeight = Math.Clamp(value, 240, 2160); OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书自建应用 App ID（用于上传图片，可留空）。</summary>
+    public string FeishuAppId
+    {
+        get => _feishuAppId;
+        set { _feishuAppId = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书自建应用 App Secret（用于上传图片，可留空）。</summary>
+    public string FeishuAppSecret
+    {
+        get => _feishuAppSecret;
+        set { _feishuAppSecret = value ?? ""; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

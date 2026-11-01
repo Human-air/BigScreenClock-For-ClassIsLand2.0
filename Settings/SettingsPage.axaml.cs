@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -1439,6 +1440,302 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public string ClockPositionPercentText => $"{_settings.ClockPositionPercent:0}%";
 
     public string VolumePositionPercentText => $"{_settings.VolumePositionPercent:0}%";
+
+    // ===== 飞书推送 =====
+
+    public bool EnableFeishuNotify
+    {
+        get => _settings.EnableFeishuNotify;
+        set
+        {
+            _settings.EnableFeishuNotify = value;
+            OnPropertyChanged(nameof(EnableFeishuNotify));
+            if (value && Cameras.Count == 0)
+                _ = ScanSnapshotCamerasAsync(userTriggered: false);
+        }
+    }
+
+    public string FeishuWebhookUrl
+    {
+        get => _settings.FeishuWebhookUrl;
+        set { _settings.FeishuWebhookUrl = value ?? ""; OnPropertyChanged(nameof(FeishuWebhookUrl)); }
+    }
+
+    public string FeishuSecret
+    {
+        get => _settings.FeishuSecret;
+        set { _settings.FeishuSecret = value ?? ""; OnPropertyChanged(nameof(FeishuSecret)); }
+    }
+
+    public string DeviceName
+    {
+        get => _settings.DeviceName;
+        set { _settings.DeviceName = value ?? ""; OnPropertyChanged(nameof(DeviceName)); }
+    }
+
+    public double FeishuCooldownSeconds
+    {
+        get => _settings.FeishuCooldownSeconds;
+        set
+        {
+            _settings.FeishuCooldownSeconds = (int)value;
+            OnPropertyChanged(nameof(FeishuCooldownSeconds));
+            OnPropertyChanged(nameof(FeishuCooldownSecondsText));
+        }
+    }
+
+    public string FeishuCooldownSecondsText
+        => _settings.FeishuCooldownSeconds <= 0 ? "不限制" : $"{_settings.FeishuCooldownSeconds} 秒";
+
+    public double FeishuTimeoutSeconds
+    {
+        get => _settings.FeishuTimeoutSeconds;
+        set
+        {
+            _settings.FeishuTimeoutSeconds = (int)value;
+            OnPropertyChanged(nameof(FeishuTimeoutSeconds));
+            OnPropertyChanged(nameof(FeishuTimeoutSecondsText));
+        }
+    }
+
+    public string FeishuTimeoutSecondsText => $"{_settings.FeishuTimeoutSeconds} 秒";
+
+    public bool FeishuDirectConnection
+    {
+        get => _settings.FeishuDirectConnection;
+        set
+        {
+            _settings.FeishuDirectConnection = value;
+            OnPropertyChanged(nameof(FeishuDirectConnection));
+        }
+    }
+
+    public bool FeishuNotifyNoise
+    {
+        get => _settings.FeishuNotifyNoise;
+        set
+        {
+            _settings.FeishuNotifyNoise = value;
+            OnPropertyChanged(nameof(FeishuNotifyNoise));
+            OnPropertyChanged(nameof(FeishuNotifyNormal));
+        }
+    }
+
+    public bool FeishuNotifyNormal
+    {
+        get => _settings.FeishuNotifyNormal;
+        set
+        {
+            _settings.FeishuNotifyNormal = value;
+            OnPropertyChanged(nameof(FeishuNotifyNormal));
+        }
+    }
+
+    public bool FeishuNotifyEnterExit
+    {
+        get => _settings.FeishuNotifyEnterExit;
+        set
+        {
+            _settings.FeishuNotifyEnterExit = value;
+            OnPropertyChanged(nameof(FeishuNotifyEnterExit));
+        }
+    }
+
+    private string _feishuTestStatus = "";
+    public string FeishuTestStatus
+    {
+        get => _feishuTestStatus;
+        set { _feishuTestStatus = value; OnPropertyChanged(nameof(FeishuTestStatus)); }
+    }
+
+    // ===== 抓拍（飞书附图）=====
+
+    public ObservableCollection<SnapshotCamera> Cameras { get; } = new();
+
+    private SnapshotCamera? _selectedCamera;
+    public SnapshotCamera? SelectedCamera
+    {
+        get => _selectedCamera;
+        set
+        {
+            _selectedCamera = value;
+            if (value is not null) _settings.SnapshotCameraIndex = value.Index;
+            OnPropertyChanged(nameof(SelectedCamera));
+        }
+    }
+
+    public List<string> Resolutions { get; } = new() { "640×480", "1280×720", "1920×1080" };
+
+    private string? _selectedResolution;
+    public string? SelectedResolution
+    {
+        get => _selectedResolution ??= ResolveSnapshotResolutionLabel();
+        set
+        {
+            if (value is null) return;
+            _selectedResolution = value;
+            ApplySnapshotResolution(value);
+            OnPropertyChanged(nameof(SelectedResolution));
+        }
+    }
+
+    public bool EnableSnapshot
+    {
+        get => _settings.EnableSnapshot;
+        set
+        {
+            _settings.EnableSnapshot = value;
+            OnPropertyChanged(nameof(EnableSnapshot));
+            if (value && Cameras.Count == 0)
+                _ = ScanSnapshotCamerasAsync(userTriggered: false);
+        }
+    }
+
+    public string FeishuAppId
+    {
+        get => _settings.FeishuAppId;
+        set { _settings.FeishuAppId = value ?? ""; OnPropertyChanged(nameof(FeishuAppId)); }
+    }
+
+    public string FeishuAppSecret
+    {
+        get => _settings.FeishuAppSecret;
+        set { _settings.FeishuAppSecret = value ?? ""; OnPropertyChanged(nameof(FeishuAppSecret)); }
+    }
+
+    private string _snapshotStatus = "";
+    public string SnapshotStatus
+    {
+        get => _snapshotStatus;
+        set { _snapshotStatus = value; OnPropertyChanged(nameof(SnapshotStatus)); }
+    }
+
+    private Bitmap? _snapshotPreview;
+    public Bitmap? SnapshotPreview
+    {
+        get => _snapshotPreview;
+        set { _snapshotPreview = value; OnPropertyChanged(nameof(SnapshotPreview)); }
+    }
+
+    private string ResolveSnapshotResolutionLabel()
+    {
+        var label = $"{_settings.SnapshotWidth}×{_settings.SnapshotHeight}";
+        return Resolutions.Contains(label) ? label : "1280×720";
+    }
+
+    private void ApplySnapshotResolution(string label)
+    {
+        var parts = label.Split('×');
+        if (parts.Length != 2) return;
+        if (int.TryParse(parts[0], out var w) && int.TryParse(parts[1], out var h))
+        {
+            _settings.SnapshotWidth = w;
+            _settings.SnapshotHeight = h;
+        }
+    }
+
+    /// <summary>扫描可抓拍的摄像头（逐个索引试开，后台线程跑，避免卡界面）。</summary>
+    private async Task ScanSnapshotCamerasAsync(bool userTriggered)
+    {
+        if (userTriggered) SnapshotStatus = "正在扫描摄像头…";
+
+        var list = await Task.Run(() => SnapshotService.Enumerate());
+
+        Cameras.Clear();
+        foreach (var cam in list) Cameras.Add(cam);
+
+        SelectedCamera = Cameras.FirstOrDefault(c => c.Index == _settings.SnapshotCameraIndex)
+                         ?? Cameras.FirstOrDefault();
+        OnPropertyChanged(nameof(SelectedCamera));
+
+        if (list.Count == 0)
+            SnapshotStatus = "未发现摄像头（可能被其它程序占用，或未连接）";
+        else if (userTriggered)
+            SnapshotStatus = $"找到 {list.Count} 个摄像头，可点「测试抓拍」确认画面";
+    }
+
+    public async void RefreshSnapshotCameras_Click(object? sender, RoutedEventArgs e)
+    {
+        await ScanSnapshotCamerasAsync(userTriggered: true);
+    }
+
+    public async void TestSnapshot_Click(object? sender, RoutedEventArgs e)
+    {
+        var camera = Plugin.ServiceProvider?.GetService<SnapshotService>();
+        if (camera is null)
+        {
+            SnapshotStatus = "❌ 抓拍服务不可用";
+            return;
+        }
+
+        SnapshotStatus = "正在抓拍…";
+        var (jpeg, error) = await camera.CaptureAsync();
+        if (jpeg is null)
+        {
+            SnapshotStatus = $"❌ 抓拍失败：{error}";
+            return;
+        }
+
+        var path = SnapshotService.TrySaveLocal(jpeg, DateTime.Now);
+        try
+        {
+            SnapshotPreview = new Bitmap(new MemoryStream(jpeg));
+        }
+        catch
+        {
+            // 预览失败不影响抓拍本身
+        }
+
+        SnapshotStatus = $"✅ 抓拍成功（{jpeg.Length / 1024} KB）" + (path is null ? "" : "，已保存到本地");
+    }
+
+    /// <summary>测试发送：忽略启用开关，直接校验 Webhook（及图片上传通道）。</summary>
+    public async void TestFeishu_Click(object? sender, RoutedEventArgs e)
+    {
+        var notifier = Plugin.ServiceProvider?.GetService<FeishuNotifier>();
+        if (notifier is null)
+        {
+            FeishuTestStatus = "❌ 推送服务不可用";
+            return;
+        }
+
+        // 立即写盘，保证测试用的是界面上刚填的地址 / 密钥
+        try { Plugin.SaveSettings(); } catch { }
+
+        FeishuTestStatus = "发送中…";
+
+        // 开启抓拍时，测试消息也带一张照片，便于确认整条链路
+        byte[]? jpeg = null;
+        string? savedPath = null;
+        if (_settings.EnableSnapshot)
+        {
+            var camera = Plugin.ServiceProvider?.GetService<SnapshotService>();
+            if (camera is not null)
+            {
+                try
+                {
+                    var (data, _) = await camera.CaptureAsync();
+                    if (data is { Length: > 0 })
+                    {
+                        jpeg = data;
+                        savedPath = SnapshotService.TrySaveLocal(data, DateTime.Now);
+                    }
+                }
+                catch
+                {
+                    // 抓拍失败不影响文字测试
+                }
+            }
+        }
+
+        var (ok, msg) = await notifier.SendTestAsync(jpeg, savedPath);
+        if (!ok)
+            FeishuTestStatus = $"❌ 发送失败：{msg}";
+        else if (msg.Contains("照片未发送") || msg.Contains("照片发送失败"))
+            FeishuTestStatus = $"⚠️ 文字已送达，但照片没发出去：{msg}";
+        else
+            FeishuTestStatus = "✅ 发送成功（含照片），请查看飞书群";
+    }
 
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)
