@@ -107,10 +107,11 @@ public class SnapshotService
     /// <summary>
     /// 抓拍一帧并编码为 JPEG。失败返回 null 并给出原因。
     /// 摄像头打开可能阻塞，内部放到后台线程并限时。
+    /// force = 忽略「推送时抓拍」总开关强制抓拍（快捷键打小报告用，摄像头配置仍取设置页）。
     /// </summary>
-    public async Task<(byte[]? Jpeg, string? Error)> CaptureAsync(int timeoutSeconds = 9)
+    public async Task<(byte[]? Jpeg, string? Error)> CaptureAsync(int timeoutSeconds = 9, bool force = false)
     {
-        if (!_settings.EnableSnapshot)
+        if (!_settings.EnableSnapshot && !force)
             return (null, "抓拍未启用");
 
         var index = Math.Max(0, _settings.SnapshotCameraIndex);

@@ -67,13 +67,16 @@ public class Plugin : PluginBase
         services.AddSingleton<CameraActivityService>();
         services.AddSingleton<FeishuNotifier>();
         services.AddSingleton<SnapshotService>();
+        services.AddSingleton<AudioRecorderService>();
         services.AddSingleton<FullScreenClockViewModel>();
         services.AddSingleton<AutoTriggerService>();
+        services.AddSingleton<SnitchHotkeyService>();
 
         services.AddHostedService<ServiceProviderCapture>();
         services.AddHostedService<AutoTriggerService>();
         services.AddHostedService<BackdropPreloadService>();
         services.AddHostedService<TrayMenuService>();
+        services.AddHostedService<SnitchHotkeyService>();
 
         services.AddSettingsPage<EveningSelfStudyClock.Settings.SettingsPage>();
     }

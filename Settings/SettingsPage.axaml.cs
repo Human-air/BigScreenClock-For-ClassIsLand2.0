@@ -1737,6 +1737,125 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             FeishuTestStatus = "✅ 发送成功（含照片），请查看飞书群";
     }
 
+    // ===== 现场录音 / 打小报告 =====
+
+    public bool EnableNoiseAudioRecord
+    {
+        get => _settings.EnableNoiseAudioRecord;
+        set { _settings.EnableNoiseAudioRecord = value; OnPropertyChanged(nameof(EnableNoiseAudioRecord)); }
+    }
+
+    public double NoiseRecordSeconds
+    {
+        get => _settings.NoiseRecordSeconds;
+        set
+        {
+            _settings.NoiseRecordSeconds = (int)value;
+            OnPropertyChanged(nameof(NoiseRecordSeconds));
+            OnPropertyChanged(nameof(NoiseRecordSecondsText));
+        }
+    }
+
+    public string NoiseRecordSecondsText => $"{_settings.NoiseRecordSeconds} 秒";
+
+    public ObservableCollection<FeishuChat> Chats { get; } = new();
+
+    private FeishuChat? _selectedChat;
+    public FeishuChat? SelectedChat
+    {
+        get => _selectedChat;
+        set
+        {
+            _selectedChat = value;
+            if (value is not null) _settings.FeishuChatId = value.Id;
+            OnPropertyChanged(nameof(SelectedChat));
+            OnPropertyChanged(nameof(FeishuChatIdText));
+        }
+    }
+
+    public string FeishuChatIdText => string.IsNullOrWhiteSpace(_settings.FeishuChatId)
+        ? "当前 chat_id：未选择"
+        : $"当前 chat_id：{_settings.FeishuChatId}";
+
+    private string _chatQueryStatus = "";
+    public string ChatQueryStatus
+    {
+        get => _chatQueryStatus;
+        set { _chatQueryStatus = value; OnPropertyChanged(nameof(ChatQueryStatus)); }
+    }
+
+    public async void QueryChats_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var notifier = Plugin.ServiceProvider?.GetService<FeishuNotifier>();
+        if (notifier is null)
+        {
+            ChatQueryStatus = "❌ 推送服务不可用";
+            return;
+        }
+
+        try { Plugin.SaveSettings(); } catch { } // 用界面上刚填的凭据查询
+
+        ChatQueryStatus = "正在查询机器人所在群…";
+        var (chats, error) = await notifier.ListChatsAsync();
+        if (chats is null)
+        {
+            ChatQueryStatus = $"❌ 查询失败：{error}";
+            return;
+        }
+        if (chats.Count == 0)
+        {
+            ChatQueryStatus = "⚠️ 机器人还没有加入任何群：请先把自建应用机器人拉进目标群，再重新查询。";
+            return;
+        }
+
+        Chats.Clear();
+        foreach (var c in chats) Chats.Add(c);
+
+        // 回显已保存的 chat_id；没有匹配项时选第一个
+        SelectedChat = Chats.FirstOrDefault(c => c.Id == _settings.FeishuChatId) ?? Chats[0];
+        OnPropertyChanged(nameof(FeishuChatIdText));
+        ChatQueryStatus = $"✅ 找到 {chats.Count} 个群，下拉选择即可（选完自动保存）";
+    }
+
+    public bool EnableSnitch
+    {
+        get => _settings.EnableSnitch;
+        set { _settings.EnableSnitch = value; OnPropertyChanged(nameof(EnableSnitch)); }
+    }
+
+    public string SnitchHotkey
+    {
+        get => _settings.SnitchHotkey;
+        set { _settings.SnitchHotkey = value ?? ""; OnPropertyChanged(nameof(SnitchHotkey)); }
+    }
+
+    private string _snitchTestStatus = "";
+    public string SnitchTestStatus
+    {
+        get => _snitchTestStatus;
+        set { _snitchTestStatus = value; OnPropertyChanged(nameof(SnitchTestStatus)); }
+    }
+
+    public async void TestSnitch_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var service = Plugin.ServiceProvider?.GetService<SnitchHotkeyService>();
+        if (service is null)
+        {
+            SnitchTestStatus = "❌ 热键服务不可用";
+            return;
+        }
+
+        if (!SnitchHotkeyService.TryParseHotkey(_settings.SnitchHotkey, out _, out _))
+        {
+            SnitchTestStatus = $"❌ 快捷键格式不正确：{_settings.SnitchHotkey}（示例 Ctrl+Alt+R）";
+            return;
+        }
+
+        try { Plugin.SaveSettings(); } catch { }
+        SnitchTestStatus = "执行中：抓拍 → 卡片 → 录音 10 秒 → 发送…";
+        SnitchTestStatus = await service.TriggerAsync(ignoreCooldown: true);
+    }
+
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

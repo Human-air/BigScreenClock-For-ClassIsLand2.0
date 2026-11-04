@@ -81,6 +81,13 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _feishuNotifyNormal = true;
     private bool _feishuNotifyEnterExit = true;
 
+    // ===== 现场录音 / 打小报告 =====
+    private bool _enableNoiseAudioRecord;
+    private int _noiseRecordSeconds = 15;
+    private string _feishuChatId = "";
+    private bool _enableSnitch = true;
+    private string _snitchHotkey = "Ctrl+Alt+R";
+
     // ===== 抓拍附图（OpenCvSharp）=====
     private bool _enableSnapshot;
     private int _snapshotCameraIndex;
@@ -795,6 +802,43 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _feishuAppSecret;
         set { _feishuAppSecret = value ?? ""; OnPropertyChanged(); }
+    }
+
+    // ===== 现场录音 / 打小报告 =====
+
+    /// <summary>噪音事件触发后是否自动录制现场音频并发到群。</summary>
+    public bool EnableNoiseAudioRecord
+    {
+        get => _enableNoiseAudioRecord;
+        set { _enableNoiseAudioRecord = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>吵闹录音时长（秒），10~60，默认 15。</summary>
+    public int NoiseRecordSeconds
+    {
+        get => _noiseRecordSeconds;
+        set { _noiseRecordSeconds = Math.Clamp(value, 10, 60); OnPropertyChanged(); }
+    }
+
+    /// <summary>发录音文件的目标群 chat_id（设置页一键查询选择）。Webhook 机器人发不了文件，必须走自建应用消息。</summary>
+    public string FeishuChatId
+    {
+        get => _feishuChatId;
+        set { _feishuChatId = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否启用「打小报告」全局快捷键。</summary>
+    public bool EnableSnitch
+    {
+        get => _enableSnitch;
+        set { _enableSnitch = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>打小报告快捷键组合，格式 "Ctrl+Alt+R"。</summary>
+    public string SnitchHotkey
+    {
+        get => _snitchHotkey;
+        set { _snitchHotkey = value ?? ""; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

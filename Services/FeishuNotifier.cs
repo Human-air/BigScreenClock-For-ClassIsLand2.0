@@ -13,10 +13,18 @@ using EveningSelfStudyClock.NoiseDetection;
 
 namespace EveningSelfStudyClock.Services;
 
+/// <summary>机器人所在的飞书群（chat_id 查询结果，下拉框显示群名）。</summary>
+public sealed record FeishuChat(string Id, string Name)
+{
+    public override string ToString() => string.IsNullOrWhiteSpace(Name) ? Id : Name;
+}
+
 /// <summary>
 /// 飞书推送服务。
 /// 文本/卡片走「自定义机器人 Webhook」；照片需要先用「自建应用」的 tenant_access_token
 /// 调用上传图片接口换取 image_key，再把 image_key 放进卡片的 img 元素（同一企业内有效）。
+/// 音频等文件走「自建应用」上传文件接口 + 文件消息（Webhook 机器人不支持发文件），
+/// 需要群的 chat_id。
 /// 未配置 app_id / app_secret 时自动降级为纯文字卡片。
 /// </summary>
 public class FeishuNotifier
@@ -33,10 +41,10 @@ public class FeishuNotifier
         _settings = settings;
     }
 
-    /// <summary>噪音段结束提醒。level 为 Normal / Noisy。</summary>
+    /// <summary>噪音段结束提醒。level 为 Normal / Noisy。audioNote 非空时在卡片中标注录音状态。</summary>
     public async Task<(bool Ok, string Message)> SendNoiseAsync(
         NoiseLevel level, double smoothedRms, string course, int normalCount, int noisyCount,
-        byte[]? snapshot = null, string? snapshotPath = null)
+        byte[]? snapshot = null, string? snapshotPath = null, string? audioNote = null)
     {
         if (!_settings.EnableFeishuNotify || !_settings.FeishuNotifyNoise)
             return (false, "噪音推送未启用");
@@ -57,8 +65,33 @@ public class FeishuNotifier
         };
         if (!string.IsNullOrWhiteSpace(_settings.DeviceName))
             fields.Add(("设备", _settings.DeviceName));
+        if (!string.IsNullOrWhiteSpace(audioNote))
+            fields.Add(("现场录音", audioNote));
 
         return await SendInteractiveAsync(title, template, fields, BuildNote(snapshotPath), false, snapshot);
+    }
+
+    /// <summary>快捷键「打小报告」：橙色卡片标注手动触发现场报告。</summary>
+    public async Task<(bool Ok, string Message)> SendSnitchAsync(
+        string course, string hotkeyText,
+        byte[]? snapshot = null, string? snapshotPath = null, string? audioNote = null)
+    {
+        if (!_settings.EnableFeishuNotify)
+            return (false, "未启用飞书推送");
+
+        var fields = new List<(string Label, string Value)>
+        {
+            ("课程", string.IsNullOrWhiteSpace(course) ? "（未知课程）" : course),
+            ("触发方式", $"快捷键 {hotkeyText}（手动上报）"),
+            ("时间", DateTime.Now.ToString("HH:mm:ss")),
+        };
+        if (!string.IsNullOrWhiteSpace(_settings.DeviceName))
+            fields.Add(("设备", _settings.DeviceName));
+        if (!string.IsNullOrWhiteSpace(audioNote))
+            fields.Add(("现场录音", audioNote));
+
+        return await SendInteractiveAsync("📣 教室现场报告（打小报告）", "orange", fields,
+            BuildNote(snapshotPath), true, snapshot);
     }
 
     /// <summary>进入大屏时钟通知。</summary>
@@ -114,6 +147,214 @@ public class FeishuNotifier
         };
 
         return SendInteractiveAsync("🔔 大屏时钟 · 飞书推送测试", "green", fields, BuildNote(snapshotPath), true, snapshot);
+    }
+
+    // ===== 音频文件 / 群列表（走自建应用，Webhook 机器人不支持发文件） =====
+
+    /// <summary>
+    /// 录音发送到群：先发一条文字说明（文件消息不能带文字），再上传 WAV 并发送文件消息。
+    /// 需要已配置自建应用 + 群 chat_id（机器人已在群内）。
+    /// </summary>
+    public async Task<(bool Ok, string Message)> SendAudioAsync(byte[] wav, string fileName, string caption)
+    {
+        var chatId = (_settings.FeishuChatId ?? "").Trim();
+        if (string.IsNullOrEmpty(chatId))
+            return (false, "未配置群 chat_id，无法发送录音");
+
+        try
+        {
+            using var http = CreateHttp();
+
+            // 1) 文字说明（可选，帮助群里看懂这段录音的来龙去脉）
+            if (!string.IsNullOrWhiteSpace(caption))
+            {
+                var (textOk, textMsg) = await PostImMessageAsync(http, chatId, "text",
+                    JsonSerializer.Serialize(new Dictionary<string, string> { ["text"] = caption }))
+                    .ConfigureAwait(false);
+                if (!textOk)
+                    return (false, "录音说明文字发送失败：" + textMsg);
+            }
+
+            // 2) 上传文件（WAV 用 stream 类型）
+            var (fileKey, err) = await UploadFileAsync(http, wav, fileName).ConfigureAwait(false);
+            if (fileKey is null)
+                return (false, "录音上传失败：" + err);
+
+            // 3) 发送文件消息
+            var (ok, msg) = await PostImMessageAsync(http, chatId, "file",
+                JsonSerializer.Serialize(new Dictionary<string, string> { ["file_key"] = fileKey }))
+                .ConfigureAwait(false);
+            return ok
+                ? (true, $"录音已发送（{wav.Length / 1024} KB）")
+                : (false, "录音文件消息发送失败：" + msg);
+        }
+        catch (TaskCanceledException)
+        {
+            return (false, $"请求超时（发送录音）。可尝试切换「直连」或调大超时秒数。");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>查询机器人所在的群列表（需机器人已被拉进群）。设置页一键选择 chat_id 用。</summary>
+    public async Task<(List<FeishuChat>? Chats, string? Error)> ListChatsAsync()
+    {
+        try
+        {
+            using var http = CreateHttp();
+            var token = await GetTokenOrErrorAsync(http).ConfigureAwait(false);
+            if (token.Key is null)
+                return (null, token.Error);
+
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                "https://open.feishu.cn/open-apis/im/v1/chats?page_size=50");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Key);
+
+            using var resp = await http.SendAsync(req).ConfigureAwait(false);
+            var text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return (null, $"HTTP {(int)resp.StatusCode}：{Truncate(text, 150)}");
+
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("code", out var code) && code.GetInt32() != 0)
+                return (null, $"code={code.GetInt32()}：{Truncate(text, 150)}" +
+                    "（常见原因：未开通「获取群组信息 im:chat」权限或未发布版本）");
+
+            var list = new List<FeishuChat>();
+            if (root.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var id = item.TryGetProperty("chat_id", out var ci) ? ci.GetString() : null;
+                    var name = item.TryGetProperty("name", out var nm) ? nm.GetString() : null;
+                    if (!string.IsNullOrEmpty(id))
+                        list.Add(new FeishuChat(id!, name ?? id!));
+                }
+            }
+            return (list, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>获取 token；未配置应用凭据时给出明确错误。</summary>
+    private async Task<(string? Key, string? Error)> GetTokenOrErrorAsync(HttpClient http)
+    {
+        var appId = (_settings.FeishuAppId ?? "").Trim();
+        var appSecret = (_settings.FeishuAppSecret ?? "").Trim();
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
+            return (null, "未配置飞书应用 App ID / App Secret");
+        return await GetTenantTokenAsync(http, appId, appSecret).ConfigureAwait(false);
+    }
+
+    /// <summary>上传任意文件到飞书（file_type=stream），返回 file_key。需要 im:resource 权限。</summary>
+    private async Task<(string? Key, string? Error)> UploadFileAsync(HttpClient http, byte[] data, string fileName)
+    {
+        var token = await GetTokenOrErrorAsync(http).ConfigureAwait(false);
+        if (token.Key is null)
+            return (null, token.Error);
+
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            form.Add(new StringContent("stream"), "file_type");
+            form.Add(new StringContent(fileName), "file_name");
+
+            var fileContent = new ByteArrayContent(data);
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            form.Add(fileContent, "file");
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://open.feishu.cn/open-apis/im/v1/files")
+            {
+                Content = form,
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Key);
+
+            using var resp = await http.SendAsync(req).ConfigureAwait(false);
+            var text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return (null, $"上传接口 HTTP {(int)resp.StatusCode}：{Truncate(text, 150)}");
+
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("code", out var code) && code.GetInt32() != 0)
+                return (null, $"code={code.GetInt32()}：{Truncate(text, 150)}" +
+                    "（常见原因：未开通「上传或下载文件 im:resource」权限；权限后未重新发布应用版本）");
+
+            if (root.TryGetProperty("data", out var payload) &&
+                payload.TryGetProperty("file_key", out var key))
+                return (key.GetString(), null);
+
+            return (null, "上传接口未返回 file_key");
+        }
+        catch (Exception ex)
+        {
+            return (null, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>通过自建应用发消息到群（receive_id_type=chat_id）。msg_type: text / file。</summary>
+    private async Task<(bool Ok, string Message)> PostImMessageAsync(
+        HttpClient http, string chatId, string msgType, string contentJson)
+    {
+        var token = await GetTokenOrErrorAsync(http).ConfigureAwait(false);
+        if (token.Key is null)
+            return (false, token.Error!);
+
+        try
+        {
+            var payload = new Dictionary<string, object>
+            {
+                ["receive_id"] = chatId,
+                ["msg_type"] = msgType,
+                ["content"] = contentJson,
+            };
+
+            using var req = new HttpRequestMessage(HttpMethod.Post,
+                "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Key);
+
+            using var resp = await http.SendAsync(req).ConfigureAwait(false);
+            var text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            if (!resp.IsSuccessStatusCode)
+                return (false, $"HTTP {(int)resp.StatusCode} · {Truncate(text, 200)}");
+
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            var code = root.TryGetProperty("code", out var c) ? c.GetInt32() : 0;
+            if (code != 0)
+                return (false, $"code={code}：{Truncate(text, 200)}" +
+                    (code == 99992402 || code == 230001
+                        ? "（机器人可能不在该群内，或 chat_id 不正确）"
+                        : "（常见原因：未开通「接收群消息 im:message」权限，或未发布版本）"));
+            return (true, "success");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>按设置构建 HttpClient（超时可调；可选直连）。</summary>
+    private HttpClient CreateHttp()
+    {
+        var handler = new HttpClientHandler();
+        if (_settings.FeishuDirectConnection)
+            handler.UseProxy = false;
+        return new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(Math.Clamp(_settings.FeishuTimeoutSeconds, 5, 120)),
+        };
     }
 
     // ===== 内部实现 =====

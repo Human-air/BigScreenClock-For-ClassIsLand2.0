@@ -816,6 +816,71 @@
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
                                 </StackPanel>
 
+                                <!-- ===== 现场录音 / 打小报告 ===== -->
+                                <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="0,1,0,0" Margin="0,6,0,0" Padding="0,8,0,0">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="🎙 现场录音" FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                        <TextBlock Text="Webhook 机器人发不了文件，录音走「自建应用」发到群：先填好上方应用凭据，开通「上传或下载文件（im:resource）」「接收群消息（im:message）」「获取群组信息（im:chat）」权限并发布版本，再把机器人拉进群后点「查询群列表」选择目标群。未选群时录音只保存本地。"
+                                                   FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <CheckBox IsChecked="{Binding EnableNoiseAudioRecord}" FontSize="13"
+                                                  Content="检测到吵闹后自动录音并发送到群"/>
+
+                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
+                                              IsEnabled="{Binding EnableNoiseAudioRecord}">
+                                            <TextBlock Grid.Column="0" Text="录音时长" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <Slider Grid.Column="1" Value="{Binding NoiseRecordSeconds}"
+                                                    Minimum="10" Maximum="60" TickFrequency="5" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding NoiseRecordSecondsText}" FontSize="12"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+
+                                        <TextBlock Text="录音发送到哪个群？（机器人所在群）" FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0"/>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <ComboBox Grid.Column="0" ItemsSource="{Binding Chats}"
+                                                      SelectedItem="{Binding SelectedChat}"
+                                                      HorizontalAlignment="Stretch"
+                                                      PlaceholderText="（点右侧「查询群列表」选择）"/>
+                                            <Button Grid.Column="1" Content="🔍 查询群列表" Click="QueryChats_Click"
+                                                    CornerRadius="6" Padding="8,4" Cursor="Hand"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding FeishuChatIdText}" FontSize="11"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding ChatQueryStatus}" FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <!-- ===== 快捷键打小报告 ===== -->
+                                        <TextBlock Text="📣 快捷键打小报告" FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="系统级全局热键：无论在哪个界面，按下即自动 抓拍教室照片 → 发橙色报告卡片 → 录 10 秒现场音频 → 发送录音到群。10 秒冷却防误触；照片/录音同样依赖上方应用凭据与群选择。"
+                                                   FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                   TextWrapping="Wrap"/>
+
+                                        <CheckBox IsChecked="{Binding EnableSnitch}" FontSize="13"
+                                                  Content="启用打小报告快捷键"/>
+
+                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                            <TextBlock Grid.Column="0" Text="快捷键" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <TextBox Grid.Column="1" Text="{Binding SnitchHotkey}" FontSize="12" Padding="6,4"
+                                                     Watermark="Ctrl+Alt+R（Ctrl/Alt/Shift/Win + 字母/数字/F1~F24）"/>
+                                            <Button Grid.Column="2" Content="🚨 测试" Click="TestSnitch_Click"
+                                                    CornerRadius="6" Padding="8,4" Cursor="Hand"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding SnitchTestStatus}" FontSize="12"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
                                     <Button Content="测试发送" Click="TestFeishu_Click" CornerRadius="6" Padding="10,5" Cursor="Hand"/>
                                     <TextBlock Text="{Binding FeishuTestStatus}" VerticalAlignment="Center" FontSize="12"
