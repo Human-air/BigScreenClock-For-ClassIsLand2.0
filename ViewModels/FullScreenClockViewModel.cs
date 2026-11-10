@@ -34,8 +34,6 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly DecibelMeterService _decibelService;
     private readonly CameraActivityService _cameraService;
     private readonly FeishuNotifier _feishu;
-    private readonly SnapshotService _snapshot;
-    private readonly AudioRecorderService _audio;
     private readonly IServiceProvider _serviceProvider;
     private readonly EarthquakeReader _earthquakeReader;
     private readonly NoiseCounter _counter = new();
@@ -145,16 +143,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         DecibelMeterService decibelService,
         CameraActivityService cameraService,
         FeishuNotifier feishu,
-        SnapshotService snapshot,
-        AudioRecorderService audio,
         IServiceProvider serviceProvider)
     {
         _settings = settings;
         _decibelService = decibelService;
         _cameraService = cameraService;
         _feishu = feishu;
-        _snapshot = snapshot;
-        _audio = audio;
         _serviceProvider = serviceProvider;
         _earthquakeReader = new EarthquakeReader(serviceProvider);
 
@@ -341,92 +335,18 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (level == NoiseLevel.Noisy) _lastNoiseNotifyNoisy = now;
         else _lastNoiseNotifyNormal = now;
 
-        var audioNote = _settings.EnableNoiseAudioRecord
-            ? $"正在录制 {_settings.NoiseRecordSeconds} 秒现场音频…"
-            : null;
-
-        // 异步发送，不阻塞 UI 线程；开启抓拍时先拍再发
-        _ = SendWithSnapshotAsync((img, path) => _feishu.SendNoiseAsync(
-            level, smoothedRms, CurrentCourseNameSafe(), _counter.NormalCount, _counter.NoisyCount,
-            img, path, audioNote));
-
-        // 现场录音：事件触发后录 N 秒 → 上传发群（独立异步任务，与卡片并行，失败不影响推送）
-        if (_settings.EnableNoiseAudioRecord)
-        {
-            var lvl = level;
-            var seconds = _settings.NoiseRecordSeconds;
-            var normal = _counter.NormalCount;
-            var noisy = _counter.NoisyCount;
-            _ = RecordAndSendNoiseAudioAsync(lvl, seconds, normal, noisy);
-        }
+        // 异步发送，不阻塞 UI 线程（卡片只承载文字信息）
+        var course = CurrentCourseNameSafe();
+        var normal = _counter.NormalCount;
+        var noisy = _counter.NoisyCount;
+        _ = SendQuietlyAsync(_feishu.SendNoiseAsync(level, smoothedRms, course, normal, noisy));
     }
 
-    /// <summary>
-    /// 录制现场音频并发到飞书群（先发文字说明，再发文件）。
-    /// 需要自建应用 + 群 chat_id；失败仅留本地备份，不影响大屏时钟主流程。
-    /// </summary>
-    private async Task RecordAndSendNoiseAudioAsync(NoiseLevel level, int seconds, int normal, int noisy)
+    /// <summary>等待发送任务并吞掉异常：推送失败绝不能打断大屏时钟主流程。</summary>
+    private static async Task SendQuietlyAsync(Task<(bool Ok, string Message)> send)
     {
-        try
-        {
-            var course = CurrentCourseNameSafe(); // UI 线程先取课程名
-
-            var (wav, err) = await _audio.RecordAsync(seconds).ConfigureAwait(false);
-            if (wav is null)
-            {
-                System.Diagnostics.Debug.WriteLine($"[录音] 失败：{err}");
-                return;
-            }
-
-            var local = AudioRecorderService.TrySaveLocal(wav, DateTime.Now);
-            var device = string.IsNullOrWhiteSpace(_settings.DeviceName) ? "" : $"{_settings.DeviceName} · ";
-            var label = level == NoiseLevel.Noisy ? "吵闹" : "一般";
-            var caption = $"🎙 {label}现场录音（{seconds} 秒）\n" +
-                          $"课程：{(string.IsNullOrWhiteSpace(course) ? "未知" : course)} · {device}" +
-                          $"{DateTime.Now:HH:mm:ss} · 本节累计 一般 {normal} / 吵闹 {noisy}";
-            if (local != null) caption += $"\n本地备份：{local}";
-
-            await _feishu.SendAudioAsync(wav, $"noise-{DateTime.Now:yyyyMMdd-HHmmss}.wav", caption)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            // 录音/发送失败静默，不打断大屏时钟
-        }
-    }
-
-    /// <summary>按设置抓拍一帧（同时存本地），再把照片交给发送动作。</summary>
-    private async Task SendWithSnapshotAsync(
-        Func<byte[]?, string?, Task<(bool Ok, string Message)>> send)
-    {
-        byte[]? jpeg = null;
-        string? localPath = null;
-
-        if (_settings.EnableSnapshot)
-        {
-            try
-            {
-                var (data, _) = await _snapshot.CaptureAsync().ConfigureAwait(false);
-                if (data is { Length: > 0 })
-                {
-                    jpeg = data;
-                    localPath = SnapshotService.TrySaveLocal(data, DateTime.Now);
-                }
-            }
-            catch
-            {
-                // 抓拍失败不影响文字推送
-            }
-        }
-
-        try
-        {
-            await send(jpeg, localPath).ConfigureAwait(false);
-        }
-        catch
-        {
-            // 发送失败静默，避免影响大屏时钟主流程
-        }
+        try { await send.ConfigureAwait(false); }
+        catch { }
     }
 
     /// <summary>当前课程名：优先用已定位的课程名，否则直接向 ILessonsService 取。</summary>
@@ -450,7 +370,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (_settings.EnableFeishuNotify && _settings.FeishuNotifyEnterExit)
         {
             var course = CurrentCourseNameSafe();
-            _ = SendWithSnapshotAsync((img, path) => _feishu.SendEnterAsync(course, img, path));
+            _ = SendQuietlyAsync(_feishu.SendEnterAsync(course));
         }
     }
 
@@ -466,8 +386,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             var course = CurrentCourseNameSafe();
             var normal = _sessionNormal;
             var noisy = _sessionNoisy;
-            _ = SendWithSnapshotAsync((img, path) =>
-                _feishu.SendExitAsync(course, duration, normal, noisy, img, path));
+            _ = SendQuietlyAsync(_feishu.SendExitAsync(course, duration, normal, noisy));
         }
     }
 

@@ -20,6 +20,7 @@
         <PackageReference Include="ClassIsland.PluginSdk" Version="$(ClassIslandPluginSdkVersion)">
             <ExcludeAssets>runtime; native</ExcludeAssets>
         </PackageReference>
+        <!-- 麦克风音量检测（DecibelMeterService）用；录音上传功能已移除，此处仅剩音量采集 -->
         <PackageReference Include="NAudio" Version="2.2.1" />
         <!-- 摄像头占用检测的 Windows API 声明（PrivateAssets：只在编译期生成代码，不进 cipx） -->
         <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.106" PrivateAssets="all" />
@@ -27,21 +28,7 @@
         <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.3.17">
             <ExcludeAssets>runtime; native</ExcludeAssets>
         </PackageReference>
-        <!-- 抓拍附图：OpenCvSharp 抓帧 + JPEG 编码（原生库由下方 Target 拷到插件目录） -->
-        <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
-        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" GeneratePathProperty="true" />
     </ItemGroup>
-
-    <!-- 原生库不在主程序目录，需与插件 DLL 放在同一目录（配合 SnapshotService 的 DllImport 解析器） -->
-    <Target Name="CopyOpenCvNative" AfterTargets="Build" BeforeTargets="CreateCipx">
-        <ItemGroup>
-            <OpenCvNative Include="$(PkgOpenCvSharp4_runtime_win)\runtimes\win-x64\native\*.dll" />
-        </ItemGroup>
-        <Message Text="复制 OpenCV 原生库 @(OpenCvNative->Count()) 个到输出目录" Importance="high" />
-        <Copy SourceFiles="@(OpenCvNative)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-        <!-- 根目录已有一份，删掉 runtimes 副本，避免 cipx 里重复打包（体积翻倍） -->
-        <RemoveDir Directories="$(OutputPath)runtimes" />
-    </Target>
 
     <!--
       内部开发版号：manifest.yml 里永远只写四位对外版本号（如 1.1.1.8），

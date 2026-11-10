@@ -1,6 +1,6 @@
 id: com.bigscreen.clock
 name: 大屏时钟
-description: 自动全屏显示当前时间、教室分贝值、课程信息和各类提醒，并按课程统计教室吵闹次数。支持噪音提醒 / 进出大屏时钟时推送飞书消息，并可自动抓拍教室照片一并发送；检测到吵闹可自动录制现场音频发到群；支持全局快捷键（默认 Ctrl+Alt+R）一键「打小报告」：抓拍+卡片+录音+发送。
+description: 自动全屏显示当前时间、教室分贝值、课程信息和各类提醒，并按课程统计教室吵闹次数。支持噪音提醒 / 进出大屏时钟时推送飞书文字卡片；支持全局快捷键（默认 Ctrl+Alt+R）一键「打小报告」发送现场报告卡片。
 entranceAssembly: "EveningSelfStudyClock.dll"
 url: https://github.com/Human-air/BigScreenClock-For-ClassIsLand2.0
 repoOwner: Human-air

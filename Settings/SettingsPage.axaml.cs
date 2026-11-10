@@ -1450,8 +1450,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         {
             _settings.EnableFeishuNotify = value;
             OnPropertyChanged(nameof(EnableFeishuNotify));
-            if (value && Cameras.Count == 0)
-                _ = ScanSnapshotCamerasAsync(userTriggered: false);
         }
     }
 
@@ -1548,148 +1546,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         set { _feishuTestStatus = value; OnPropertyChanged(nameof(FeishuTestStatus)); }
     }
 
-    // ===== 抓拍（飞书附图）=====
-
-    public ObservableCollection<SnapshotCamera> Cameras { get; } = new();
-
-    private SnapshotCamera? _selectedCamera;
-    public SnapshotCamera? SelectedCamera
-    {
-        get => _selectedCamera;
-        set
-        {
-            _selectedCamera = value;
-            if (value is not null) _settings.SnapshotCameraIndex = value.Index;
-            OnPropertyChanged(nameof(SelectedCamera));
-        }
-    }
-
-    public List<string> Resolutions { get; } = new() { "640×480", "1280×720", "1920×1080" };
-
-    private string? _selectedResolution;
-    public string? SelectedResolution
-    {
-        get => _selectedResolution ??= ResolveSnapshotResolutionLabel();
-        set
-        {
-            if (value is null) return;
-            _selectedResolution = value;
-            ApplySnapshotResolution(value);
-            OnPropertyChanged(nameof(SelectedResolution));
-        }
-    }
-
-    public bool EnableSnapshot
-    {
-        get => _settings.EnableSnapshot;
-        set
-        {
-            _settings.EnableSnapshot = value;
-            OnPropertyChanged(nameof(EnableSnapshot));
-            if (value && Cameras.Count == 0)
-                _ = ScanSnapshotCamerasAsync(userTriggered: false);
-        }
-    }
-
-    public string FeishuAppId
-    {
-        get => _settings.FeishuAppId;
-        set { _settings.FeishuAppId = value ?? ""; OnPropertyChanged(nameof(FeishuAppId)); }
-    }
-
-    public string FeishuAppSecret
-    {
-        get => _settings.FeishuAppSecret;
-        set { _settings.FeishuAppSecret = value ?? ""; OnPropertyChanged(nameof(FeishuAppSecret)); }
-    }
-
-    private string _snapshotStatus = "";
-    public string SnapshotStatus
-    {
-        get => _snapshotStatus;
-        set { _snapshotStatus = value; OnPropertyChanged(nameof(SnapshotStatus)); }
-    }
-
-    private Bitmap? _snapshotPreview;
-    public Bitmap? SnapshotPreview
-    {
-        get => _snapshotPreview;
-        set { _snapshotPreview = value; OnPropertyChanged(nameof(SnapshotPreview)); }
-    }
-
-    private string ResolveSnapshotResolutionLabel()
-    {
-        var label = $"{_settings.SnapshotWidth}×{_settings.SnapshotHeight}";
-        return Resolutions.Contains(label) ? label : "1280×720";
-    }
-
-    private void ApplySnapshotResolution(string label)
-    {
-        var parts = label.Split('×');
-        if (parts.Length != 2) return;
-        if (int.TryParse(parts[0], out var w) && int.TryParse(parts[1], out var h))
-        {
-            _settings.SnapshotWidth = w;
-            _settings.SnapshotHeight = h;
-        }
-    }
-
-    /// <summary>扫描可抓拍的摄像头（逐个索引试开，后台线程跑，避免卡界面）。</summary>
-    private async Task ScanSnapshotCamerasAsync(bool userTriggered)
-    {
-        if (userTriggered) SnapshotStatus = "正在扫描摄像头…";
-
-        var list = await Task.Run(() => SnapshotService.Enumerate());
-
-        Cameras.Clear();
-        foreach (var cam in list) Cameras.Add(cam);
-
-        SelectedCamera = Cameras.FirstOrDefault(c => c.Index == _settings.SnapshotCameraIndex)
-                         ?? Cameras.FirstOrDefault();
-        OnPropertyChanged(nameof(SelectedCamera));
-
-        if (list.Count == 0)
-            SnapshotStatus = "未发现摄像头（可能被其它程序占用，或未连接）";
-        else if (userTriggered)
-            SnapshotStatus = $"找到 {list.Count} 个摄像头，可点「测试抓拍」确认画面";
-    }
-
-    public async void RefreshSnapshotCameras_Click(object? sender, RoutedEventArgs e)
-    {
-        await ScanSnapshotCamerasAsync(userTriggered: true);
-    }
-
-    public async void TestSnapshot_Click(object? sender, RoutedEventArgs e)
-    {
-        var camera = Plugin.ServiceProvider?.GetService<SnapshotService>();
-        if (camera is null)
-        {
-            SnapshotStatus = "❌ 抓拍服务不可用";
-            return;
-        }
-
-        SnapshotStatus = "正在抓拍…";
-        var (jpeg, error) = await camera.CaptureAsync();
-        if (jpeg is null)
-        {
-            SnapshotStatus = $"❌ 抓拍失败：{error}";
-            return;
-        }
-
-        var path = SnapshotService.TrySaveLocal(jpeg, DateTime.Now);
-        try
-        {
-            SnapshotPreview = new Bitmap(new MemoryStream(jpeg));
-        }
-        catch
-        {
-            // 预览失败不影响抓拍本身
-        }
-
-        SnapshotStatus = $"✅ 抓拍成功（{jpeg.Length / 1024} KB）" + (path is null ? "" : "，已保存到本地");
-    }
-
-    /// <summary>测试发送：忽略启用开关，直接校验 Webhook（及图片上传通道）。</summary>
+    /// <summary>测试发送：忽略启用开关，直接校验 Webhook 是否可用。</summary>
     public async void TestFeishu_Click(object? sender, RoutedEventArgs e)
     {
         var notifier = Plugin.ServiceProvider?.GetService<FeishuNotifier>();
@@ -1703,119 +1560,11 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         try { Plugin.SaveSettings(); } catch { }
 
         FeishuTestStatus = "发送中…";
-
-        // 开启抓拍时，测试消息也带一张照片，便于确认整条链路
-        byte[]? jpeg = null;
-        string? savedPath = null;
-        if (_settings.EnableSnapshot)
-        {
-            var camera = Plugin.ServiceProvider?.GetService<SnapshotService>();
-            if (camera is not null)
-            {
-                try
-                {
-                    var (data, _) = await camera.CaptureAsync();
-                    if (data is { Length: > 0 })
-                    {
-                        jpeg = data;
-                        savedPath = SnapshotService.TrySaveLocal(data, DateTime.Now);
-                    }
-                }
-                catch
-                {
-                    // 抓拍失败不影响文字测试
-                }
-            }
-        }
-
-        var (ok, msg) = await notifier.SendTestAsync(jpeg, savedPath);
-        if (!ok)
-            FeishuTestStatus = $"❌ 发送失败：{msg}";
-        else if (msg.Contains("照片未发送") || msg.Contains("照片发送失败"))
-            FeishuTestStatus = $"⚠️ 文字已送达，但照片没发出去：{msg}";
-        else
-            FeishuTestStatus = "✅ 发送成功（含照片），请查看飞书群";
+        var (ok, msg) = await notifier.SendTestAsync();
+        FeishuTestStatus = ok ? "✅ 发送成功，请查看飞书群" : $"❌ 发送失败：{msg}";
     }
 
-    // ===== 现场录音 / 打小报告 =====
-
-    public bool EnableNoiseAudioRecord
-    {
-        get => _settings.EnableNoiseAudioRecord;
-        set { _settings.EnableNoiseAudioRecord = value; OnPropertyChanged(nameof(EnableNoiseAudioRecord)); }
-    }
-
-    public double NoiseRecordSeconds
-    {
-        get => _settings.NoiseRecordSeconds;
-        set
-        {
-            _settings.NoiseRecordSeconds = (int)value;
-            OnPropertyChanged(nameof(NoiseRecordSeconds));
-            OnPropertyChanged(nameof(NoiseRecordSecondsText));
-        }
-    }
-
-    public string NoiseRecordSecondsText => $"{_settings.NoiseRecordSeconds} 秒";
-
-    public ObservableCollection<FeishuChat> Chats { get; } = new();
-
-    private FeishuChat? _selectedChat;
-    public FeishuChat? SelectedChat
-    {
-        get => _selectedChat;
-        set
-        {
-            _selectedChat = value;
-            if (value is not null) _settings.FeishuChatId = value.Id;
-            OnPropertyChanged(nameof(SelectedChat));
-            OnPropertyChanged(nameof(FeishuChatIdText));
-        }
-    }
-
-    public string FeishuChatIdText => string.IsNullOrWhiteSpace(_settings.FeishuChatId)
-        ? "当前 chat_id：未选择"
-        : $"当前 chat_id：{_settings.FeishuChatId}";
-
-    private string _chatQueryStatus = "";
-    public string ChatQueryStatus
-    {
-        get => _chatQueryStatus;
-        set { _chatQueryStatus = value; OnPropertyChanged(nameof(ChatQueryStatus)); }
-    }
-
-    public async void QueryChats_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        var notifier = Plugin.ServiceProvider?.GetService<FeishuNotifier>();
-        if (notifier is null)
-        {
-            ChatQueryStatus = "❌ 推送服务不可用";
-            return;
-        }
-
-        try { Plugin.SaveSettings(); } catch { } // 用界面上刚填的凭据查询
-
-        ChatQueryStatus = "正在查询机器人所在群…";
-        var (chats, error) = await notifier.ListChatsAsync();
-        if (chats is null)
-        {
-            ChatQueryStatus = $"❌ 查询失败：{error}";
-            return;
-        }
-        if (chats.Count == 0)
-        {
-            ChatQueryStatus = "⚠️ 机器人还没有加入任何群：请先把自建应用机器人拉进目标群，再重新查询。";
-            return;
-        }
-
-        Chats.Clear();
-        foreach (var c in chats) Chats.Add(c);
-
-        // 回显已保存的 chat_id；没有匹配项时选第一个
-        SelectedChat = Chats.FirstOrDefault(c => c.Id == _settings.FeishuChatId) ?? Chats[0];
-        OnPropertyChanged(nameof(FeishuChatIdText));
-        ChatQueryStatus = $"✅ 找到 {chats.Count} 个群，下拉选择即可（选完自动保存）";
-    }
+    // ===== 打小报告 =====
 
     public bool EnableSnitch
     {
@@ -1852,7 +1601,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         }
 
         try { Plugin.SaveSettings(); } catch { }
-        SnitchTestStatus = "执行中：抓拍 → 卡片 → 录音 10 秒 → 发送…";
+        SnitchTestStatus = "执行中：发送报告卡片…";
         SnitchTestStatus = await service.TriggerAsync(ignoreCooldown: true);
     }
 

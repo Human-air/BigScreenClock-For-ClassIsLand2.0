@@ -81,20 +81,9 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _feishuNotifyNormal = true;
     private bool _feishuNotifyEnterExit = true;
 
-    // ===== 现场录音 / 打小报告 =====
-    private bool _enableNoiseAudioRecord;
-    private int _noiseRecordSeconds = 15;
-    private string _feishuChatId = "";
+    // ===== 打小报告快捷键（拍照与录音上传已移除，此处只剩卡片触发） =====
     private bool _enableSnitch = true;
     private string _snitchHotkey = "Ctrl+Alt+R";
-
-    // ===== 抓拍附图（OpenCvSharp）=====
-    private bool _enableSnapshot;
-    private int _snapshotCameraIndex;
-    private int _snapshotWidth = 1280;
-    private int _snapshotHeight = 720;
-    private string _feishuAppId = "";
-    private string _feishuAppSecret = "";
 
     public PluginSettings()
     {
@@ -762,70 +751,7 @@ public class PluginSettings : INotifyPropertyChanged
         set { _feishuDirectConnection = value; OnPropertyChanged(); }
     }
 
-    /// <summary>推送消息时是否自动抓拍教室照片。</summary>
-    public bool EnableSnapshot
-    {
-        get => _enableSnapshot;
-        set { _enableSnapshot = value; OnPropertyChanged(); }
-    }
-
-    /// <summary>抓拍使用的摄像头索引（0 开始）。</summary>
-    public int SnapshotCameraIndex
-    {
-        get => _snapshotCameraIndex;
-        set { _snapshotCameraIndex = Math.Max(0, value); OnPropertyChanged(); }
-    }
-
-    /// <summary>抓拍宽度（像素）。</summary>
-    public int SnapshotWidth
-    {
-        get => _snapshotWidth;
-        set { _snapshotWidth = Math.Clamp(value, 320, 3840); OnPropertyChanged(); }
-    }
-
-    /// <summary>抓拍高度（像素）。</summary>
-    public int SnapshotHeight
-    {
-        get => _snapshotHeight;
-        set { _snapshotHeight = Math.Clamp(value, 240, 2160); OnPropertyChanged(); }
-    }
-
-    /// <summary>飞书自建应用 App ID（用于上传图片，可留空）。</summary>
-    public string FeishuAppId
-    {
-        get => _feishuAppId;
-        set { _feishuAppId = value ?? ""; OnPropertyChanged(); }
-    }
-
-    /// <summary>飞书自建应用 App Secret（用于上传图片，可留空）。</summary>
-    public string FeishuAppSecret
-    {
-        get => _feishuAppSecret;
-        set { _feishuAppSecret = value ?? ""; OnPropertyChanged(); }
-    }
-
-    // ===== 现场录音 / 打小报告 =====
-
-    /// <summary>噪音事件触发后是否自动录制现场音频并发到群。</summary>
-    public bool EnableNoiseAudioRecord
-    {
-        get => _enableNoiseAudioRecord;
-        set { _enableNoiseAudioRecord = value; OnPropertyChanged(); }
-    }
-
-    /// <summary>吵闹录音时长（秒），10~60，默认 15。</summary>
-    public int NoiseRecordSeconds
-    {
-        get => _noiseRecordSeconds;
-        set { _noiseRecordSeconds = Math.Clamp(value, 10, 60); OnPropertyChanged(); }
-    }
-
-    /// <summary>发录音文件的目标群 chat_id（设置页一键查询选择）。Webhook 机器人发不了文件，必须走自建应用消息。</summary>
-    public string FeishuChatId
-    {
-        get => _feishuChatId;
-        set { _feishuChatId = value ?? ""; OnPropertyChanged(); }
-    }
+    // ===== 打小报告 =====
 
     /// <summary>是否启用「打小报告」全局快捷键。</summary>
     public bool EnableSnitch

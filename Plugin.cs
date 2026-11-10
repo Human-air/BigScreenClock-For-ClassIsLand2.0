@@ -66,8 +66,6 @@ public class Plugin : PluginBase
         services.AddSingleton<DecibelMeterService>();
         services.AddSingleton<CameraActivityService>();
         services.AddSingleton<FeishuNotifier>();
-        services.AddSingleton<SnapshotService>();
-        services.AddSingleton<AudioRecorderService>();
         services.AddSingleton<FullScreenClockViewModel>();
         services.AddSingleton<AutoTriggerService>();
         services.AddSingleton<SnitchHotkeyService>();

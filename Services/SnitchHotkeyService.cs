@@ -7,9 +7,9 @@ namespace EveningSelfStudyClock.Services;
 
 /// <summary>
 /// 快捷键「打小报告」服务：注册系统级全局热键（默认 Ctrl+Alt+R，设置页可改），
-/// 按下后执行 完整报告流水线：抓拍教室照片 → 发橙色卡片 → 录 10 秒现场音频 → 发文字说明 + 音频文件。
+/// 按下后向飞书群发送一张橙色「现场报告」卡片。
 /// 热键用 Win32 RegisterHotKey + 专用消息窗口线程实现，CI 在任何界面时都生效。
-/// 录音/文件发送依赖自建应用 + 群 chat_id（未配置时卡片照发、录音降级为仅本地保存）。
+/// 说明：抓拍照片与现场录音的上传通道已按需求移除，这里只剩卡片推送。
 /// </summary>
 public class SnitchHotkeyService : IHostedService, IDisposable
 {
@@ -20,12 +20,8 @@ public class SnitchHotkeyService : IHostedService, IDisposable
     /// <summary>触发冷却（秒），防止误触连发。测试按钮不受限。</summary>
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(10);
 
-    /// <summary>打小报告录音时长（秒）。</summary>
-    public const int SnitchRecordSeconds = 10;
-
     private readonly PluginSettings _settings;
     private readonly IServiceProvider _sp;
-    private readonly AudioRecorderService _audio;
     private readonly object _gate = new();
 
     private Thread? _thread;
@@ -40,11 +36,10 @@ public class SnitchHotkeyService : IHostedService, IDisposable
 
     private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    public SnitchHotkeyService(PluginSettings settings, IServiceProvider sp, AudioRecorderService audio)
+    public SnitchHotkeyService(PluginSettings settings, IServiceProvider sp)
     {
         _settings = settings;
         _sp = sp;
-        _audio = audio;
         _wndProcKeepAlive = WndProcCore;
     }
 
@@ -250,58 +245,8 @@ public class SnitchHotkeyService : IHostedService, IDisposable
         var course = CurrentCourseNameSafe();
         var hotkeyText = string.IsNullOrWhiteSpace(_settings.SnitchHotkey) ? "Ctrl+Alt+R" : _settings.SnitchHotkey;
 
-        // 1) 抓拍（强制：打小报告自带照片，不受「推送时抓拍」开关限制）
-        byte[]? jpeg = null;
-        string? photoPath = null;
-        var camera = _sp.GetService<SnapshotService>();
-        if (camera is not null)
-        {
-            try
-            {
-                var (data, _) = await camera.CaptureAsync(force: true).ConfigureAwait(false);
-                if (data is { Length: > 0 })
-                {
-                    jpeg = data;
-                    photoPath = SnapshotService.TrySaveLocal(data, DateTime.Now);
-                }
-            }
-            catch { }
-        }
-
-        // 2) 发卡片（注明随后会有 10 秒录音）
-        var (ok, msg) = await notifier.SendSnitchAsync(course, hotkeyText, jpeg, photoPath,
-            $"正在录制 {SnitchRecordSeconds} 秒现场音频…").ConfigureAwait(false);
-        if (!ok)
-            return $"❌ 卡片发送失败：{msg}";
-
-        var result = "✅ 报告已发送" + (jpeg != null ? "（含照片）" : "（照片抓拍失败，已降级纯文字）");
-
-        // 3) 录音 → 文字说明 + 文件消息（失败不影响卡片，仅本地留档）
-        try
-        {
-            var (wav, err) = await _audio.RecordAsync(SnitchRecordSeconds).ConfigureAwait(false);
-            if (wav is null)
-            {
-                return $"{result}；录音失败：{err}";
-            }
-
-            var local = AudioRecorderService.TrySaveLocal(wav, DateTime.Now);
-            var device = string.IsNullOrWhiteSpace(_settings.DeviceName) ? "" : $"{_settings.DeviceName} · ";
-            var caption = $"🎙 打小报告现场录音（{SnitchRecordSeconds} 秒）\n课程：{(string.IsNullOrWhiteSpace(course) ? "未知" : course)} · {device}{DateTime.Now:HH:mm:ss}";
-            if (local != null) caption += $"\n本地备份：{local}";
-
-            var (audioOk, audioMsg) = await notifier
-                .SendAudioAsync(wav, $"snitch-{DateTime.Now:yyyyMMdd-HHmmss}.wav", caption)
-                .ConfigureAwait(false);
-
-            return audioOk
-                ? $"{result}；录音已发送"
-                : $"{result}；⚠️ 录音未发出：{audioMsg}";
-        }
-        catch (Exception ex)
-        {
-            return $"{result}；录音异常：{ex.GetType().Name}: {ex.Message}";
-        }
+        var (ok, msg) = await notifier.SendSnitchAsync(course, hotkeyText).ConfigureAwait(false);
+        return ok ? "✅ 报告卡片已发送" : $"❌ 卡片发送失败：{msg}";
     }
 
     private string CurrentCourseNameSafe()
