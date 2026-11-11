@@ -65,13 +65,18 @@ public class Plugin : PluginBase
 
         services.AddSingleton<DecibelMeterService>();
         services.AddSingleton<CameraActivityService>();
+        services.AddSingleton<FeishuNotifier>();
         services.AddSingleton<FullScreenClockViewModel>();
         services.AddSingleton<AutoTriggerService>();
+        services.AddSingleton<SnitchHotkeyService>();
 
         services.AddHostedService<ServiceProviderCapture>();
         services.AddHostedService<AutoTriggerService>();
         services.AddHostedService<BackdropPreloadService>();
         services.AddHostedService<TrayMenuService>();
+        // 用同一个实例当 HostedService：AddHostedService<T> 会另建一个对象，
+        // 变成两个实例各自注册一遍全局热键（第二个必然注册失败）
+        services.AddHostedService(sp => sp.GetRequiredService<SnitchHotkeyService>());
 
         services.AddSettingsPage<EveningSelfStudyClock.Settings.SettingsPage>();
     }

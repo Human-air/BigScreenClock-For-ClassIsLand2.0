@@ -169,7 +169,14 @@ public sealed class BackdropLayer : Control
 
             // 松手：解冻。覆盖框收起、换回玻璃，并且**只**重烘矩形真变过的那几块
             // （没动过的块位图还在手上，直接接着用）。
-            if (!_adjusting) _suppressed = false;
+            if (!_adjusting)
+            {
+                _suppressed = false;
+
+                // 拖动期间压下的整图重烘（见 TryStartRebuild 的 _adjusting 分支）在这里补上，
+                // 否则一直按着改模糊半径，松手后那张图要等到下一次布局才会烘出来。
+                if (_needsRebuild) RequestRebuild();
+            }
 
             // 按下去这一下：停掉在途的重烘、把已经排上的请求作废（拖动期间不再烘）；
             // 放开来这一下：按当前设置把该重烘的块烘出来
@@ -1231,6 +1238,12 @@ public sealed class BackdropLayer : Control
     {
         if (_busy || !_needsRebuild) return;
         if (size.Width < 2 || size.Height < 2) return;   // 还没排布，等 ArrangeOverride 再来
+
+        // 按着滑块期间不解码、也不烘模糊图。以前这里没有这道闸：拖「磨砂颗粒度」每过一格
+        // （0.4 的判定线）就整张 4K 重来一遍 —— 一次一百多兆，几秒钟就能把 CI 的内存看门狗顶爆
+        // （学校那台设置页开着拖滑块被强杀、日志里 1.4~1.5 GiB，就是这条）。
+        // 请求不丢：_needsRebuild 一直是 true，松手时 Apply 里补一次。
+        if (_adjusting) return;
 
         _needsRebuild = false;
 

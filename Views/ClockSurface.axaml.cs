@@ -8,8 +8,10 @@ using Avalonia.Media;
 using Avalonia.Media.Transformation;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
+using EveningSelfStudyClock.Settings;
 using EveningSelfStudyClock.ViewModels;
 
 namespace EveningSelfStudyClock.Views;
@@ -51,10 +53,14 @@ public partial class ClockSurface : UserControl
         InitializeComponent();
 
         RulesPopup.PlacementTarget = CounterAreaBorder; // 规则浮层锚定在计数区域上方
-        SizeChanged += (_, _) => UpdateSizeDependentLayout();
+
+        // 半屏模式下点黑着的那一边三下 → 回到全屏（黑板挡住时看不见，但平时可以这样退出来）
+        AddHandler(PointerPressedEvent, OnEmptyAreaPressed, RoutingStrategies.Tunnel, true);
+
+        SizeChanged += (_, _) => ApplyDisplayRegion();
         DataContextChanged += (_, _) =>
         {
-            UpdateSizeDependentLayout();
+            ApplyDisplayRegion();
             SetupBackdrop();
             UpdatePreviewPlaceholders();
         };
@@ -66,7 +72,11 @@ public partial class ClockSurface : UserControl
         EarthquakeAlertLayer.PropertyChanged += OnEarthquakeAlertPropertyChanged;
 
         BodyArea.SizeChanged += (_, _) => ApplyBodyPositions();
-        ClockText.SizeChanged += (_, _) => ApplyBodyPositions();
+
+        // 顶栏 / 按钮行的高度一变（半屏紧凑排版、字号、按钮增减），快速设置面板的上下边界跟着重算
+        HeaderGrid.SizeChanged += (_, _) => UpdateQuickSettingsBounds();
+        ButtonBar.SizeChanged += (_, _) => UpdateQuickSettingsBounds();
+        ClockBox.SizeChanged += (_, _) => ApplyBodyPositions();
         VolumePanel.SizeChanged += (_, _) => ApplyBodyPositions();
         Loaded += (_, _) => ApplyBodyPositions();
         Loaded += (_, _) => UpdatePreviewPlaceholders();
@@ -129,6 +139,19 @@ public partial class ClockSurface : UserControl
 
     private void OnPluginSettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // 按住设置项（滑块把手）时快速设置面板淡下去，好看清后面被改的那块大屏；
+        // 不 return：AdjustingLayout 同时也是背景层「先别重烘」的闸，下面照样要处理。
+        if (e.PropertyName is nameof(PluginSettings.AdjustingLayout))
+            UpdateQuickSettingsOpacity();
+
+        // 显示区域：全屏 ↔ 半屏、可见宽度变化，立刻重排（背景层跟着 Shell 变窄，会自己重烘）
+        if (e.PropertyName is nameof(PluginSettings.DisplayRegion)
+            or nameof(PluginSettings.VisibleWidthPercent))
+        {
+            ApplyDisplayRegion();
+            return;
+        }
+
         // 设置页拖滑块改的是同一个 PluginSettings 实例 → 立刻重排，不用等重开窗口
         if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent)
             or nameof(PluginSettings.VolumePositionPercent)
@@ -183,7 +206,7 @@ public partial class ClockSurface : UserControl
                 new() { Visual = ReminderTextBlock },
                 new() { Visual = AlertDetailScroll },
                 new() { Visual = DateBlock },
-                new() { Visual = ClockText, InsetX = 16, InsetY = 8, Radius = 16 },
+                new() { Visual = ClockBox, InsetX = 16, InsetY = 8, Radius = 16 },
                 new() { Visual = VolumePanel, InsetX = 16, InsetY = 8, Radius = 16 },
                 new() { Visual = CounterStrip },
                 new() { Visual = CourseInfoBox },
@@ -196,7 +219,7 @@ public partial class ClockSurface : UserControl
             foreach (var target in new Control[]
                      {
                          WeatherBlock, RainBlock, CountdownBlock, ReminderTextBlock,
-                         AlertDetailScroll, DateBlock, ClockText, VolumePanel,
+                         AlertDetailScroll, DateBlock, ClockBox, VolumePanel,
                          CounterStrip, CourseInfoBox, ButtonBar, ReminderPanel,
                      })
             {
@@ -309,10 +332,15 @@ public partial class ClockSurface : UserControl
         // 总开关关着 = 背景图与玻璃一并收掉，哪怕设置里选过图/开过玻璃
         var on = settings.BackgroundEnabled;
 
+        // 半屏模式下填充方式定死「铺满整屏（裁掉多余）」：窄条里留白或拉伸都不好看
+        var stretch = settings.DisplayRegion != 0
+            ? (int)BackgroundImageStretch.FillCrop
+            : settings.BackgroundImageStretch;
+
         Backdrop.SetPalette(vm.Chrome, ParseColorOrDefault(vm.BackgroundColor, Colors.Black));
         ApplyQuakeFrost(vm);
         Backdrop.Apply(on ? BackgroundImageStore.ResolvePath(settings.BackgroundImageFile) : null,
-                       settings.BackgroundImageStretch, settings.BackgroundDim,
+                       stretch, settings.BackgroundDim,
                        on ? settings.GlassMode : (int)GlassMode.Off,
                        settings.GlassOpacity, settings.GlassBlurRadius, settings.GlassRefraction,
                        settings.GlassFrost, settings.AdjustingLayout);
@@ -342,18 +370,230 @@ public partial class ClockSurface : UserControl
         catch { return fallback; }
     }
 
+    // ===== 显示区域：全屏 / 左半屏 / 右半屏 =====
+
     /// <summary>
-    /// 随尺寸变化的几个宽度：提醒面板最大宽 = 屏幕宽 × 2/3；第一行提醒合并阈值 = 屏幕宽 × 1/3；
-    /// 底部课程信息最大宽 = 整行宽（去掉页面左右各 40 的边距）× 1/2，超了由 Viewbox 缩字而不是裁掉。
+    /// 当前可见区域的实际宽度（逻辑像素）。全屏时等于整个 ClockSurface 的宽度；
+    /// 左/右半屏时是其中一条。尺寸相关的宽度都按它算，不能再用整窗宽。
+    /// </summary>
+    private double _visibleWidth;
+
+    /// <summary>上一次套用的是不是紧凑排版；null = 还没套过（第一次一定要套一遍）。</summary>
+    private bool? _compactApplied;
+
+    /// <summary>
+    /// 按设置把画面收进可见区域：全屏铺满；左/右半屏时 Shell 只占宽度的一条。
+    /// 窗口本身不动——Esc/F11、防休眠、焦点仍然是整个全屏窗口的事。
+    /// </summary>
+    private void ApplyDisplayRegion()
+    {
+        var full = Bounds.Width;
+        if (Plugin.Settings is not { } settings)
+        {
+            UpdateSizeDependentLayout();
+            return;
+        }
+
+        var region = settings.DisplayRegion;
+        var percent = Math.Clamp(settings.VisibleWidthPercent, 30, 70);
+
+        var narrowed = region != 0 && full > 0;
+
+        if (!narrowed)
+        {
+            Shell.Width = double.NaN;
+            Shell.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
+            _visibleWidth = full;
+        }
+        else
+        {
+            _visibleWidth = Math.Round(full * percent / 100.0);
+            Shell.Width = _visibleWidth;
+            Shell.HorizontalAlignment = region == 1
+                ? Avalonia.Layout.HorizontalAlignment.Left
+                : Avalonia.Layout.HorizontalAlignment.Right;
+        }
+
+        // 收窄到七成以下才换紧凑排版：再宽一点一行放得下，按原来那套排，省得在两套边界上来回跳
+        ApplyCompactLayout(narrowed && percent < 70);
+
+        // 日期、天气、提醒面板贴可见的那一侧：左半屏靠左，右半屏靠右
+        ApplyRegionAlignment(narrowed && region == 2);
+
+        // 半屏时背景填充方式被锁成「铺满整屏」，这里让背景层重新取一次参数
+        ApplyBackdrop();
+
+        UpdateSizeDependentLayout();
+    }
+
+    /// <summary>
+    /// 半屏（窄）排版。宽屏那套是「顶栏一行（左天气 / 中弹幕 / 右日期）+ 底部一行（计数 / 课程信息 / 按钮）」；
+    /// 窄了放不下，改成：天气一行 → 日期与弹幕一行；课程信息一行 → 计数与按钮一行。
+    /// 时钟字号不在这里动：外面那层 Viewbox 会按可用宽度自己缩。
+    /// </summary>
+    private void ApplyCompactLayout(bool compact)
+    {
+        if (_compactApplied == compact) return;
+        _compactApplied = compact;
+
+        if (compact)
+        {
+            MainContent.Margin = new Thickness(20, 18, 20, 12);
+
+            // 两行之间留出 24：玻璃各往外探 6，间距得比 12 大，不然上下两块玻璃会压在一起
+            HeaderGrid.RowSpacing = 24;
+            FooterGrid.RowSpacing = 24;
+
+            // 顶栏：日期在第一行（弹幕接着占同一行剩下的横向空间），天气挪到第二行
+            Grid.SetRow(DateBlock, 0);
+            Grid.SetColumn(DateBlock, 0);
+            Grid.SetColumnSpan(DateBlock, 1);
+            DateBlock.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            DateBlock.Margin = new Thickness(0);
+
+            Grid.SetRow(AlertDetailScroll, 0);
+            Grid.SetColumn(AlertDetailScroll, 1);
+            Grid.SetColumnSpan(AlertDetailScroll, 2);
+            AlertDetailScroll.Margin = new Thickness(16, 0, 0, 0);
+
+            Grid.SetRow(HeaderLeft, 1);
+            Grid.SetColumn(HeaderLeft, 0);
+            Grid.SetColumnSpan(HeaderLeft, 3);
+
+            // 底行：课程信息独占一行，计数和按钮挤到下一行（两边本来就都是 *，不用改列定义）
+            Grid.SetRow(CourseInfoBox, 0);
+            Grid.SetColumn(CourseInfoBox, 0);
+            Grid.SetColumnSpan(CourseInfoBox, 3);
+
+            Grid.SetRow(CounterAreaBorder, 1);
+            Grid.SetColumn(CounterAreaBorder, 0);
+            Grid.SetColumnSpan(CounterAreaBorder, 2);
+
+            Grid.SetRow(ButtonBar, 1);
+            Grid.SetColumn(ButtonBar, 2);
+            Grid.SetColumnSpan(ButtonBar, 1);
+        }
+        else
+        {
+            MainContent.Margin = new Thickness(40, 30, 40, 18);
+            HeaderGrid.RowSpacing = 0;
+            FooterGrid.RowSpacing = 0;
+
+            Grid.SetRow(HeaderLeft, 0);
+            Grid.SetColumn(HeaderLeft, 0);
+            Grid.SetColumnSpan(HeaderLeft, 1);
+
+            Grid.SetRow(DateBlock, 0);
+            Grid.SetColumn(DateBlock, 2);
+            Grid.SetColumnSpan(DateBlock, 1);
+            DateBlock.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right;
+            DateBlock.Margin = new Thickness(28, 0, 0, 0);
+
+            Grid.SetRow(AlertDetailScroll, 0);
+            Grid.SetColumn(AlertDetailScroll, 1);
+            Grid.SetColumnSpan(AlertDetailScroll, 1);
+            AlertDetailScroll.Margin = new Thickness(28, 0, 0, 0);
+
+            Grid.SetRow(CourseInfoBox, 0);
+            Grid.SetColumn(CourseInfoBox, 1);
+            Grid.SetColumnSpan(CourseInfoBox, 1);
+
+            Grid.SetRow(CounterAreaBorder, 0);
+            Grid.SetColumn(CounterAreaBorder, 0);
+            Grid.SetColumnSpan(CounterAreaBorder, 1);
+
+            Grid.SetRow(ButtonBar, 0);
+            Grid.SetColumn(ButtonBar, 2);
+            Grid.SetColumnSpan(ButtonBar, 1);
+        }
+    }
+
+    /// <summary>
+    /// 内容贴哪一边：左半屏贴左、右半屏贴右（日期、天气、预警弹幕、提醒面板都跟着可见侧走）。
+    /// 不是整幅镜像——时钟、音量条、课程信息始终居中，读数的方向不变。
+    /// </summary>
+    private void ApplyRegionAlignment(bool right)
+    {
+        // 快速设置面板跟着可见侧走（要先于下面的提前返回：宽屏那套也要贴对边）
+        ApplyQuickSettingsAppearance();
+
+        var side = right
+            ? Avalonia.Layout.HorizontalAlignment.Right
+            : Avalonia.Layout.HorizontalAlignment.Left;
+
+        HeaderLeft.HorizontalAlignment = side;
+        ReminderPanel.HorizontalAlignment = side;
+
+        if (_compactApplied != true) return;   // 宽屏那套日期本来就在右侧，不用动
+
+        DateBlock.HorizontalAlignment = side;
+
+        if (right)
+        {
+            // 右半屏：日期贴右，弹幕占左边剩下的横向空间
+            Grid.SetColumn(DateBlock, 2);
+            Grid.SetColumn(AlertDetailScroll, 0);
+            Grid.SetColumnSpan(AlertDetailScroll, 2);
+            AlertDetailScroll.Margin = new Thickness(0, 0, 16, 0);
+        }
+        else
+        {
+            Grid.SetColumn(DateBlock, 0);
+            Grid.SetColumn(AlertDetailScroll, 1);
+            Grid.SetColumnSpan(AlertDetailScroll, 2);
+            AlertDetailScroll.Margin = new Thickness(16, 0, 0, 0);
+        }
+    }
+
+    /// <summary>
+    /// 半屏模式下点黑着的那一边三下 → 回到全屏。
+    /// 用隧道挂：黑屏区没有控件，但点在可见区里的按钮/滑块上也会先经过这里，按坐标排掉即可。
+    /// </summary>
+    private void OnEmptyAreaPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (IsPreview) return;
+        if (IsQuickSettingsOpen) return;   // 面板开着时点黑屏区是关面板，不算「三击退出半屏」
+        if (Plugin.Settings is not { } settings || settings.DisplayRegion == 0) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+
+        // 点在看得见的那一条里就不算（Shell 靠右时，屏幕左半边是负坐标）
+        var point = e.GetPosition(Shell);
+        if (point.X >= 0 && point.X <= Shell.Bounds.Width
+            && point.Y >= 0 && point.Y <= Shell.Bounds.Height)
+            return;
+
+        var now = DateTime.Now;
+
+        // 触摸屏（希沃）上一次触摸会同时送来触摸与模拟鼠标两个 PointerPressed：
+        // 不去重的话双击就成了三下，半屏会被误退出。120 毫秒内的重复事件按同一次点击算。
+        if ((now - _lastEmptyAreaTap).TotalMilliseconds < 120) return;
+
+        if ((now - _lastEmptyAreaTap).TotalMilliseconds > 1000) _emptyAreaTapCount = 0;
+        _lastEmptyAreaTap = now;
+
+        if (++_emptyAreaTapCount < 3) return;
+        _emptyAreaTapCount = 0;
+        settings.DisplayRegion = 0;   // 设置变更通知会接着走 ApplyDisplayRegion
+    }
+
+    private int _emptyAreaTapCount;
+    private DateTime _lastEmptyAreaTap = DateTime.MinValue;
+
+    /// <summary>
+    /// 随尺寸变化的几个宽度：提醒面板最大宽 = 可见区域宽 × 2/3；第一行提醒合并阈值 = 可见区域宽 × 1/3；
+    /// 底部课程信息最大宽 = 可见区域宽（去掉页面左右各 40 的边距）× 1/2，超了由 Viewbox 缩字而不是裁掉。
     /// </summary>
     private void UpdateSizeDependentLayout()
     {
         if (DataContext is not FullScreenClockViewModel vm) return;
         if (Bounds.Width <= 0) return;  // 还没量出尺寸，别把课程信息压成 0 宽
-        vm.ReminderPanelMaxWidth = Bounds.Width * 2.0 / 3.0;
-        vm.MergeThreshold = Bounds.Width / 3.0;
-        vm.CourseInfoMaxWidth = Math.Max(160, (Bounds.Width - 80) / 2.0);
-        // 地震提醒块：整窗宽去掉页面左右各 40 的边距，再留出内边距与描边
+
+        // 半屏时这些宽度按「看得见的那一条」算，不是整窗
+        var width = _visibleWidth > 0 ? _visibleWidth : Bounds.Width;
+        vm.ReminderPanelMaxWidth = width * 2.0 / 3.0;
+        vm.MergeThreshold = width / 3.0;
+        vm.CourseInfoMaxWidth = Math.Max(160, (width - 80) / 2.0);
+        // 地震提醒块铺的是整窗（半屏时仍然整屏弹），这条仍按整窗宽算
         vm.EarthquakeAlertMaxWidth = Math.Max(240, Bounds.Width - 80 - 72);
         ApplyBodyPositions();
     }
@@ -435,7 +675,8 @@ public partial class ClockSurface : UserControl
             // 地震提醒是整屏正中的浮层，不参与这里的限位：它来去都不该把时钟顶走
             const double clockMinTop = 0.0;
 
-            var clockHeight = ClockText.Bounds.Height;
+            // 用外层的 Viewbox：半屏窄条里它会被缩到放得下，摆位要按缩放后的实际尺寸算
+            var clockHeight = ClockBox.Bounds.Height;
             var volumeVisible = VolumePanel.IsVisible;
             var volumeHeight = VolumePanel.Bounds.Height;
 
@@ -453,7 +694,7 @@ public partial class ClockSurface : UserControl
             var clockTop = Math.Clamp(TopFor(settings.ClockPositionPercent, areaHeight, clockHeight), clockMinTop, clockMaxTop);
 
             if (volumeVisible) SetTop(VolumePanel, volumeTop);
-            SetTop(ClockText, clockTop);
+            SetTop(ClockBox, clockTop);
 
             if (IsPreview) return;   // 预览到此为止：位置摆好了，剩下的都是真实大屏才该做的事
 
@@ -720,7 +961,11 @@ public partial class ClockSurface : UserControl
 
     private void ShowAboutPopup()
     {
-        if (_aboutWindow != null && _aboutWindow.IsVisible) return;
+        if (_aboutWindow is { IsVisible: true }) return;   // 已经开着，不要再叠一个
+
+        // 旧窗口可能只是跟着主窗口一起藏了起来、没走过 Closed：这种窗口不会再触发 Closed，
+        // 弹出时套上的蒙版就会一直留在 ClockSurface 上，重开大屏还是糊的。先收干净再开新的。
+        DismissAboutPopup();
         if (TopLevel.GetTopLevel(this) is not Window owner) return;   // 预览那份不在窗口里，点了也不弹
 
         var vm = DataContext as FullScreenClockViewModel;
@@ -742,13 +987,213 @@ public partial class ClockSurface : UserControl
         if (settings?.BackgroundEnabled == true && ClockThemeApplier.BackgroundIsDark(settings) is { } imageDark)
             light = !imageDark;
 
-        _aboutWindow = new AboutPopupWindow(light, frosted);
-        _aboutWindow.Closed += (_, _) =>
+        var window = new AboutPopupWindow(light, frosted);
+        _aboutWindow = window;
+        window.Closed += (_, _) => ClearAboutMask(window);
+        try
+        {
+            window.Show(owner); // 以全屏窗口为 Owner（置顶、随主窗口关闭）
+            PlaceAboutWindow(window, owner);
+        }
+        catch (Exception ex)
+        {
+            // 窗口没开出来也得把蒙版撤掉，否则整面墙会一直糊着
+            System.Diagnostics.Debug.WriteLine($"[About] 显示关于窗口失败: {ex}");
+            ClearAboutMask(window);
+        }
+    }
+
+    /// <summary>
+    /// 半屏模式下把关于窗口摆到看得见的那一条正中。
+    /// 全屏时 CenterOwner 本来就居中于整窗，不用动。
+    /// </summary>
+    private void PlaceAboutWindow(Window window, Window owner)
+    {
+        if (Plugin.Settings is not { DisplayRegion: > 0 }) return;
+        if (Shell.Bounds.Width <= 0 || Shell.Bounds.Height <= 0) return;
+
+        try
+        {
+            var scale = owner.RenderScaling;
+            var origin = Shell.PointToScreen(new Point(0, 0));
+            var width = (int)Math.Round(window.Width * scale);
+            var height = (int)Math.Round(window.Height * scale);
+
+            window.Position = new PixelPoint(
+                origin.X + (int)Math.Round((Shell.Bounds.Width * scale - width) / 2),
+                origin.Y + (int)Math.Round((Shell.Bounds.Height * scale - height) / 2));
+        }
+        catch
+        {
+            // 定位失败就留在整窗正中，至少还看得见
+        }
+    }
+
+    /// <summary>
+    /// 关掉关于窗口并撤掉蒙版（按 Esc、退出全屏、主窗口被藏起来时都要走这里）。
+    /// 返回是否真的有关窗口或蒙版在。
+    /// </summary>
+    public bool DismissAboutPopup()
+    {
+        var window = _aboutWindow;
+        _aboutWindow = null;
+        if (window is not null)
+        {
+            try { window.Close(); } catch { }
+        }
+
+        // 窗口可能早就没了、Closed 却没走到（比如跟着主窗口一起被藏起来），这里兜底清一次
+        var hadMask = Effect is not null;
+        if (hadMask)
         {
             Effect = null;
-            _aboutWindow = null;
-        };
-        _aboutWindow.Show(owner); // 以全屏窗口为 Owner（置顶、随主窗口关闭）
+            InvalidateVisual();
+        }
+
+        return window is not null || hadMask;
+    }
+
+    /// <summary>
+    /// 撤掉关于窗口弹出时给整个大屏套的那层实时模糊。
+    /// 只认当前这一个窗口：换过窗口以后，旧窗口迟到的 Closed 不能再把新窗口的蒙版撤掉。
+    /// </summary>
+    private void ClearAboutMask(AboutPopupWindow window)
+    {
+        if (!ReferenceEquals(_aboutWindow, window)) return;
+        _aboutWindow = null;
+        Effect = null;
+        InvalidateVisual();   // Effect 走合成器，明确标一次脏，别指望下一秒的时钟刷新顺手带出来
+    }
+
+    // ===== 快速设置 =====
+    //
+    // 大屏上直接调设置：底部「设置」按钮打开，面板贴在可见区域那一侧。
+    // 内容不另做一套——塞一份 SettingsPage（Embedded 模式，右栏预览藏掉），
+    // 设置项的读写、滑块拖动标记、位置限位全跟 CI 设置窗口里那页一模一样。
+
+    private SettingsPage? _quickSettings;
+
+    public bool IsQuickSettingsOpen => _quickSettings is not null;
+
+    private void SettingsButton_Click(object? sender, RoutedEventArgs e) => ToggleQuickSettings();
+
+    public void ToggleQuickSettings()
+    {
+        if (_quickSettings is not null) CloseQuickSettings();
+        else OpenQuickSettings();
+    }
+
+    private void OpenQuickSettings()
+    {
+        if (_quickSettings is not null || IsPreview) return;
+
+        var page = new SettingsPage(embedded: true);
+        _quickSettings = page;
+        QuickSettingsHost.Children.Add(page);
+        QuickSettingsOverlay.IsVisible = true;
+        ApplyQuickSettingsAppearance();
+        UpdateQuickSettingsBounds();
+    }
+
+    /// <summary>关掉面板；本来就没开返回 false（Esc 用它决定要不要接着退出全屏）。</summary>
+    public bool CloseQuickSettings()
+    {
+        if (_quickSettings is not { } page) return false;
+
+        _quickSettings = null;
+        QuickSettingsHost.Children.Remove(page);   // 真从树里摘掉才会走 Unloaded，把订阅摘干净
+        QuickSettingsOverlay.IsVisible = false;
+        ClearQuickSettingsBlur();
+        return true;
+    }
+
+    /// <summary>
+    /// 面板贴哪一侧、多宽、透不透明：半屏时收进看得见的那一条；
+    /// 拖动设置项（AdjustingLayout）时淡到只剩一点轮廓。
+    /// </summary>
+    private void ApplyQuickSettingsAppearance()
+    {
+        if (_quickSettings is null) return;
+
+        var region = Plugin.Settings?.DisplayRegion ?? 0;
+
+        // 左半屏贴左、右半屏贴右；全屏统一贴右（与 CI 设置窗口里平时的位置一致）
+        QuickSettingsCard.HorizontalAlignment = region == 1
+            ? Avalonia.Layout.HorizontalAlignment.Left
+            : Avalonia.Layout.HorizontalAlignment.Right;
+
+        // 宽度不超过可见区域，窄到 30% 也放得下
+        var available = _visibleWidth > 0 ? _visibleWidth : Bounds.Width;
+        if (available > 0)
+            QuickSettingsCard.MaxWidth = Math.Max(300, available - 40);
+
+        UpdateQuickSettingsBounds();
+        UpdateQuickSettingsOpacity();
+    }
+
+    /// <summary>
+    /// 面板只占「顶栏以下、按钮行以上」那一段：不压日期，也不盖住最小化/退出那排按钮。
+    /// 上下留白按这两块的实际落位算，换半屏、换紧凑排版、改字号都不会错位。
+    /// </summary>
+    private void UpdateQuickSettingsBounds()
+    {
+        if (_quickSettings is null) return;
+
+        var top = 20.0;
+        var bottom = 20.0;
+
+        if (HeaderGrid.TranslatePoint(new Point(0, HeaderGrid.Bounds.Height), this) is { } header)
+            top = header.Y + 12;
+
+        if (ButtonBar.TranslatePoint(default, this) is { } bar)
+            bottom = Math.Max(12, Bounds.Height - bar.Y + 12);
+
+        QuickSettingsCard.Margin = new Thickness(0, top, 20, bottom);
+    }
+
+    private void UpdateQuickSettingsOpacity()
+    {
+        if (_quickSettings is null) return;
+
+        // 按住设置项拖动：面板淡下去、整屏模糊也撤掉——要看的正是后面被调的那块大屏。
+        var adjusting = Plugin.Settings?.AdjustingLayout == true;
+        QuickSettingsCard.Opacity = adjusting ? 0.35 : 1.0;
+        QuickSettingsVeil.Opacity = adjusting ? 0.35 : 1.0;
+
+        if (adjusting) ClearQuickSettingsBlur();
+        else ApplyQuickSettingsBlur();
+    }
+
+    /// <summary>
+    /// 面板打开时，把面板背后的整面墙**实时**糊掉（与关于窗口同一套做法、同一个半径）。
+    /// 糊的是 <see cref="Shell"/>：面板的浮层在它外面，不会被自己糊住；后台的时钟、计数照常实时刷新。
+    /// 没有模糊底图（纯色背景 / 玻璃关着）就不套——省一次整屏重绘。
+    /// </summary>
+    private void ApplyQuickSettingsBlur()
+    {
+        if (_quickSettings is null || Shell.Effect is not null) return;
+        if (!Backdrop.HasBlurredBackdrop) return;
+
+        var radius = Plugin.Settings?.GlassBlurRadius ?? 24;
+        Shell.Effect = new BlurEffect { Radius = Math.Clamp(radius, 4, 48) };
+        Shell.InvalidateVisual();
+    }
+
+    private void ClearQuickSettingsBlur()
+    {
+        if (Shell.Effect is null) return;
+        Shell.Effect = null;
+        Shell.InvalidateVisual();
+    }
+
+    /// <summary>点遮罩空白处关；点在面板（或面板里的控件）上不关。</summary>
+    private void QuickSettingsOverlay_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        for (var visual = e.Source as Visual; visual is not null; visual = visual.GetVisualParent())
+            if (ReferenceEquals(visual, QuickSettingsCard))
+                return;
+
+        CloseQuickSettings();
     }
 
     private void ExitButton_Click(object? sender, RoutedEventArgs e)

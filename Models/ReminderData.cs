@@ -1,3 +1,5 @@
+using Avalonia.Media;
+
 namespace EveningSelfStudyClock.Models;
 
 /// <summary>左上角提醒面板的显示数据（由 CI 组件配置 + CI 天气缓存组装）。</summary>
@@ -11,6 +13,12 @@ public class ReminderData
 
     /// <summary>文本框内容（CI 文本组件的 TextContent）。</summary>
     public string? TextContent { get; set; }
+
+    /// <summary>文本组件自定义的颜色（没勾「自定义字体颜色」时为 null，用主题色）。</summary>
+    public Color? TextColor { get; set; }
+
+    /// <summary>文本组件的字号（跟随 CI 主界面上的设置）。</summary>
+    public int? TextFontSize { get; set; }
 
     /// <summary>天气 emoji 图标。</summary>
     public string? WeatherIcon { get; set; }

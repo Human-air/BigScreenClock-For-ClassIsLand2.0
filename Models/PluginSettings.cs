@@ -37,6 +37,8 @@ public class PluginSettings : INotifyPropertyChanged
     private int _clockFontSize = 180;
     private double _clockPositionPercent = 30;      // 时钟中心在主体区高度的 30% 处
     private double _volumePositionPercent = 80;     // 音量条中心在主体区高度的 80% 处
+    private int _displayRegion;
+    private double _visibleWidthPercent = 50;
     private int _courseInfoFontSize = 28;
     private int _countFontSize = 24;
     private int _themeMode;
@@ -68,6 +70,22 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showEarthquakeReminder = true;
     private bool _cameraListFilled;
     private ObservableCollection<string> _monitoredCameras = new();
+
+    // ===== 飞书推送（噪音 / 进出大屏时钟）=====
+    private bool _enableFeishuNotify;
+    private string _feishuWebhookUrl = "";
+    private string _feishuSecret = "";
+    private string _deviceName = "";
+    private int _feishuCooldownSeconds = 30;
+    private int _feishuTimeoutSeconds = 30;
+    private bool _feishuDirectConnection;
+    private bool _feishuNotifyNoise = true;
+    private bool _feishuNotifyNormal = true;
+    private bool _feishuNotifyEnterExit = true;
+
+    // ===== 打小报告快捷键（拍照与录音上传已移除，此处只剩卡片触发） =====
+    private bool _enableSnitch = true;
+    private string _snitchHotkey = "Ctrl+Alt+R";
 
     public PluginSettings()
     {
@@ -528,6 +546,26 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 显示区域：0 = 全屏，1 = 左半屏，2 = 右半屏。
+    /// 教室里推拉黑板会从一侧把屏幕遮掉一半，画面只铺在能看见的那一条里。
+    /// </summary>
+    public int DisplayRegion
+    {
+        get => _displayRegion;
+        set { _displayRegion = Math.Clamp(value, 0, 2); OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 可见区域宽度占整屏的百分比（30~70）。只在 <see cref="DisplayRegion"/> 非 0 时生效。
+    /// 不写死 50%：各校黑板推开的幅度不一样；上限卡在 70，再多就不该算「半屏」了。
+    /// </summary>
+    public double VisibleWidthPercent
+    {
+        get => _visibleWidthPercent;
+        set { _visibleWidthPercent = Math.Clamp(value, 30, 70); OnPropertyChanged(); }
+    }
+
+    /// <summary>
     /// 窗口标题
     /// </summary>
     public string WindowTitle
@@ -663,6 +701,92 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _cameraListFilled;
         set { _cameraListFilled = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否启用飞书推送（噪音提醒 / 进出大屏时钟）。</summary>
+    public bool EnableFeishuNotify
+    {
+        get => _enableFeishuNotify;
+        set { _enableFeishuNotify = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书自定义机器人 Webhook 地址（https://open.feishu.cn/open-apis/bot/v2/hook/...）。</summary>
+    public string FeishuWebhookUrl
+    {
+        get => _feishuWebhookUrl;
+        set { _feishuWebhookUrl = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>飞书机器人「签名校验」密钥。机器人开启签名校验时必填，未开启则留空。</summary>
+    public string FeishuSecret
+    {
+        get => _feishuSecret;
+        set { _feishuSecret = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>设备 / 班级名称，用于多台机器区分显示（可留空）。</summary>
+    public string DeviceName
+    {
+        get => _deviceName;
+        set { _deviceName = value ?? ""; OnPropertyChanged(); }
+    }
+
+    /// <summary>同一等级噪音消息的最小发送间隔（秒）。0 表示不限制，默认 30。</summary>
+    public int FeishuCooldownSeconds
+    {
+        get => _feishuCooldownSeconds;
+        set { _feishuCooldownSeconds = Math.Clamp(value, 0, 600); OnPropertyChanged(); }
+    }
+
+    /// <summary>是否推送噪音提醒（一般 / 吵闹）。</summary>
+    public bool FeishuNotifyNoise
+    {
+        get => _feishuNotifyNoise;
+        set { _feishuNotifyNoise = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>「一般」等级是否也推送。关闭后仅在「吵闹」时推送。</summary>
+    public bool FeishuNotifyNormal
+    {
+        get => _feishuNotifyNormal;
+        set { _feishuNotifyNormal = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>是否推送进入 / 退出大屏时钟通知。</summary>
+    public bool FeishuNotifyEnterExit
+    {
+        get => _feishuNotifyEnterExit;
+        set { _feishuNotifyEnterExit = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>单次请求超时秒数，默认 30（范围 5~120）。</summary>
+    public int FeishuTimeoutSeconds
+    {
+        get => _feishuTimeoutSeconds;
+        set { _feishuTimeoutSeconds = Math.Clamp(value, 5, 120); OnPropertyChanged(); }
+    }
+
+    /// <summary>true = 不使用系统代理直连；false（默认）= 跟随系统代理。</summary>
+    public bool FeishuDirectConnection
+    {
+        get => _feishuDirectConnection;
+        set { _feishuDirectConnection = value; OnPropertyChanged(); }
+    }
+
+    // ===== 打小报告 =====
+
+    /// <summary>是否启用「打小报告」全局快捷键。</summary>
+    public bool EnableSnitch
+    {
+        get => _enableSnitch;
+        set { _enableSnitch = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>打小报告快捷键组合，格式 "Ctrl+Alt+R"。</summary>
+    public string SnitchHotkey
+    {
+        get => _snitchHotkey;
+        set { _snitchHotkey = value ?? ""; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
+using EveningSelfStudyClock.Helpers;
 
 namespace EveningSelfStudyClock.Views;
 
@@ -20,40 +22,11 @@ public partial class AboutPopupWindow : Window
         "https://www.bilibili.com/video/BV1b7tH6EEmj/?spm_id_from=333.1387.homepage.video_card.click&vd_source=672e65ac988bbb49080779dccc57cdb2";
 
     /// <summary>从插件目录的 manifest.yml 动态读取版本号，不再写死（避免升级后忘记同步）。</summary>
-    private static readonly string PluginVersion = ReadManifestVersion();
+    private static readonly string PluginVersionText =
+        PluginVersion.Current.Length > 0 ? PluginVersion.Current : "未知";
 
     private readonly DispatcherTimer _autoCloseTimer;
     private readonly DateTime _shownAt = DateTime.Now;
-
-    /// <summary>
-    /// 读取插件安装目录下 manifest.yml 的 version 字段。
-    /// manifest.yml 由 csproj 复制到输出目录，与 DLL 同目录，运行时可取到。
-    /// </summary>
-    private static string ReadManifestVersion()
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(typeof(AboutPopupWindow).Assembly.Location);
-            if (!string.IsNullOrEmpty(dir))
-            {
-                var manifestPath = Path.Combine(dir, "manifest.yml");
-                if (File.Exists(manifestPath))
-                {
-                    foreach (var line in File.ReadAllLines(manifestPath))
-                    {
-                        var trimmed = line.TrimStart();
-                        if (trimmed.StartsWith("version:", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var v = trimmed["version:".Length..].Trim().Trim('"', '\'');
-                            if (v.Length > 0) return v;
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-        return "未知";
-    }
 
     /// <param name="light">大屏当前是明亮主题还是黑暗主题（文字、底色跟着翻）。</param>
     /// <param name="frosted">身后的大屏是不是磨砂/液态玻璃档（是就半透明，让糊掉的画面透出来）。</param>
@@ -66,8 +39,8 @@ public partial class AboutPopupWindow : Window
         // 版本号 + 版本类型：
         //   五位（如 1.1.1.10.6）= 本机开发版，构建时自动盖号，不对外发布；
         //   四位最后一位非 0 = 测试版，为 0 = 正式版。
-        VersionNumberText.Text = $"版本号：{PluginVersion}";
-        var (type, color) = VersionKind(PluginVersion);
+        VersionNumberText.Text = $"版本号：{PluginVersionText}";
+        var (type, color) = VersionKind(PluginVersionText);
         VersionTypeText.Text = type;
         VersionTypeText.Foreground = new SolidColorBrush(Color.Parse(color));
 
@@ -78,6 +51,15 @@ public partial class AboutPopupWindow : Window
         _autoCloseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _autoCloseTimer.Tick += (_, _) => Close();
         _autoCloseTimer.Start();
+
+        // Esc 关闭。窗口里没有可聚焦的控件，按键会直接落到窗口本身。
+        // 必须自己接这个键：以前没人处理，Esc 在关于窗口上等于没按，大屏那层蒙版也就一直挂着。
+        KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape) return;
+            e.Handled = true;
+            Close();
+        };
 
         // 点击窗口外 → 失焦 → 关闭（加 0.5 秒宽限期，避免刚显示就误关）
         Deactivated += (_, _) =>

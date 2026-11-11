@@ -11,8 +11,51 @@
             <Setter Property="FontFamily" Value="{x:Static cis:AppBase.LucideIconsFontFamily}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+        <!-- 更新说明的三种块（GitHub 上各版排版不统一，脚本里已归一成 heading / bullet / text）。
+             先写通用样式、再写标题样式：同一控件两个类都命中时，后定义的覆盖先定义的。 -->
+        <Style Selector="TextBlock.noteLine">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+            <Setter Property="Margin" Value="0,1,0,1"/>
+        </Style>
+        <Style Selector="TextBlock.noteHeading">
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+            <Setter Property="Margin" Value="0,8,0,3"/>
+        </Style>
+        <Style Selector="TextBlock.noteBullet">
+            <Setter Property="Margin" Value="6,1,0,1"/>
+        </Style>
+        <!-- 「在 GitHub 查看」：看起来像链接，不是按钮 -->
+        <Style Selector="Button.noteLink">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
     </UserControl.Styles>
-    <Grid ColumnDefinitions="*,360" Margin="12">
+
+    <UserControl.Resources>
+        <!-- 一版更新说明的正文：heading / bullet / text 三种块共用这一份模板 -->
+        <DataTemplate x:Key="NoteBlocks">
+            <ItemsControl ItemsSource="{Binding}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Classes="noteLine"
+                                   Classes.noteHeading="{Binding IsHeading}"
+                                   Classes.noteBullet="{Binding IsBullet}"
+                                   Text="{Binding DisplayText}"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid x:Name="RootGrid" ColumnDefinitions="*,360" Margin="12">
 
         <!-- ===== 左栏：设置（可滚动） =====
              每个区块是一张卡片，用的是 CI 设置页里 SettingsExpander 那套：
@@ -418,6 +461,29 @@
                             <ComboBoxItem Content="黑暗"/>
                         </ComboBox>
                     </Grid>
+                    <!-- 半屏模式：教室推拉黑板会从一侧遮掉半个屏幕，先把画面收进看得见的那一条。
+                         宽度按百分比而不是写死 50%：各校黑板推开的幅度不一样。 -->
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="半屏模式" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <ComboBox Grid.Column="1" SelectedIndex="{Binding DisplayRegionIndex}" FontSize="13"
+                                  MinWidth="150" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="关闭"/>
+                            <ComboBoxItem Content="左半屏"/>
+                            <ComboBoxItem Content="右半屏"/>
+                        </ComboBox>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
+                          IsVisible="{Binding IsHalfScreen}">
+                        <TextBlock Grid.Column="0" Text="可见宽度" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider x:Name="VisibleWidthSlider" Grid.Column="1"
+                                Value="{Binding VisibleWidthPercent}" Minimum="30" Maximum="70"
+                                TickFrequency="5" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding VisibleWidthPercentText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40"
+                                   TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
                     <!-- 背景总开关：开了才启用下面这一整组（背景图 + 玻璃 + 背景主题），
                          此时上面那项「主题」整项失效、由下面「背景主题」说了算 -->
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
@@ -472,16 +538,20 @@
                                 <TextBlock Grid.Column="0" Text="填充方式" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding BackgroundImageStretchIndex}" FontSize="13"
-                                          MinWidth="150" HorizontalAlignment="Left">
+                                          MinWidth="150" HorizontalAlignment="Left"
+                                          IsEnabled="{Binding IsFullScreen}">
                                     <ComboBoxItem Content="铺满整屏（裁掉多余）"/>
                                     <ComboBoxItem Content="完整显示（两侧模糊补齐）"/>
                                     <ComboBoxItem Content="拉伸铺满"/>
                                 </ComboBox>
                             </Grid>
+                            <TextBlock Text="半屏模式下固定按「铺满整屏（裁掉多余）」显示" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       IsVisible="{Binding IsHalfScreen}"/>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0" Text="背景明暗" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding BackgroundDim}" Minimum="-100" Maximum="100"
+                                <Slider x:Name="BackgroundDimSlider" Grid.Column="1" Value="{Binding BackgroundDim}" Minimum="-100" Maximum="100"
                                         TickFrequency="10" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding BackgroundDimText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -501,7 +571,7 @@
                                   IsVisible="{Binding IsOpacityRowVisible}">
                                 <TextBlock Grid.Column="0" Text="透明度" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding GlassOpacity}" Minimum="0" Maximum="100"
+                                <Slider x:Name="GlassOpacitySlider" Grid.Column="1" Value="{Binding GlassOpacity}" Minimum="0" Maximum="100"
                                         TickFrequency="5" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding GlassOpacityText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -510,7 +580,7 @@
                                   IsVisible="{Binding IsGrainRowVisible}">
                                 <TextBlock Grid.Column="0" Text="磨砂颗粒度" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding GlassBlurRadius}" Minimum="1" Maximum="64"
+                                <Slider x:Name="GlassBlurRadiusSlider" Grid.Column="1" Value="{Binding GlassBlurRadius}" Minimum="1" Maximum="64"
                                         TickFrequency="4" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding GlassBlurRadiusText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -519,7 +589,7 @@
                                   IsVisible="{Binding IsLiquidRowVisible}">
                                 <TextBlock Grid.Column="0" Text="折射强度" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding GlassRefraction}" Minimum="0" Maximum="100"
+                                <Slider x:Name="GlassRefractionSlider" Grid.Column="1" Value="{Binding GlassRefraction}" Minimum="0" Maximum="100"
                                         TickFrequency="5" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding GlassRefractionText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -528,7 +598,7 @@
                                   IsVisible="{Binding IsLiquidRowVisible}">
                                 <TextBlock Grid.Column="0" Text="雾面浓度" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <Slider Grid.Column="1" Value="{Binding GlassFrost}" Minimum="0" Maximum="100"
+                                <Slider x:Name="GlassFrostSlider" Grid.Column="1" Value="{Binding GlassFrost}" Minimum="0" Maximum="100"
                                         TickFrequency="5" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding GlassFrostText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>
@@ -693,6 +763,105 @@
                 </StackPanel>
                 </Border>
 
+                <!-- 飞书推送 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="飞书推送" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <CheckBox IsChecked="{Binding EnableFeishuNotify}" FontSize="14">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Bell}" FontSize="13"/>
+                            <TextBlock Text="启用飞书推送（噪音提醒 / 进出大屏时钟）" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+
+                    <StackPanel Spacing="6" IsEnabled="{Binding EnableFeishuNotify}">
+                        <TextBlock Text="Webhook 地址：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，复制其中的地址填到这里"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding FeishuWebhookUrl}" FontSize="12" Padding="6,4"
+                                 Watermark="https://open.feishu.cn/open-apis/bot/v2/hook/..."/>
+                        <TextBlock Text="签名密钥（机器人开启「签名校验」时填，未开启留空）" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding FeishuSecret}" PasswordChar="●" FontSize="12" Padding="6,4"
+                                 Watermark="签名密钥"/>
+                        <TextBlock Text="设备 / 班级名称（多台机器区分用，可留空）" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <TextBox Text="{Binding DeviceName}" FontSize="12" Padding="6,4" Watermark="如 高一(3)班"/>
+
+                        <CheckBox IsChecked="{Binding FeishuNotifyNoise}" Content="推送噪音提醒（一般 / 吵闹）" FontSize="13"/>
+                        <CheckBox IsChecked="{Binding FeishuNotifyNormal}" IsEnabled="{Binding FeishuNotifyNoise}"
+                                  Content="「一般」等级也推送（关闭则只在「吵闹」时推送）" FontSize="13" Margin="20,0,0,0"/>
+                        <CheckBox IsChecked="{Binding FeishuNotifyEnterExit}" Content="推送进入 / 退出大屏时钟" FontSize="13"/>
+                        <CheckBox IsChecked="{Binding FeishuDirectConnection}"
+                                  Content="直连（不走系统代理；插件发送超时可勾选）" FontSize="13"/>
+
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="同级冷却" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                            <Slider Grid.Column="1" Value="{Binding FeishuCooldownSeconds}"
+                                    Minimum="0" Maximum="600" TickFrequency="10" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding FeishuCooldownSecondsText}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="66"
+                                       TextAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="请求超时" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                            <Slider Grid.Column="1" Value="{Binding FeishuTimeoutSeconds}"
+                                    Minimum="5" Maximum="120" TickFrequency="5" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding FeishuTimeoutSecondsText}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="66"
+                                       TextAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="同级冷却：同一等级（一般 / 吵闹）两条消息的最小间隔，0 = 不限制，默认 30 秒。"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+
+                        <!-- 快捷键打小报告（拍照与录音上传已移除，只剩卡片推送） -->
+                        <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="0,1,0,0" Margin="0,6,0,0" Padding="0,8,0,0">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="📣 快捷键打小报告" FontSize="14" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                <TextBlock Text="系统级全局热键：无论在哪个界面，按下即向飞书群发送一张橙色「现场报告」卡片。10 秒冷却防误触。"
+                                           FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           TextWrapping="Wrap"/>
+
+                                <CheckBox IsChecked="{Binding EnableSnitch}" FontSize="13"
+                                          Content="启用打小报告快捷键"/>
+
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                    <TextBlock Grid.Column="0" Text="快捷键" VerticalAlignment="Center" FontSize="13"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                    <TextBox Grid.Column="1" Text="{Binding SnitchHotkey}" FontSize="12" Padding="6,4"
+                                             Watermark="Ctrl+Alt+R（Ctrl/Alt/Shift/Win + 字母/数字/F1~F24）"/>
+                                    <Button Grid.Column="2" Content="🚨 测试" Click="TestSnitch_Click"
+                                            CornerRadius="6" Padding="8,4" Cursor="Hand"/>
+                                </Grid>
+                                <TextBlock Text="{Binding SnitchTestStatus}" FontSize="12"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+                            <Button Content="测试发送" Click="TestFeishu_Click" CornerRadius="6" Padding="10,5" Cursor="Hand"/>
+                            <TextBlock Text="{Binding FeishuTestStatus}" VerticalAlignment="Center" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
 
@@ -700,9 +869,9 @@
              预览不是照着重画的小样，而是把大屏那面墙（ClockSurface）本身等比缩进这个框里：
              布局、字号、颜色、时钟与音量条的位置都出自同一份 XAML，不可能和大屏对不上。
              尺寸按大屏那块屏幕的长宽比算，所以各种比例下看到的都是真实观感。 -->
-        <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Top" Margin="4,8,0,0">
-            <TextBlock Text="预览" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-            <Border Background="{Binding BackgroundColorBrush}" CornerRadius="12" ClipToBounds="True">
+        <Grid x:Name="PreviewPanel" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8" Margin="4,8,0,0">
+            <TextBlock Grid.Row="0" Text="预览" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+            <Border Grid.Row="1" Background="{Binding BackgroundColorBrush}" CornerRadius="12" ClipToBounds="True">
                 <Viewbox Stretch="Uniform">
                     <!-- Panel 只负责给出「大屏那块屏幕的尺寸」；ClockSurface 拿的是 ViewModel。
                          分开写是因为 ClockSurface 的 DataContext 一旦换成 ViewModel，
@@ -714,7 +883,7 @@
                     </Panel>
                 </Viewbox>
             </Border>
-            <Button FontSize="15" FontWeight="Bold"
+            <Button Grid.Row="2" FontSize="15" FontWeight="Bold"
                     Foreground="#ffffff" Background="#2e7d32"
                     CornerRadius="8" Padding="10,8"
                     Cursor="Hand" Click="TestButton_Click"
@@ -725,6 +894,85 @@
                     <TextBlock Text="进入全屏时钟" FontSize="15" FontWeight="Bold" Foreground="#ffffff" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
-        </StackPanel>
+
+            <!-- ===== 更新说明 =====
+                 内容和 GitHub Releases 上每版的更新说明一致，但**不联网**：打包时由
+                 tools/generate_release_notes.py 抓成 Assets/release-notes.json 内嵌进程序集。
+                 最新的一版默认展开，其余收起来——一栏 360 宽，全展开是十几屏。 -->
+            <Border Grid.Row="3" IsVisible="{Binding HasReleaseNotes}" MinHeight="120"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="12,10">
+                <Grid RowDefinitions="Auto,*" RowSpacing="6">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI History}" FontSize="15"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="更新说明" FontSize="15" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="来自 GitHub" FontSize="11" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="6">
+                            <!-- 本版本：直接摊开 -->
+                            <StackPanel Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{Binding CurrentRelease.Version}" FontSize="13" FontWeight="Bold"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                    <Border Background="{Binding CurrentRelease.BadgeBrush}" CornerRadius="3" Padding="5,1"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding CurrentRelease.Badge}" FontSize="10" Foreground="#ffffff"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding CurrentRelease.Date}" FontSize="11" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                    <Button Classes="noteLink" Tag="{Binding CurrentRelease.Url}"
+                                            Click="ReleaseLink_Click" Content="在 GitHub 查看"
+                                            VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <ContentControl Content="{Binding CurrentRelease.Blocks}"
+                                                ContentTemplate="{StaticResource NoteBlocks}"/>
+                            </StackPanel>
+
+                            <!-- 往期版本：连版本号一起收起来，点开才看到列表；每次打开设置页默认折叠 -->
+                            <Expander x:Name="PastReleasesExpander" IsVisible="{Binding HasPastReleases}">
+                                <Expander.Header>
+                                    <TextBlock Text="{Binding PastReleasesHeader}" FontSize="12"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                </Expander.Header>
+                                <ItemsControl ItemsSource="{Binding PastReleases}" Margin="0,2,0,4">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Expander Margin="0,0,0,2">
+                                                <Expander.Header>
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Text="{Binding Version}" FontSize="12" FontWeight="Bold"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                                        <Border Background="{Binding BadgeBrush}" CornerRadius="3" Padding="5,1"
+                                                                VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Badge}" FontSize="10" Foreground="#ffffff"/>
+                                                        </Border>
+                                                        <TextBlock Text="{Binding Date}" FontSize="11" VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                                        <Button Classes="noteLink" Tag="{Binding Url}"
+                                                                Click="ReleaseLink_Click" Content="在 GitHub 查看"
+                                                                VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </Expander.Header>
+                                                <ContentControl Content="{Binding Blocks}"
+                                                                ContentTemplate="{StaticResource NoteBlocks}"/>
+                                            </Expander>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

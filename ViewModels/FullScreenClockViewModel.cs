@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Timers;
 using Avalonia;
 using Avalonia.Controls;
@@ -16,6 +18,7 @@ using Avalonia.Threading;
 using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Core.Icons;
+using ClassIsland.Core.Models.AttachedSettings;
 using ClassIsland.Core.Models.Components;
 using ClassIsland.Shared.Enums;
 using EveningSelfStudyClock.Helpers;
@@ -32,6 +35,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly PluginSettings _settings;
     private readonly DecibelMeterService _decibelService;
     private readonly CameraActivityService _cameraService;
+    private readonly FeishuNotifier _feishu;
     private readonly IServiceProvider _serviceProvider;
     private readonly EarthquakeReader _earthquakeReader;
     private readonly NoiseCounter _counter = new();
@@ -116,7 +120,23 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private DateTime _classStartTime;
     private string _courseInfoText = "";
     private List<TimeSlot> _todaySlots = new();
+
+    // CI「时间点附加信息」的设置（主界面 → 组件 → 课程表）。默认值与 CI 出厂一致。
+    private bool _showTimePointExtra = true;
+    private int _timePointExtraType;
+    private bool _countdownEnabled = true;
+    private int _countdownSeconds = 60;
+    private int _extraInfo4ShowSeconds = 300;   // 「剩余时间」剩这么多秒时切成精确倒计时
+    private bool _nonExactCountdown;            // 模糊倒计时：按分钟取整而不是到秒
     private DateTime _scheduleDate;   // _todaySlots 是哪一天的课表（跨天要重读）
+
+    // ===== 飞书推送会话状态 =====
+    private bool _feishuSessionActive;
+    private DateTime _feishuSessionStart;
+    private int _sessionNormal;
+    private int _sessionNoisy;
+    private DateTime _lastNoiseNotifyNormal = DateTime.MinValue;
+    private DateTime _lastNoiseNotifyNoisy = DateTime.MinValue;
     private System.Timers.Timer? _antiScreensaverTimer;
     private string _noisyDisplaySignature = "";
     private bool _showCountRules;
@@ -132,11 +152,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         PluginSettings settings,
         DecibelMeterService decibelService,
         CameraActivityService cameraService,
+        FeishuNotifier feishu,
         IServiceProvider serviceProvider)
     {
         _settings = settings;
         _decibelService = decibelService;
         _cameraService = cameraService;
+        _feishu = feishu;
         _serviceProvider = serviceProvider;
         _earthquakeReader = new EarthquakeReader(serviceProvider);
 
@@ -296,9 +318,87 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         Dispatcher.UIThread.Post(() =>
         {
             var decision = _counter.OnEvent(e.Level, IsInProtection());
-            if (decision != CountDecision.None)
-                UpdateNoisyDisplay();
+            if (decision == CountDecision.None) return;
+
+            UpdateNoisyDisplay();
+
+            // 会话累计与飞书推送都只跟真正记账的事件走：课间、上课初期保护期内不推
+            if (decision == CountDecision.CountNoisy) _sessionNoisy++;
+            else if (decision == CountDecision.CountNormal) _sessionNormal++;
+
+            TrySendNoiseNotification(e.Level, e.SmoothedRms);
         });
+    }
+
+    /// <summary>按开关与同级冷却策略推送噪音提醒（一般 / 吵闹）。</summary>
+    private void TrySendNoiseNotification(NoiseLevel level, double smoothedRms)
+    {
+        if (!_feishuSessionActive) return;
+        if (!_settings.EnableFeishuNotify || !_settings.FeishuNotifyNoise) return;
+        if (level == NoiseLevel.Normal && !_settings.FeishuNotifyNormal) return;
+        if (level != NoiseLevel.Noisy && level != NoiseLevel.Normal) return;
+
+        var now = DateTime.Now;
+        var cooldown = TimeSpan.FromSeconds(Math.Max(0, _settings.FeishuCooldownSeconds));
+        var last = level == NoiseLevel.Noisy ? _lastNoiseNotifyNoisy : _lastNoiseNotifyNormal;
+        if (cooldown > TimeSpan.Zero && now - last < cooldown) return;
+
+        if (level == NoiseLevel.Noisy) _lastNoiseNotifyNoisy = now;
+        else _lastNoiseNotifyNormal = now;
+
+        // 异步发送，不阻塞 UI 线程（卡片只承载文字信息）
+        var course = CurrentCourseNameSafe();
+        var normal = _counter.NormalCount;
+        var noisy = _counter.NoisyCount;
+        _ = SendQuietlyAsync(_feishu.SendNoiseAsync(level, smoothedRms, course, normal, noisy));
+    }
+
+    /// <summary>等待发送任务并吞掉异常：推送失败绝不能打断大屏时钟主流程。</summary>
+    private static async Task SendQuietlyAsync(Task<(bool Ok, string Message)> send)
+    {
+        try { await send.ConfigureAwait(false); }
+        catch { }
+    }
+
+    /// <summary>当前课程名：优先用已定位的课程名，否则直接向 ILessonsService 取。</summary>
+    private string CurrentCourseNameSafe()
+    {
+        if (!string.IsNullOrEmpty(_currentClassName)) return _currentClassName;
+        try { return _serviceProvider.GetRequiredService<ILessonsService>().CurrentSubject?.Name ?? ""; }
+        catch { return ""; }
+    }
+
+    /// <summary>开始一次大屏时钟会话：重置汇总并发送「进入」通知。</summary>
+    private void BeginFeishuSession()
+    {
+        _feishuSessionActive = true;
+        _feishuSessionStart = DateTime.Now;
+        _sessionNormal = 0;
+        _sessionNoisy = 0;
+        _lastNoiseNotifyNormal = DateTime.MinValue;
+        _lastNoiseNotifyNoisy = DateTime.MinValue;
+
+        if (_settings.EnableFeishuNotify && _settings.FeishuNotifyEnterExit)
+        {
+            var course = CurrentCourseNameSafe();
+            _ = SendQuietlyAsync(_feishu.SendEnterAsync(course));
+        }
+    }
+
+    /// <summary>结束会话：发送「退出」通知（附本节汇总）。幂等，重复调用只发一次。</summary>
+    private void EndFeishuSession()
+    {
+        if (!_feishuSessionActive) return;
+        _feishuSessionActive = false;
+
+        if (_settings.EnableFeishuNotify && _settings.FeishuNotifyEnterExit)
+        {
+            var duration = DateTime.Now - _feishuSessionStart;
+            var course = CurrentCourseNameSafe();
+            var normal = _sessionNormal;
+            var noisy = _sessionNoisy;
+            _ = SendQuietlyAsync(_feishu.SendExitAsync(course, duration, normal, noisy));
+        }
     }
 
     private bool IsInProtection()
@@ -404,6 +504,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(NoiseLevelTrackBrush));
         OnPropertyChanged(nameof(ProgressTrackBrush));
         OnPropertyChanged(nameof(WeatherBrush));   // 非降水天气的天气块用主题正文色，换主题要跟着变
+        OnPropertyChanged(nameof(ReminderTextBrush));   // 文本组件没自定义颜色时也跟着主题正文色
         RefreshSemanticColors();
     }
 
@@ -734,6 +835,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public string WeatherText => _reminderData.WeatherText ?? "";
     public string ReminderText => _reminderData.TextContent ?? "";
 
+    /// <summary>文本组件在大屏上的颜色：CI 里勾了「自定义字体颜色」就照搬，否则跟随主题正文色。</summary>
+    public IBrush ReminderTextBrush =>
+        _reminderData.TextColor is { } color ? new SolidColorBrush(color) : Chrome.TextBody;
+
+    /// <summary>文本组件在大屏上的字号（跟随 CI 主界面上的设置）。</summary>
+    public double ReminderTextFontSize => _reminderData.TextFontSize ?? 16;
+
     /// <summary>倒计时整行文本（如「高考   还有 30 天」）。</summary>
     public string CountdownText
     {
@@ -1023,7 +1131,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 spacing, threshold, ref used, ref rainMerged);
             TryMerge(used, countdown, countdown ? IconWidth(20) + 6 + TextWidth(CountdownText, 19) : 0,
                 spacing, threshold, ref used, ref countdownMerged);
-            TryMerge(used, text, text ? TextWidth(ReminderText, 16) : 0,
+            TryMerge(used, text, text ? TextWidth(ReminderText, ReminderTextFontSize) : 0,
                 spacing, threshold, ref used, ref textMerged);
         }
         else if (countdown)
@@ -1246,6 +1354,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>进入全屏时立即同步一次提醒数据（不等定时器）。</summary>
     private void RefreshRemindersNow()
     {
+        SyncTimePointSettings();
         RefreshComponents();
         RefreshWeather();
     }
@@ -1261,13 +1370,16 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
             string? title = null, remaining = null;
             var texts = new List<string>();
+            CiTextComponent? style = null;
             foreach (var line in profile.Lines)
                 foreach (var child in line.Children)
-                    CollectComponents(child, ref title, ref remaining, texts);
+                    CollectComponents(child, ref title, ref remaining, texts, ref style);
 
             _reminderData.CountdownTitle = title;
             _reminderData.CountdownRemaining = remaining;
             _reminderData.TextContent = texts.Count > 0 ? string.Join("\n", texts) : null;
+            _reminderData.TextColor = style?.Color;
+            _reminderData.TextFontSize = style?.FontSize;
             NotifyReminderChanged();
         }
         catch { /* CI 组件服务暂不可用时保持上次数据 */ }
@@ -1280,18 +1392,22 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </remarks>
     private void CollectComponents(
         ComponentSettings c,
-        ref string? title, ref string? remaining, List<string> texts)
+        ref string? title, ref string? remaining, List<string> texts, ref CiTextComponent? style)
     {
         if (c.Settings is not null)
         {
             var (t, r, txt) = CiComponentsReader.Extract(c.Settings, NowVirtual);
             if (!string.IsNullOrEmpty(t)) title ??= t;
             if (!string.IsNullOrEmpty(r)) remaining ??= r;
-            if (!string.IsNullOrEmpty(txt)) texts.Add(txt!);
+            if (txt is { } text)
+            {
+                texts.Add(text.Text);
+                style ??= text;   // 多个文本组件时取第一个的字体设置（顶栏就一行）
+            }
         }
         if (c.Children is not null)
             foreach (var child in c.Children)
-                CollectComponents(child, ref title, ref remaining, texts);
+                CollectComponents(child, ref title, ref remaining, texts, ref style);
     }
 
     /// <summary>从 CI Settings.json 缓存读取天气 + 预警（每 60 秒）。</summary>
@@ -1332,6 +1448,159 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             NotifyReminderChanged();
         }
         catch { }
+    }
+
+    // CI 主界面的设置是内存里的对象，改完马上变；Settings.json 要等 CI 自己存盘才更新。
+    // 只轮询文件会慢半拍（甚至一直读到旧值），所以优先反射读 CI 的 SettingsService。
+    private object? _ciSettings;
+    private readonly Dictionary<string, PropertyInfo?> _ciSettingProps = new();
+
+    private object? GetCiSettingsObject()
+    {
+        if (_ciSettings is not null) return _ciSettings;
+        try
+        {
+            var serviceType = Type.GetType("ClassIsland.Services.SettingsService, ClassIsland");
+            if (serviceType is not null && _serviceProvider.GetService(serviceType) is { } service)
+                _ciSettings = serviceType.GetProperty("Settings")?.GetValue(service);
+
+            // 设置服务没注册上时，退回从 CI 的 App 实例上取（同一份设置对象）
+            if (_ciSettings is null && Avalonia.Application.Current is { } app)
+                _ciSettings = app.GetType().GetProperty("Settings")?.GetValue(app);
+
+            return _ciSettings;
+        }
+        catch { return null; }
+    }
+
+    private T GetCiSetting<T>(object settings, string name, T fallback)
+    {
+        if (!_ciSettingProps.TryGetValue(name, out var prop))
+            _ciSettingProps[name] = prop = settings.GetType().GetProperty(name);
+        return prop?.GetValue(settings) is T value ? value : fallback;
+    }
+
+    /// <summary>
+    /// 同步 CI 的「时间点附加信息」设置（主界面 → 组件 → 课程表）：
+    /// 是否显示、显示哪种、倒计时开关与时长、「剩余时间」切秒级显示的阈值。
+    /// 与 CI 主界面同一个取法：先看当前时间点/课程/班级计划上挂了没有（附加设置），
+    /// 没有才用全局设置。改完最多 3 秒生效。
+    /// </summary>
+    private void SyncTimePointSettings()
+    {
+        // 附加设置（课程表组件里「要显示的附加信息」那个下拉框改的就是它）
+        if (GetAttachedLessonControlSettings() is { } attached)
+        {
+            try
+            {
+                _showTimePointExtra = attached.ShowExtraInfoOnTimePoint;
+                _timePointExtraType = Math.Clamp(attached.ExtraInfoType, 0, 5);
+                _countdownEnabled = attached.IsCountdownEnabled;
+                _countdownSeconds = Math.Clamp(attached.CountdownSeconds, 0, 3600);
+                _extraInfo4ShowSeconds = Math.Clamp(attached.ExtraInfo4ShowSecondsSeconds, 0, 3600);
+                _nonExactCountdown = attached.IsNonExactCountdownEnabled;
+                return;
+            }
+            catch { /* 读不到就用全局设置 */ }
+        }
+
+        // 全局设置（CI 内存里的设置对象）
+        if (GetCiSettingsObject() is { } settings)
+        {
+            try
+            {
+                _showTimePointExtra = GetCiSetting(settings, "ShowExtraInfoOnTimePoint", _showTimePointExtra);
+                _timePointExtraType = Math.Clamp(GetCiSetting(settings, "ExtraInfoType", _timePointExtraType), 0, 5);
+                _countdownEnabled = GetCiSetting(settings, "IsCountdownEnabled", _countdownEnabled);
+                _countdownSeconds = Math.Clamp(GetCiSetting(settings, "CountdownSeconds", _countdownSeconds), 0, 3600);
+                _extraInfo4ShowSeconds = Math.Clamp(GetCiSetting(settings, "ExtraInfo4ShowSecondsSeconds", _extraInfo4ShowSeconds), 0, 3600);
+                _nonExactCountdown = GetCiSetting(settings, "IsNonExactCountdownEnabled", _nonExactCountdown);
+                return;
+            }
+            catch { /* 字段对不上就退回读文件 */ }
+        }
+
+        ReadTimePointExtraSettings(Path.Combine(CiDataDir, "Settings.json"));
+    }
+
+    /// <summary>CI 课程表组件那套附加设置的 ID（CI 里写死的常量）。</summary>
+    private static readonly Guid LessonControlSettingsId = new("58e5b69a-764a-472b-bcf7-003b6a8c7fdf");
+
+    /// <summary>
+    /// 取 CI 当前时间点生效的课程表附加设置。
+    /// 走的是 CI 自己的 <c>GetAttachedSettingsByPriority</c>：课程 → 时间点 → 班级计划 → 课表，
+    /// 第一个启用的就是 CI 主界面正在用的那份；都没启用时返回 null（回落到全局设置）。
+    /// </summary>
+    private LessonControlAttachedSettings? GetAttachedLessonControlSettings()
+    {
+        try
+        {
+            if (_serviceProvider.GetService<ILessonsService>() is not { } lessons) return null;
+            var plan = lessons.CurrentClassPlan;
+            if (plan is null) return null;
+
+            // 这是 CI 接口里的静态默认实现，直接按类型名调
+            return IAttachedSettingsHostService.GetAttachedSettingsByPriority<LessonControlAttachedSettings>(
+                LessonControlSettingsId, lessons.CurrentSubject, lessons.CurrentTimeLayoutItem, plan, plan.TimeLayout);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 从 Settings.json 兜底读「时间点附加信息」设置（拿不到 CI 的设置服务时才走这里）。
+    /// </summary>
+    private void ReadTimePointExtraSettings(string settingsPath)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("ShowExtraInfoOnTimePoint", out var show))
+                _showTimePointExtra = show.GetBoolean();
+            if (root.TryGetProperty("ExtraInfoType", out var type))
+                _timePointExtraType = Math.Clamp(type.GetInt32(), 0, 5);
+            if (root.TryGetProperty("IsCountdownEnabled", out var countdown))
+                _countdownEnabled = countdown.GetBoolean();
+            if (root.TryGetProperty("CountdownSeconds", out var seconds))
+                _countdownSeconds = Math.Clamp(seconds.GetInt32(), 0, 3600);
+            if (root.TryGetProperty("ExtraInfo4ShowSecondsSeconds", out var extra4))
+                _extraInfo4ShowSeconds = Math.Clamp(extra4.GetInt32(), 0, 3600);
+            if (root.TryGetProperty("IsNonExactCountdownEnabled", out var nonExact))
+                _nonExactCountdown = nonExact.GetBoolean();
+        }
+        catch { /* 设置文件读不到就沿用上一次的 */ }
+    }
+
+    /// <summary>
+    /// 课程信息行末尾的「时间点附加信息」，格式与 CI 主界面完全一致（见 <see cref="CiTimePointFormat"/>）：
+    /// 默认「时间点持续时间」在 CI 里就是起止时刻，课程行本身已经有，所以不加；
+    /// 其余类型按 CI 的写法显示一个（如「4m/1h30m」「-1h25m」「6%」「-1:24:51」）。
+    /// 快下课时 CI 会把附加信息换成倒计时，这里照做。
+    /// </summary>
+    private string FormatTimePointExtra(TimeSlot slot, TimeSpan now)
+    {
+        if (!_showTimePointExtra) return "";
+
+        var total = (long)Math.Floor(Math.Max(0, (slot.End - slot.Start).TotalSeconds));
+        var elapsed = Math.Max(0, (long)(now - slot.Start).TotalSeconds);
+        var left = Math.Max(0, (long)(slot.End - now).TotalSeconds);
+
+        // 结束前的倒计时（CI 优先于附加信息）：精确到秒，或者开了模糊倒计时就按分钟取整
+        if (_countdownEnabled && left <= _countdownSeconds)
+        {
+            var countdown = _nonExactCountdown
+                ? CiTimePointFormat.Single(left, ceiling: true)
+                : CiTimePointFormat.Exact(left);
+            return "   -" + countdown;
+        }
+
+        // 「剩余时间」在最后 ExtraInfo4ShowSecondsSeconds 秒切成秒级倒计时
+        var type = _timePointExtraType;
+        if (type == 4 && left <= _extraInfo4ShowSeconds) type = 5;
+
+        var text = CiTimePointFormat.ExtraInfo(type, elapsed, left, total);
+        return string.IsNullOrEmpty(text) ? "" : "   " + text;
     }
 
     /// <summary>
@@ -1391,6 +1660,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(RainReminderTitle));
         OnPropertyChanged(nameof(ShowRainReminder));
         OnPropertyChanged(nameof(ReminderText));
+        OnPropertyChanged(nameof(ReminderTextBrush));
+        OnPropertyChanged(nameof(ReminderTextFontSize));
         OnPropertyChanged(nameof(CountdownText));
         OnPropertyChanged(nameof(ShowWeatherRow));
         OnPropertyChanged(nameof(ShowAlertsRow));
@@ -1484,6 +1755,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                     _cameraService.StopMonitoring();
                     UnsubscribeToClassEvents();
                     SetMainWindowVisible(true);
+                    EndFeishuSession();   // 用户直接关窗口也要发「退出」通知
                     _window = null;
                 };
                 // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
@@ -1536,6 +1808,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             _window.Show();
             IsWindowVisible = true;
             SetMainWindowVisible(false);
+            BeginFeishuSession();   // 进入大屏时钟：发「进入」通知
         });
     }
 
@@ -1664,6 +1937,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             UnsubscribeToClassEvents();
             IsWindowVisible = false;
             SetMainWindowVisible(true);
+            EndFeishuSession();   // 退出大屏时钟：发「退出」通知（附本节汇总）
         });
     }
 
@@ -1713,7 +1987,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
         // 提醒面板：组件配置每 3 秒同步一次（用户改 CI 组件自动跟随），天气缓存每 60 秒读一次
         _reminderTick++;
-        if (_reminderTick % 3 == 0) RefreshComponents();
+        if (_reminderTick % 3 == 0)
+        {
+            RefreshComponents();
+            // 时间点附加信息设置：改完最多 3 秒生效（读 CI 内存里的设置对象）
+            SyncTimePointSettings();
+        }
         if ((DateTime.Now - _lastWeatherRead).TotalSeconds >= 60)
         {
             _lastWeatherRead = DateTime.Now;
@@ -1845,8 +2124,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
         if (current != null && current.IsClass && !string.IsNullOrEmpty(current.SubjectName))
         {
-            // 上课中：显示当前课程（含实际打铃时间，如有偏移）
-            CourseInfoText = $"当前课程为 {current.SubjectName}   {current.Start:hh\\:mm} — {current.End:hh\\:mm}{FormatBellTime(current)}";
+            // 上课中：显示当前课程（含实际打铃时间，如有偏移）+ 与 CI 一致的时间点附加信息
+            CourseInfoText = $"当前课程为 {current.SubjectName}   {current.Start:hh\\:mm} — {current.End:hh\\:mm}{FormatBellTime(current)}{FormatTimePointExtra(current, time)}";
         }
         else if (_isInBreak && nextClass != null)
         {

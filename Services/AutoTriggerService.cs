@@ -63,6 +63,11 @@ public class AutoTriggerService : BackgroundService
         _lessonsService.OnAfterSchool += OnAfterSchool;
         _lessonsService.CurrentTimeStateChanged += OnClassOrStateChanged;
 
+        // 再挂一层心跳：临时课表 / 手动换课表这类「上课中途把当前课程换掉」的操作不会发 OnClass，
+        // CurrentTimeStateChanged 也不一定跟着响，光靠上面两个事件会漏。
+        // DoCheck 只在「状态或课程真的变了」时才动手，所以每秒跑一次也不会重复开关窗口。
+        _lessonsService.PostMainTimerTicked += OnClassOrStateChanged;
+
         // 初始检查
         DoCheck();
 
@@ -79,6 +84,7 @@ public class AutoTriggerService : BackgroundService
             _lessonsService.OnClass -= OnClassOrStateChanged;
             _lessonsService.OnAfterSchool -= OnAfterSchool;
             _lessonsService.CurrentTimeStateChanged -= OnClassOrStateChanged;
+            _lessonsService.PostMainTimerTicked -= OnClassOrStateChanged;
         }
     }
 
@@ -92,26 +98,35 @@ public class AutoTriggerService : BackgroundService
         _viewModel.Hide();
     }
 
+    // 上一次看到的「时间状态 + 课程名」。心跳每秒都会进来，靠它只处理真正变化的那一次。
+    private TimeState _lastState;
+    private string? _lastSubject;
+    private bool _hasSnapshot;
+
     private void DoCheck()
     {
         if (_lessonsService == null) return;
 
         var currentState = _lessonsService.CurrentState;
-        var currentSubject = _lessonsService.CurrentSubject;
+        string? subjectName = _lessonsService.CurrentSubject?.Name;
 
-        if (currentState == TimeState.OnClass)
+        // 状态和课程都没变就什么都不做：窗口是用户手动打开的，不能每秒都被这里重新判一遍关掉。
+        if (_hasSnapshot && currentState == _lastState && subjectName == _lastSubject) return;
+        _hasSnapshot = true;
+        _lastState = currentState;
+        _lastSubject = subjectName;
+
+        if (currentState != TimeState.OnClass) return;
+
+        if (_settings.IsTargetCourse(subjectName))
         {
-            string? subjectName = currentSubject?.Name;
-            if (_settings.IsTargetCourse(subjectName))
-            {
-                // 进入目标课程 → 显示时钟（Show 幂等，已显示时无操作）
-                _viewModel.Show();
-            }
-            else if (_viewModel.IsWindowVisible)
-            {
-                // 进入非目标课程且时钟开着 → 关闭
-                _viewModel.Hide();
-            }
+            // 进入目标课程 → 显示时钟（Show 幂等，已显示时无操作）
+            _viewModel.Show();
+        }
+        else if (_viewModel.IsWindowVisible)
+        {
+            // 进入非目标课程且时钟开着 → 关闭
+            _viewModel.Hide();
         }
     }
 

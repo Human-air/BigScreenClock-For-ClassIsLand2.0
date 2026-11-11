@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Timers;
 using System.Windows.Input;
@@ -35,9 +36,74 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public ObservableCollection<CourseSelectionItem> SelectedCourses { get; } = new();
 
-    public SettingsPage()
+    /// <summary>
+    /// 右栏「更新说明」：打开设置页时从 GitHub 拉。拉不到就整块不显示（见 <see cref="ReleaseNotesCatalog"/>）。
+    /// 只展开当前运行的这一版；往期版本连版本号一起收在「往期版本」里，每次打开都默认折叠。
+    /// </summary>
+    public ReleaseNote? CurrentRelease { get; private set; }
+
+    public ObservableCollection<ReleaseNote> PastReleases { get; } = new();
+
+    public bool HasReleaseNotes => CurrentRelease is not null;
+
+    public bool HasPastReleases => PastReleases.Count > 0;
+
+    public string PastReleasesHeader => $"往期版本（{PastReleases.Count}）";
+
+    /// <summary>
+    /// 打开设置页时在后台拉 GitHub 上的更新说明。拉不到（没网 / 被墙 / 限流）就不显示整块内容，
+    /// 不用内嵌快照兜底——插件市场本身就在 GitHub 上，连不上 GitHub 的机器也装不了这个插件。
+    /// </summary>
+    private async Task RefreshReleaseNotesAsync()
+    {
+        // 拉到这一版的说明就落盘，以后重开设置页、重启程序都不再请求；没拉到则每次启动试一次
+        var cachePath = Plugin.ConfigFolder is { } folder
+            ? Path.Combine(folder, "release-notes.json")
+            : null;
+        var notes = await ReleaseNotesCatalog.FetchFromGitHubAsync(cachePath, PluginVersion.Current);
+        if (notes is null || notes.Count == 0) return;
+
+        var current = ReleaseNotesCatalog.FindCurrent(notes, PluginVersion.Current);
+        if (current is null) return;
+
+        CurrentRelease = current;
+
+        PastReleases.Clear();
+        foreach (var note in notes)
+            if (!ReferenceEquals(note, current))
+                PastReleases.Add(note);
+
+        OnPropertyChanged(nameof(CurrentRelease));
+        OnPropertyChanged(nameof(HasReleaseNotes));
+        OnPropertyChanged(nameof(HasPastReleases));
+        OnPropertyChanged(nameof(PastReleasesHeader));
+    }
+
+    /// <summary>「在 GitHub 查看」：用系统默认浏览器打开该版本的发布页。</summary>
+    private void ReleaseLink_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string url } || url.Length == 0) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 嵌入模式：这份页面被塞进大屏里的快速设置面板，不是 CI 设置窗口里的那一页。
+    /// 右栏预览要藏掉（大屏就在后面，看真的比看缩略图强），也不该在这里弹信、拉更新说明。
+    /// </summary>
+    public bool Embedded { get; }
+
+    public SettingsPage() : this(embedded: false) { }
+
+    /// <param name="embedded">true = 大屏里的快速设置面板。</param>
+    public SettingsPage(bool embedded)
     {
         InitializeComponent();
+        Embedded = embedded;
         _settings = Plugin.Settings!;
         _earthquakePluginAvailable = CheckEarthquakePlugin();
         try { _clockViewModel = Plugin.ServiceProvider?.GetService<FullScreenClockViewModel>(); } catch { }
@@ -49,9 +115,16 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             HookPositionLimits();
             HookLayoutSliders();
             SubscribeSharedEvents();
-            ShowLetterIfNeeded();
+            if (!Embedded)
+            {
+                ShowLetterIfNeeded();
+                PastReleasesExpander.IsExpanded = false;   // 每次打开都从一个默认折叠的状态开始
+                _ = RefreshReleaseNotesAsync();
+            }
         };
         Unloaded += (_, _) => { UnhookPositionLimits(); StopLayoutAdjust(); UnsubscribeSharedEvents(); };
+
+        if (Embedded) ApplyEmbeddedLayout();
 
         DataContext = this;
 
@@ -65,7 +138,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         LoadAllCourseNames();
         RestoreSelectedCourses();
         LoadCameraDevices();
-        StartPreviewSync();
+        if (!Embedded) StartPreviewSync();
 
         // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
         ActualThemeVariantChanged += (_, _) => ApplyThemeFromSettings();
@@ -76,6 +149,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// 勾了「不再显示」就再也不弹（见 <see cref="LetterWindow"/>）。
     /// 延到版面排完之后再弹，免得页面切过来时和弹窗抢焦点。
     /// </summary>
+    /// <summary>嵌入大屏时把右栏整列收掉：预览框、更新说明在这里没意义，也省一次布局。</summary>
+    private void ApplyEmbeddedLayout()
+    {
+        RootGrid.ColumnDefinitions[1].Width = new GridLength(0);
+        PreviewPanel.IsVisible = false;
+    }
+
     private void ShowLetterIfNeeded()
     {
         if (!LetterWindow.ShouldShow()) return;
@@ -242,6 +322,45 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     /// <summary>背景开关打开后，外观里那项「主题」就不起作用了，置灰。</summary>
     public bool IsAppearanceThemeEnabled => !_settings.BackgroundEnabled;
+
+    /// <summary>
+    /// 显示区域：0 = 全屏，1 = 左半屏，2 = 右半屏。
+    /// 教室推拉黑板会从一侧遮掉一半屏幕，画面收进看得见的那一条里。
+    /// </summary>
+    public int DisplayRegionIndex
+    {
+        get => _settings.DisplayRegion;
+        set
+        {
+            if (_settings.DisplayRegion == value) return;
+            BeginLayoutAdjust();   // 换区域要整面重排，先把玻璃冻结一下
+            _settings.DisplayRegion = value;
+            OnPropertyChanged(nameof(DisplayRegionIndex));
+            OnPropertyChanged(nameof(IsHalfScreen));
+            OnPropertyChanged(nameof(IsFullScreen));
+        }
+    }
+
+    /// <summary>选了半屏才露出「可见宽度」那根滑块、并把背景填充方式锁成铺满。</summary>
+    public bool IsHalfScreen => _settings.DisplayRegion != 0;
+
+    /// <summary>全屏时才允许改背景填充方式（半屏固定铺满整屏）。</summary>
+    public bool IsFullScreen => _settings.DisplayRegion == 0;
+
+    /// <summary>可见区域宽度占整屏的百分比（30~100）。</summary>
+    public double VisibleWidthPercent
+    {
+        get => _settings.VisibleWidthPercent;
+        set
+        {
+            BeginLayoutAdjust();
+            _settings.VisibleWidthPercent = value;
+            OnPropertyChanged(nameof(VisibleWidthPercent));
+            OnPropertyChanged(nameof(VisibleWidthPercentText));
+        }
+    }
+
+    public string VisibleWidthPercentText => $"{_settings.VisibleWidthPercent:0}%";
 
     /// <summary>
     /// 背景总开关：关着一整组背景/玻璃设置都不生效，外观与没有这套功能时逐像素一致。
@@ -613,7 +732,11 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 给「改布局」的那几根滑块接上真按下/松开。
+    /// 给「改布局」和「改玻璃」的那几根滑块接上真按下/松开。
+    ///
+    /// 玻璃那几根（明暗 / 透明度 / 颗粒度 / 折射 / 雾面）也在这里：每动一格预览就要按新参数重画整屏，
+    /// 而预览是整屏大小塞在一个 Viewbox 里，高质量缩放每帧都会给 Skia 造一大批临时面。
+    /// 拖起来不冻结的话，几秒钟就能把内存顶到 CI 看门狗那条线（学校开会拖滑块被强杀就是这条）。
     ///
     /// 必须走**隧道**且 <c>handledEventsToo</c>：Slider 模板里的 Thumb 会把 PointerPressed 标成
     /// Handled，冒泡那一遍根本收不到；而且事件源是 Thumb 不是 Slider，按在滑块空白处更是什么都不发。
@@ -626,6 +749,9 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         {
             ClockFontSlider, CourseInfoFontSlider, CountFontSlider,
             ClockPositionSlider, VolumePositionSlider, CameraAlertFontSlider,
+            VisibleWidthSlider,
+            BackgroundDimSlider, GlassOpacitySlider, GlassBlurRadiusSlider,
+            GlassRefractionSlider, GlassFrostSlider,
         });
 
         foreach (var slider in _layoutSliders)
@@ -1439,6 +1565,170 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public string ClockPositionPercentText => $"{_settings.ClockPositionPercent:0}%";
 
     public string VolumePositionPercentText => $"{_settings.VolumePositionPercent:0}%";
+
+    // ===== 飞书推送 =====
+
+    public bool EnableFeishuNotify
+    {
+        get => _settings.EnableFeishuNotify;
+        set
+        {
+            _settings.EnableFeishuNotify = value;
+            OnPropertyChanged(nameof(EnableFeishuNotify));
+        }
+    }
+
+    public string FeishuWebhookUrl
+    {
+        get => _settings.FeishuWebhookUrl;
+        set { _settings.FeishuWebhookUrl = value ?? ""; OnPropertyChanged(nameof(FeishuWebhookUrl)); }
+    }
+
+    public string FeishuSecret
+    {
+        get => _settings.FeishuSecret;
+        set { _settings.FeishuSecret = value ?? ""; OnPropertyChanged(nameof(FeishuSecret)); }
+    }
+
+    public string DeviceName
+    {
+        get => _settings.DeviceName;
+        set { _settings.DeviceName = value ?? ""; OnPropertyChanged(nameof(DeviceName)); }
+    }
+
+    public double FeishuCooldownSeconds
+    {
+        get => _settings.FeishuCooldownSeconds;
+        set
+        {
+            _settings.FeishuCooldownSeconds = (int)value;
+            OnPropertyChanged(nameof(FeishuCooldownSeconds));
+            OnPropertyChanged(nameof(FeishuCooldownSecondsText));
+        }
+    }
+
+    public string FeishuCooldownSecondsText
+        => _settings.FeishuCooldownSeconds <= 0 ? "不限制" : $"{_settings.FeishuCooldownSeconds} 秒";
+
+    public double FeishuTimeoutSeconds
+    {
+        get => _settings.FeishuTimeoutSeconds;
+        set
+        {
+            _settings.FeishuTimeoutSeconds = (int)value;
+            OnPropertyChanged(nameof(FeishuTimeoutSeconds));
+            OnPropertyChanged(nameof(FeishuTimeoutSecondsText));
+        }
+    }
+
+    public string FeishuTimeoutSecondsText => $"{_settings.FeishuTimeoutSeconds} 秒";
+
+    public bool FeishuDirectConnection
+    {
+        get => _settings.FeishuDirectConnection;
+        set
+        {
+            _settings.FeishuDirectConnection = value;
+            OnPropertyChanged(nameof(FeishuDirectConnection));
+        }
+    }
+
+    public bool FeishuNotifyNoise
+    {
+        get => _settings.FeishuNotifyNoise;
+        set
+        {
+            _settings.FeishuNotifyNoise = value;
+            OnPropertyChanged(nameof(FeishuNotifyNoise));
+            OnPropertyChanged(nameof(FeishuNotifyNormal));
+        }
+    }
+
+    public bool FeishuNotifyNormal
+    {
+        get => _settings.FeishuNotifyNormal;
+        set
+        {
+            _settings.FeishuNotifyNormal = value;
+            OnPropertyChanged(nameof(FeishuNotifyNormal));
+        }
+    }
+
+    public bool FeishuNotifyEnterExit
+    {
+        get => _settings.FeishuNotifyEnterExit;
+        set
+        {
+            _settings.FeishuNotifyEnterExit = value;
+            OnPropertyChanged(nameof(FeishuNotifyEnterExit));
+        }
+    }
+
+    private string _feishuTestStatus = "";
+    public string FeishuTestStatus
+    {
+        get => _feishuTestStatus;
+        set { _feishuTestStatus = value; OnPropertyChanged(nameof(FeishuTestStatus)); }
+    }
+
+    /// <summary>测试发送：忽略启用开关，直接校验 Webhook 是否可用。</summary>
+    public async void TestFeishu_Click(object? sender, RoutedEventArgs e)
+    {
+        var notifier = Plugin.ServiceProvider?.GetService<FeishuNotifier>();
+        if (notifier is null)
+        {
+            FeishuTestStatus = "❌ 推送服务不可用";
+            return;
+        }
+
+        // 立即写盘，保证测试用的是界面上刚填的地址 / 密钥
+        try { Plugin.SaveSettings(); } catch { }
+
+        FeishuTestStatus = "发送中…";
+        var (ok, msg) = await notifier.SendTestAsync();
+        FeishuTestStatus = ok ? "✅ 发送成功，请查看飞书群" : $"❌ 发送失败：{msg}";
+    }
+
+    // ===== 打小报告 =====
+
+    public bool EnableSnitch
+    {
+        get => _settings.EnableSnitch;
+        set { _settings.EnableSnitch = value; OnPropertyChanged(nameof(EnableSnitch)); }
+    }
+
+    public string SnitchHotkey
+    {
+        get => _settings.SnitchHotkey;
+        set { _settings.SnitchHotkey = value ?? ""; OnPropertyChanged(nameof(SnitchHotkey)); }
+    }
+
+    private string _snitchTestStatus = "";
+    public string SnitchTestStatus
+    {
+        get => _snitchTestStatus;
+        set { _snitchTestStatus = value; OnPropertyChanged(nameof(SnitchTestStatus)); }
+    }
+
+    public async void TestSnitch_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var service = Plugin.ServiceProvider?.GetService<SnitchHotkeyService>();
+        if (service is null)
+        {
+            SnitchTestStatus = "❌ 热键服务不可用";
+            return;
+        }
+
+        if (!SnitchHotkeyService.TryParseHotkey(_settings.SnitchHotkey, out _, out _))
+        {
+            SnitchTestStatus = $"❌ 快捷键格式不正确：{_settings.SnitchHotkey}（示例 Ctrl+Alt+R）";
+            return;
+        }
+
+        try { Plugin.SaveSettings(); } catch { }
+        SnitchTestStatus = "执行中：发送报告卡片…";
+        SnitchTestStatus = await service.TriggerAsync(ignoreCooldown: true);
+    }
 
     public new event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged(string propertyName)

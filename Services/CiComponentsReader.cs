@@ -1,6 +1,10 @@
 using System.Reflection;
+using Avalonia.Media;
 
 namespace EveningSelfStudyClock.Services;
+
+/// <summary>CI 文本组件的内容 + 它自己的字体设置（颜色只在勾了「自定义字体颜色」时有效）。</summary>
+public readonly record struct CiTextComponent(string Text, Color? Color, int FontSize);
 
 /// <summary>
 /// 从 CI 主界面组件的设置对象中提取倒计时/文本框数据。
@@ -19,7 +23,7 @@ public static class CiComponentsReader
     /// 从单个组件设置对象提取数据。
     /// </summary>
     /// <returns>(倒计时标题, 倒计时剩余文本, 文本框内容)；该组件不是倒计时/文本框时为 (null, null, null)。</returns>
-    public static (string? Title, string? Remaining, string? Text) Extract(object? settings, DateTime now)
+    public static (string? Title, string? Remaining, CiTextComponent? Text) Extract(object? settings, DateTime now)
     {
         if (settings is null) return (null, null, null);
         var type = settings.GetType();
@@ -36,7 +40,13 @@ public static class CiComponentsReader
         if (type.Name == TextSettingsTypeName)
         {
             var text = GetProp<string>(settings, "TextContent");
-            return (null, null, string.IsNullOrWhiteSpace(text) ? null : text);
+            if (string.IsNullOrWhiteSpace(text)) return (null, null, null);
+
+            // 颜色/字号跟着 CI 主界面上的文本组件走：观众会在这里调好颜色，大屏不该还是白的
+            var fontSize = GetProp<int?>(settings, "FontSize") ?? 16;
+            var custom = GetProp<bool?>(settings, "UseCustomFontColor") ?? false;
+            var color = custom ? GetProp<Color?>(settings, "FontColor") : null;
+            return (null, null, new CiTextComponent(text, color, Math.Clamp(fontSize, 8, 200)));
         }
 
         return (null, null, null);

@@ -17,21 +17,32 @@
     <!-- 大屏时钟的全部内容。独立成一个 UserControl 是为了让设置页的预览能直接放一份同样的布局：
          预览不再是照着重画一遍的小样，而是这份布局本身等比缩到预览框里，
          字号、颜色、位置必然和大屏一致（不用两处同步改）。 -->
-    <Grid>
+    <!-- 透明底色：半屏时露出来的那一半也得能接住点击（三击黑屏区退出半屏），
+         默认的空 Grid 不参与命中测试，点了什么也收不到。 -->
+    <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <!-- 底部全宽课程进度带 -->
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 背景层：自定义背景图 + 明暗遮罩 + 各组件底下的玻璃。
-             压在全部内容下面、跨越两行，不参与布局（组件的 Margin / 实测尺寸一个都没动，
-             ApplyBodyPositions 那套定位与写回不受影响）。要垫玻璃的组件在 code-behind 里登记。 -->
-        <views:BackdropLayer x:Name="Backdrop" Grid.Row="0" Grid.RowSpan="2"/>
+        <!-- 可见区域：全屏时铺满整窗；左/右半屏时只占一条（宽度由设置里的百分比定）。
+             窗口本身仍然全屏——Esc/F11、防休眠、焦点都是窗口的事，画面只是收在能看见的那一条里。
+             背景层、内容、底部进度带都放进这一层，玻璃也跟着只烘这一条，比铺满整屏省内存。 -->
+        <Grid x:Name="Shell">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <!-- 主内容（原有布局，Margins 保持不变） -->
-        <Grid Grid.Row="0" RowDefinitions="Auto,*,Auto"
-              Margin="40,30,40,18">
+            <!-- 背景层：自定义背景图 + 明暗遮罩 + 各组件底下的玻璃。
+                 压在全部内容下面、跨越两行，不参与布局（组件的 Margin / 实测尺寸一个都没动，
+                 ApplyBodyPositions 那套定位与写回不受影响）。要垫玻璃的组件在 code-behind 里登记。 -->
+            <views:BackdropLayer x:Name="Backdrop" Grid.Row="0" Grid.RowSpan="2"/>
+
+            <!-- 主内容（原有布局，Margins 保持不变） -->
+            <Grid x:Name="MainContent" Grid.Row="0" RowDefinitions="Auto,*,Auto"
+                  Margin="40,30,40,18">
 
             <!-- 顶部第一行：主位提醒块（天气 + 可并入的降雨/倒计时/文本，颜文字在各块正下方）+ 预警详情弹幕（自适应）+ 日期。
                  合并规则（VM 的 UpdateReminderMerge）：
@@ -39,10 +50,11 @@
                  - 与天气合并优先级 降雨提醒 > 倒计时 > 文本，总宽 ≤ 屏幕 1/3 才并入，放不下该项留提醒面板；
                  - 无天气时主位由倒计时顶替，再无就文本框；
                  - 天气预警始终单开一行/多行（面板），不在顶部行。 -->
-            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
+            <Grid x:Name="HeaderGrid" Grid.Row="0" RowDefinitions="Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto">
                 <!-- Spacing 与 VM 里 UpdateReminderMerge 的 spacing 常量必须一致：
                      玻璃底比文字左右各多占 12，间距不够的话相邻两块玻璃会贴在一起连成一条 -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="36" VerticalAlignment="Center">
+                <StackPanel x:Name="HeaderLeft" Grid.Column="0" Orientation="Horizontal" Spacing="36" VerticalAlignment="Center">
                     <!-- 天气块（含正下方颜文字）：当前天气是雨雪时整块转成降水色（默认蓝） -->
                     <StackPanel x:Name="WeatherBlock" Spacing="2" IsVisible="{Binding ShowWeatherInFirstRow}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -78,8 +90,9 @@
                     </StackPanel>
                     <!-- 文本块（并入第一行时；无天气且无倒计时时作主位） -->
                     <StackPanel x:Name="ReminderTextBlock" Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowTextMergedInFirstRow}">
-                        <TextBlock Text="{Binding ReminderText}" FontSize="16" FontWeight="Bold"
-                                   Foreground="{Binding Chrome.TextBody}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                        <!-- 颜色 / 字号跟着 CI 主界面上的文本组件走（没自定义颜色时用主题正文色） -->
+                        <TextBlock Text="{Binding ReminderText}" FontSize="{Binding ReminderTextFontSize}" FontWeight="Bold"
+                                   Foreground="{Binding ReminderTextBrush}" VerticalAlignment="Center" TextWrapping="NoWrap"/>
                     </StackPanel>
                 </StackPanel>
                 <ScrollViewer x:Name="AlertDetailScroll" Grid.Column="1"
@@ -104,16 +117,21 @@
                  见 ClockSurface.ApplyBodyPositions()。 -->
             <Grid Grid.Row="1" x:Name="BodyArea">
                 <!-- 时间：字体跟随 CI 主界面字体，数字用表格宽度（tnum）免得秒数跳动时整行抖 -->
-                <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
-                           FontSize="{Binding ClockFontSize}"
-                           FontWeight="Bold"
-                           Foreground="{Binding FontColor}"
-                           FontFamily="{Binding ClockFontFamily}"
-                           FontFeatures="{Binding ClockFontFeatures}"
-                           HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                <!-- 外面套一层 Viewbox（只缩不放大）：半屏 / 窄区域里时钟比可见宽度还宽时自动缩到放得下；
+                     全屏时就是自然大小，一个像素都不缩。 -->
+                <Viewbox x:Name="ClockBox" HorizontalAlignment="Center" VerticalAlignment="Top"
+                         Stretch="Uniform" StretchDirection="DownOnly">
+                    <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
+                               FontSize="{Binding ClockFontSize}"
+                               FontWeight="Bold"
+                               Foreground="{Binding FontColor}"
+                               FontFamily="{Binding ClockFontFamily}"
+                               FontFeatures="{Binding ClockFontFeatures}"
+                               HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                </Viewbox>
 
                 <!-- 教室音量：无背景「横向轨道 + 分段刻度」仪表盘式条（宽度跟随时间字体） -->
-                <StackPanel x:Name="VolumePanel" Spacing="8" Width="{Binding #ClockText.Bounds.Width, FallbackValue=640}"
+                <StackPanel x:Name="VolumePanel" Spacing="8" Width="{Binding #ClockBox.Bounds.Width, FallbackValue=640}"
                             HorizontalAlignment="Center" VerticalAlignment="Top"
                             IsVisible="{Binding ShowDecibelMeter}">
                     <!-- 标题行：左「教室音量」，右当前档位文字（档位色；不配强度图标——
@@ -154,7 +172,10 @@
                                 <ControlTemplate TargetType="ProgressBar">
                                     <Grid>
                                         <Border x:Name="PART_Track" Background="{TemplateBinding Background}"/>
-                                        <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}"/>
+                                        <!-- 必须靠左：ProgressBar 会按百分比给这块写死 Width，而默认 Stretch 的
+                                             Border 在「定宽 + 拉伸」下会被居中，填充条就整体偏右半格（到 40 时看着像 50）。 -->
+                                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left"
+                                                Background="{TemplateBinding Foreground}"/>
                                     </Grid>
                                 </ControlTemplate>
                             </ProgressBar.Template>
@@ -186,7 +207,8 @@
                  中间列 Auto、左右两列都是 * —— 两边星列平分剩余空间，课程信息才落在屏幕正中，
                  否则会被更宽的左边计数推歪。两边星列放不下各自那份内容时，由 Viewbox 等比缩字
                  （只缩不放大），既不越界压到邻居上，也不会被列宽裁掉。 -->
-            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,*" Margin="0,6,0,0">
+            <Grid x:Name="FooterGrid" Grid.Row="2" RowDefinitions="Auto,Auto"
+                  ColumnDefinitions="*,Auto,*" Margin="0,6,0,0">
                 <!-- 吵闹计数（分段着色：一般=琥珀，吵闹=红）+ 实时「正在记录」提示。
                      鼠标悬停上方时在计数区上方弹出记录规则 -->
                 <Border Grid.Column="0" VerticalAlignment="Center" ClipToBounds="True"
@@ -267,6 +289,23 @@
 
                 <StackPanel x:Name="ButtonBar" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
                             HorizontalAlignment="Right">
+                    <!-- 快速设置：不用退出大屏、也不用切回 CI 设置窗口，就在这里把这一面墙调明白。
+                         只做图标（这里本来就挤，文字交给悬停提示） -->
+                    <Button x:Name="SettingsButton"
+                            FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
+                            Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
+                            CornerRadius="6" Padding="10,6"
+                            Cursor="Hand"
+                            ToolTip.Tip="设置"
+                            Click="SettingsButton_Click">
+                        <TextBlock Classes="icon" Text="{ci:LI Settings}" FontSize="16"
+                                   Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
+                        <Button.Styles>
+                            <Style Selector="Button:pointerover">
+                                <Setter Property="Background" Value="{Binding Chrome.ButtonHover}"/>
+                            </Style>
+                        </Button.Styles>
+                    </Button>
                     <Button x:Name="MinimizeButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
@@ -334,7 +373,8 @@
                                        IsVisible="{Binding HasCountdownSubtitle}"/>
                         </StackPanel>
                         <!-- 文本（未并入第一行才在面板显示；跟随 CI 主界面文本组件） -->
-                        <TextBlock Text="{Binding ReminderText}" FontSize="16" Foreground="{Binding Chrome.TextBody}"
+                        <TextBlock Text="{Binding ReminderText}" FontSize="{Binding ReminderTextFontSize}"
+                                   Foreground="{Binding ReminderTextBrush}"
                                    TextWrapping="Wrap" IsVisible="{Binding ShowTextPanel}"/>
                         <!-- 预警（排最下，区级统一发布按等级着色；点击标题右侧「>」在标题同一行右侧横向展开详情全文） -->
                         <StackPanel Spacing="3" IsVisible="{Binding ShowAlertsRow}">
@@ -384,11 +424,41 @@
                 <ControlTemplate TargetType="ProgressBar">
                     <Grid>
                         <Border x:Name="PART_Track" Background="{TemplateBinding Background}"/>
-                        <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}"/>
+                        <!-- 同音量条：不定 Left 的话，定宽 + 拉伸会被居中，进度带整体偏右半格 -->
+                        <Border x:Name="PART_Indicator" HorizontalAlignment="Left"
+                                Background="{TemplateBinding Foreground}"/>
                     </Grid>
                 </ControlTemplate>
             </ProgressBar.Template>
         </ProgressBar>
+        </Grid>
+
+        <!-- 快速设置：从可见区域一侧贴边滑出的一块面板，内容就是 CI 设置页左栏那一份，
+             不另做一套 UI（同一个 SettingsPage，Embedded 模式藏掉右栏预览）。
+             面板只占「顶栏以下、按钮行以上」那一段，不压日期也不盖按钮（位置在 code-behind 里算）。
+             背后垫一层整屏磨砂，把面板和大屏分开；拖动设置项时磨砂撤掉、整块淡到几乎透明，
+             好看清后面正在改的那块大屏。
+             放在地震提醒下面：预警弹出来时仍然压过设置面板。 -->
+        <Grid x:Name="QuickSettingsOverlay" Grid.Row="0" Grid.RowSpan="2"
+              IsVisible="False"
+              PointerPressed="QuickSettingsOverlay_PointerPressed">
+            <!-- 淡压一层：实时模糊之外再拉开一点对比，没有模糊图时它就是唯一的分隔 -->
+            <Border x:Name="QuickSettingsVeil" Background="#33000000"/>
+            <!-- 面板底不用 CI 的 CardBackgroundFillColor：深色主题下那个只有 5% 白，
+                 压在一张亮背景图上等于没有，白字根本读不出来。这里定死实底深色，
+                 里面再套一层深色主题作用域，文字与控件都按浅色渲染，任何背景图上都清楚。 -->
+            <Border x:Name="QuickSettingsCard"
+                    HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                    Width="440" Margin="0,20,20,20"
+                    Background="#F21A1A22"
+                    BorderBrush="#33FFFFFF"
+                    BorderThickness="1" CornerRadius="12"
+                    ClipToBounds="True">
+                <ThemeVariantScope RequestedThemeVariant="Dark">
+                    <Grid x:Name="QuickSettingsHost"/>
+                </ThemeVariantScope>
+            </Border>
+        </Grid>
 
         <!-- 地震提醒：整屏正中弹出（内容读自「地震预警」插件，见 EarthquakeReader）。
              这一层压在全部内容上面、跨两行、不吃鼠标事件。
