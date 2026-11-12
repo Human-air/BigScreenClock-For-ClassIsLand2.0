@@ -1,0 +1,60 @@
+using System.Reflection;
+using Avalonia;
+using Avalonia.Threading;
+using EveningSelfStudyClock.Models;
+using EveningSelfStudyClock.Services;
+using NAudio.Wave;
+
+int checks = 0;
+void Check(bool condition, string message) { if (!condition) throw new Exception(message); checks++; }
+var size = new PixelSize(1920,1080);
+BackdropPreloadCache.Clear();
+Check(BackdropPreloadCache.TryBeginBuild(out var generation), "initial build");
+Check(!BackdropPreloadCache.TryBeginBuild(out _), "only one build");
+BackdropPreloadCache.Clear();
+var stale = new BackdropImageSet();
+Check(!BackdropPreloadCache.Publish(stale, generation), "settings change must reject stale image");
+Check(stale.Disposed == 0, "rejected image remains owned by caller");
+stale.Dispose();
+Check(!BackdropPreloadCache.TryBeginBuild(out _), "clear must not allow overlapping builds");
+BackdropPreloadCache.EndBuild();
+Check(BackdropPreloadCache.TryBeginBuild(out generation), "build slot reusable");
+var image = new BackdropImageSet();
+Check(BackdropPreloadCache.Publish(image, generation), "current image accepted");
+BackdropPreloadCache.EndBuild();
+Check(ReferenceEquals(BackdropPreloadCache.TryTake("image",size,0,0,false),image), "take transfers ownership");
+BackdropPreloadCache.Clear();
+Check(image.Disposed == 0, "clear must not dispose transferred image");
+image.Dispose();
+Check(BackdropPreloadCache.TryBeginBuild(out generation), "new build");
+var cached = new BackdropImageSet();
+BackdropPreloadCache.Publish(cached,generation);
+BackdropPreloadCache.EndBuild();
+BackdropPreloadCache.Clear();
+Check(cached.Disposed == 1, "cache clears resources exactly once");
+
+object? Field(object obj,string name) => obj.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(obj);
+using var meter = new DecibelMeterService(new PluginSettings());
+meter.StartMonitoring();
+var oldDevice = (WaveInEvent)Field(meter,"_waveIn")!;
+oldDevice.RaiseStopped(); // queues an old device's UI update
+meter.StopMonitoring();
+meter.StartMonitoring();
+Dispatcher.UIThread.Drain();
+Check(meter.IsMonitoring, "late stopped event must not mark replacement device stopped");
+// Queue a watchdog restart while UI is busy, then stop before processing it.
+var timer = (System.Timers.Timer)Field(meter,"_watchdogTimer")!;
+var handler = (System.Timers.ElapsedEventHandler)typeof(System.Timers.Timer).GetField("_onIntervalElapsed",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(timer)!;
+typeof(DecibelMeterService).GetField("_lastDataReceived",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(meter,DateTime.MinValue);
+handler(timer,null!);
+Check(!Dispatcher.UIThread.Queue.IsEmpty, "watchdog restart queued");
+meter.StopMonitoring();
+var created = WaveInEvent.Created;
+Dispatcher.UIThread.Drain();
+Check(WaveInEvent.Created == created && !meter.IsMonitoring, "queued watchdog must not reopen stopped microphone");
+meter.StartMonitoring();
+var disposed = WaveInEvent.Disposed;
+WaveInEvent.ThrowOnStop = true;
+meter.StopMonitoring();
+Check(WaveInEvent.Disposed == disposed + 1, "device must be disposed even when stop throws");
+Console.WriteLine($"PASS: {checks} regression checks");

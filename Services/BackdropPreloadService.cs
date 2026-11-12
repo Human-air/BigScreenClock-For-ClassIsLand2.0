@@ -98,47 +98,48 @@ public class BackdropPreloadService : BackgroundService
         var lead = start - now;
         if (lead > Lead || lead <= TimeSpan.Zero) return;   // 还没到两分钟 / 已经上课了
 
-        // 背景总开关关着 / 没设图：大屏那边根本不画背景，烘了也用不上
-        var path = _settings.BackgroundEnabled
-            ? BackgroundImageStore.ResolvePath(_settings.BackgroundImageFile)
-            : null;
-        if (path is null) return;
+        if (!BackdropPreloadCache.TryBeginBuild(out var generation)) return;
 
-        var stretch = _settings.BackgroundImageStretch;
-        var radius = _settings.GlassBlurRadius;
-        // 与 BackdropLayer 的 WantBlurNow() 保持一致：磨砂 / 折射两档要模糊，「完整显示」的补边也要
-        var wantBlur = _settings.GlassMode is (int)GlassMode.Frosted or (int)GlassMode.Liquid
-                       || stretch == (int)BackgroundImageStretch.Fit;
-
-        if (BackdropPreloadCache.IsReadyFor(path, size, stretch, radius, wantBlur)) return;
-        if (!BackdropPreloadCache.TryBeginBuild()) return;   // 上一份还在烘
-        if (token.IsCancellationRequested) { BackdropPreloadCache.EndBuild(); return; }
-
+        BackdropImageSet? pending = null;
         try
         {
-            var set = await Task.Run(() => BackdropImageSet.Build(path, size, stretch, radius, wantBlur), token);
+            // 背景总开关关着 / 没设图：大屏那边根本不画背景，烘了也用不上
+            var path = _settings.BackgroundEnabled
+                ? BackgroundImageStore.ResolvePath(_settings.BackgroundImageFile)
+                : null;
+            if (path is null) return;
 
-            if (set.IsEmpty)
+            var stretch = _settings.BackgroundImageStretch;
+            var radius = _settings.GlassBlurRadius;
+            // 与 BackdropLayer 的 WantBlurNow() 保持一致：磨砂 / 折射两档要模糊，「完整显示」的补边也要
+            var wantBlur = _settings.GlassMode is (int)GlassMode.Frosted or (int)GlassMode.Liquid
+                           || stretch == (int)BackgroundImageStretch.Fit;
+
+            if (BackdropPreloadCache.IsReadyFor(path, size, stretch, radius, wantBlur)) return;
+            token.ThrowIfCancellationRequested();
+            pending = await Task.Run(() => BackdropImageSet.Build(path, size, stretch, radius, wantBlur), token);
+            token.ThrowIfCancellationRequested();
+
+            if (pending.IsEmpty)
             {
-                // 图读不了（被删了 / 格式不支持）：不缓存，开屏时按老路走（那边同样会失败并退回纯色）
-                set.Dispose();
-                BackdropPreloadCache.EndBuild();
                 Log($"没烘成：{Path.GetFileName(path)} 读不出来");
                 return;
             }
 
-            BackdropPreloadCache.Publish(set);
+            if (!BackdropPreloadCache.Publish(pending, generation)) return;
+            pending = null; // 所有权已经交给缓存
 
-            // 这一下造了几百兆临时数组。趁现在（离上课还有一两分钟）强制回收一遍，
-            // 把内存还给系统 —— 等 19:00 大屏点亮时再回收，看门狗可能已经先采样到峰值了。
+            // 提前回收预烘时的临时数组，避免开屏时仍占着内存。
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
 
             Log($"已就绪：{Path.GetFileName(path)} @ {size.Width}×{size.Height}，" +
                 $"模糊半径 {radius:0.#}，距上课 {lead.TotalSeconds:0} 秒");
         }
-        catch (OperationCanceledException)
+        finally
         {
-            BackdropPreloadCache.EndBuild();
+            // 取消、异常、空结果或设置变更，都不能遗留位图或占住构建名额。
+            try { pending?.Dispose(); }
+            finally { BackdropPreloadCache.EndBuild(); }
         }
     }
 

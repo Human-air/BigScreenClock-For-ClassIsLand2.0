@@ -38,7 +38,8 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     /// <summary>「应当正在监听」的意图标记：StartMonitoring/StopMonitoring 维护，
     /// 不受设备自身 RecordingStopped 影响。系统睡眠唤醒后设备失效时，看门狗据此才能重启
     /// （此前看门狗只看 _isMonitoring，而设备失效会把它置 false，于是永远不再重启）。</summary>
-    private bool _shouldMonitor;
+    private volatile bool _shouldMonitor;
+    private volatile int _monitorGeneration;
     private double _currentRms;
     private int _displayLevel; // 0-100 正数显示
     private string _noiseLevelText = "等待检测...";
@@ -125,6 +126,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     {
         if (_isMonitoring) return;
         _shouldMonitor = true;
+        _monitorGeneration++;
         _detector.Reset();
         _lastSegmentLevel = null;
         CurrentSegmentLevel = null;
@@ -195,15 +197,19 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     private void StartWatchdog()
     {
         _watchdogTimer?.Dispose();
+        var generation = _monitorGeneration;
         _watchdogTimer = new System.Timers.Timer(5000);
         _watchdogTimer.Elapsed += (_, _) =>
         {
-            if (!_shouldMonitor) return;
+            if (!_shouldMonitor || generation != _monitorGeneration) return;
             if (_isMonitoring && (DateTime.Now - _lastDataReceived).TotalSeconds <= 5) return;
 
             System.Diagnostics.Debug.WriteLine("[DecibelMeter] 看门狗检测到数据中断，重启音频");
             Dispatcher.UIThread.Post(() =>
             {
+                // 定时器停止后，UI 队列里仍可能留着上一次监听的重启任务。
+                if (!_shouldMonitor || generation != _monitorGeneration) return;
+                if (_isMonitoring && (DateTime.Now - _lastDataReceived).TotalSeconds <= 5) return;
                 StopMonitoringInternal();
                 StartMonitoringInternal();
             });
@@ -221,6 +227,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
     public void StopMonitoring()
     {
         _shouldMonitor = false;
+        _monitorGeneration++;
         StopWatchdog();
         StopMonitoringInternal();
         CloseLogWriter();
@@ -235,14 +242,10 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
         IsMonitoring = false;
         if (wi == null) return;
 
-        try
-        {
-            wi.StopRecording();
-            wi.DataAvailable -= OnDataAvailable;
-            wi.RecordingStopped -= OnRecordingStopped;
-            wi.Dispose();
-        }
-        catch { }
+        wi.DataAvailable -= OnDataAvailable;
+        wi.RecordingStopped -= OnRecordingStopped;
+        try { wi.StopRecording(); } catch { }
+        finally { try { wi.Dispose(); } catch { } }
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
@@ -254,11 +257,12 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
 
         _isMonitoring = false;   // 字段直写：看门狗在别的线程上立刻要读它
         // 音频线程不能直接发通知（绑定会在非 UI 线程上刷新），Post 回 UI 线程再发
-        Dispatcher.UIThread.Post(() => IsMonitoring = false);
-        if (e.Exception != null)
+        Dispatcher.UIThread.Post(() =>
         {
-            Dispatcher.UIThread.Post(() => StatusMessage = $"录音异常: {e.Exception.Message}");
-        }
+            if (!ReferenceEquals(sender, _waveIn)) return;
+            IsMonitoring = false;
+            if (e.Exception != null) StatusMessage = $"录音异常: {e.Exception.Message}";
+        });
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)

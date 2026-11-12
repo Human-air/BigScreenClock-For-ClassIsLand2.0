@@ -13,12 +13,14 @@ public static class BackdropPreloadCache
     private static BackdropImageSet? _ready;
     private static DateTime _readyAt;
     private static bool _building;
+    private static long _generation;
 
     /// <summary>占住「正在烘」的名额；已经有人在烘就返回 false（别烘第二份）。</summary>
-    public static bool TryBeginBuild()
+    public static bool TryBeginBuild(out long generation)
     {
         lock (Gate)
         {
+            generation = _generation;
             if (_building) return false;
             _building = true;
             return true;
@@ -31,18 +33,20 @@ public static class BackdropPreloadCache
         lock (Gate) _building = false;
     }
 
-    /// <summary>放一份收工；原来那份（如果有）释放掉。</summary>
-    public static void Publish(BackdropImageSet set)
+    /// <summary>发布有效结果；成功后由缓存接管，失败时调用方负责释放。构建名额由 EndBuild 归还。</summary>
+    public static bool Publish(BackdropImageSet set, long generation)
     {
         BackdropImageSet? old;
         lock (Gate)
         {
+            // Clear 之后，旧任务只负责释放结果，不能把失效的图重新放回缓存。
+            if (generation != _generation) return false;
             old = _ready;
             _ready = set;
             _readyAt = DateTime.UtcNow;
-            _building = false;
         }
         if (!ReferenceEquals(old, set)) old?.Dispose();
+        return true;
     }
 
     /// <summary>
@@ -98,6 +102,7 @@ public static class BackdropPreloadCache
         BackdropImageSet? old;
         lock (Gate)
         {
+            _generation++;
             old = _ready;
             _ready = null;
         }
