@@ -1,0 +1,65 @@
+name: Publish development release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing five-part development version tag
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: release-config
+      - name: Validate version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^\d+\.\d+\.\d+\.\d+\.[1-9]\d*$') {
+            throw 'Expected a five-part development version'
+          }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: source
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Regression checks
+        run: dotnet run --project source/tests/Regression/Regression.csproj
+      - name: Build package
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $base, $counter = $env:RELEASE_TAG -split '\.(?=[^.]+$)'
+          $manifest = Get-Content source/manifest.yml -Raw
+          if ($manifest -notmatch "(?m)^version: $([regex]::Escape($base))\s*$") {
+            throw 'Tag base version does not match manifest'
+          }
+          $counterFile = Join-Path $env:RUNNER_TEMP 'devbuild.txt'
+          Set-Content $counterFile @($base, ([long]$counter - 1))
+          dotnet build source/EveningSelfStudyClock.csproj -c Release -p:DevBuild=1 "-p:DevBuildCounterFile=$counterFile"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $builtManifest = Get-Content source/bin/Release/net8.0-windows/manifest.yml -Raw
+          if ($builtManifest -notmatch "(?m)^version: $([regex]::Escape($env:RELEASE_TAG))\s*$") {
+            throw 'Package version mismatch'
+          }
+      - name: Publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $checksum = Get-Content source/cipx/checksums.md -Raw
+          $notes = Get-Content "release-config/.github/release-notes/$env:RELEASE_TAG.md" -Raw
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content $notesFile "$checksum`n`n$notes"
+          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title "$env:RELEASE_TAG 开发版：资源生命周期优化（Codex）" --notes-file $notesFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
