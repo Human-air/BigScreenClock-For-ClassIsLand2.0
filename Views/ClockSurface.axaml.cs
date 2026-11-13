@@ -546,21 +546,36 @@ public partial class ClockSurface : UserControl
     }
 
     /// <summary>
-    /// 半屏模式下点黑着的那一边三下 → 回到全屏。
-    /// 用隧道挂：黑屏区没有控件，但点在可见区里的按钮/滑块上也会先经过这里，按坐标排掉即可。
+    /// 屏幕手势（三击）：
+    /// - 半屏时点黑着的那一边三下 → 回到全屏；
+    /// - 全屏时点屏幕左/右半边三下 → 进入对应一侧的半屏。
+    /// 用隧道挂：黑屏区没有控件，但点在可见区里的按钮/滑块上也会先经过这里，按控件与坐标排掉即可。
     /// </summary>
     private void OnEmptyAreaPressed(object? sender, PointerPressedEventArgs e)
     {
         if (IsPreview) return;
         if (IsQuickSettingsOpen) return;   // 面板开着时点黑屏区是关面板，不算「三击退出半屏」
-        if (Plugin.Settings is not { } settings || settings.DisplayRegion == 0) return;
+        if (Plugin.Settings is not { } settings) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        if (IsInteractiveControl(e.Source)) return;   // 点在按钮/滚动区上不算点屏幕
 
-        // 点在看得见的那一条里就不算（Shell 靠右时，屏幕左半边是负坐标）
-        var point = e.GetPosition(Shell);
-        if (point.X >= 0 && point.X <= Shell.Bounds.Width
-            && point.Y >= 0 && point.Y <= Shell.Bounds.Height)
-            return;
+        int side;
+        if (settings.DisplayRegion != 0)
+        {
+            // 半屏：点在看得见的那一条里就不算（Shell 靠右时，屏幕左半边是负坐标）
+            var point = e.GetPosition(Shell);
+            if (point.X >= 0 && point.X <= Shell.Bounds.Width
+                && point.Y >= 0 && point.Y <= Shell.Bounds.Height)
+                return;
+            side = 0;   // 退出半屏不区分左右
+        }
+        else
+        {
+            // 全屏：按点击位置分左右半边，三击同侧进该侧半屏
+            var width = Bounds.Width;
+            if (width <= 0) return;
+            side = e.GetPosition(this).X < width / 2 ? 1 : 2;
+        }
 
         var now = DateTime.Now;
 
@@ -568,15 +583,31 @@ public partial class ClockSurface : UserControl
         // 不去重的话双击就成了三下，半屏会被误退出。120 毫秒内的重复事件按同一次点击算。
         if ((now - _lastEmptyAreaTap).TotalMilliseconds < 120) return;
 
-        if ((now - _lastEmptyAreaTap).TotalMilliseconds > 1000) _emptyAreaTapCount = 0;
+        // 一秒内、且都在同一侧才算连续三击；换了半边就重新数
+        if ((now - _lastEmptyAreaTap).TotalMilliseconds > 1000 || side != _emptyAreaTapSide)
+        {
+            _emptyAreaTapCount = 0;
+            _emptyAreaTapSide = side;
+        }
         _lastEmptyAreaTap = now;
 
         if (++_emptyAreaTapCount < 3) return;
         _emptyAreaTapCount = 0;
-        settings.DisplayRegion = 0;   // 设置变更通知会接着走 ApplyDisplayRegion
+        _emptyAreaTapSide = 0;
+        settings.DisplayRegion = side;   // 设置变更通知会接着走 ApplyDisplayRegion
+    }
+
+    /// <summary>点在按钮、滑块、输入框、滚动区这类控件上时，不算「点屏幕」的手势。</summary>
+    private static bool IsInteractiveControl(object? source)
+    {
+        for (var visual = source as Visual; visual is not null; visual = visual.GetVisualParent())
+            if (visual is Button or Slider or TextBox or ComboBox or CheckBox or ScrollViewer)
+                return true;
+        return false;
     }
 
     private int _emptyAreaTapCount;
+    private int _emptyAreaTapSide;
     private DateTime _lastEmptyAreaTap = DateTime.MinValue;
 
     /// <summary>

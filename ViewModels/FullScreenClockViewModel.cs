@@ -1925,20 +1925,27 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     public void Hide()
     {
-        Dispatcher.UIThread.Post(() =>
+        // UI 线程上直接执行：点「退出」后窗口立刻消失。
+        // 以前整个流程都塞进 Post 队列，UI 正忙的那一秒（每秒刷新、玻璃重烘）点一下要等队列消化，
+        // 用户以为没点上、再点几次——就是「退出按钮要点多次」的观感来源。
+        // 非 UI 线程（自动触发服务）仍走 Post，窗口操作必须在 UI 线程做。
+        if (!Dispatcher.UIThread.CheckAccess())
         {
-            CancelMinimizePause();
-            _pausedForMinimize = false;
-            _window?.Hide();
-            StopUpdateTimer();
-            StopAntiScreensaver();
-            _decibelService.StopMonitoring();
-            _cameraService.StopMonitoring();
-            UnsubscribeToClassEvents();
-            IsWindowVisible = false;
-            SetMainWindowVisible(true);
-            EndFeishuSession();   // 退出大屏时钟：发「退出」通知（附本节汇总）
-        });
+            Dispatcher.UIThread.Post(Hide);
+            return;
+        }
+
+        CancelMinimizePause();
+        _pausedForMinimize = false;
+        _window?.Hide();
+        StopUpdateTimer();
+        StopAntiScreensaver();
+        _decibelService.StopMonitoring();
+        _cameraService.StopMonitoring();
+        UnsubscribeToClassEvents();
+        IsWindowVisible = false;
+        SetMainWindowVisible(true);
+        EndFeishuSession();   // 退出大屏时钟：发「退出」通知（附本节汇总）
     }
 
     private void StartUpdateTimer()

@@ -1573,9 +1573,27 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         get => _settings.EnableFeishuNotify;
         set
         {
+            if (_settings.EnableFeishuNotify == value) return;
             _settings.EnableFeishuNotify = value;
+            // 开启自动展开、关闭自动折叠；关闭状态下仍可点标题手动展开查看
+            _settings.FeishuSectionExpanded = value;
             OnPropertyChanged(nameof(EnableFeishuNotify));
+            OnPropertyChanged(nameof(FeishuContentVisible));
+            OnPropertyChanged(nameof(FeishuExpanderGlyph));
         }
+    }
+
+    /// <summary>配置区是否显示：已启用时始终展开；未启用时由用户手动展开/折叠。</summary>
+    public bool FeishuContentVisible => _settings.EnableFeishuNotify || _settings.FeishuSectionExpanded;
+
+    public string FeishuExpanderGlyph => FeishuContentVisible ? "▾" : "▸";
+
+    private void FeishuHeader_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_settings.EnableFeishuNotify) return;   // 启用中一直展开
+        _settings.FeishuSectionExpanded = !_settings.FeishuSectionExpanded;
+        OnPropertyChanged(nameof(FeishuContentVisible));
+        OnPropertyChanged(nameof(FeishuExpanderGlyph));
     }
 
     public string FeishuWebhookUrl

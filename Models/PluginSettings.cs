@@ -82,6 +82,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _feishuNotifyNoise = true;
     private bool _feishuNotifyNormal = true;
     private bool _feishuNotifyEnterExit = true;
+    private bool _feishuSectionExpanded;
 
     // ===== 打小报告快捷键（拍照与录音上传已移除，此处只剩卡片触发） =====
     private bool _enableSnitch = true;
@@ -701,6 +702,13 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _cameraListFilled;
         set { _cameraListFilled = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>设置页「飞书推送」卡片是否展开（未启用时也能手动展开查看配置，重启后保持）。</summary>
+    public bool FeishuSectionExpanded
+    {
+        get => _feishuSectionExpanded;
+        set { _feishuSectionExpanded = value; OnPropertyChanged(); }
     }
 
     /// <summary>是否启用飞书推送（噪音提醒 / 进出大屏时钟）。</summary>

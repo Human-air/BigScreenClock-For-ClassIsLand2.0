@@ -734,47 +734,28 @@
                     </Grid>
                 </StackPanel>
                 </Border>
-                <!-- 规则说明 -->
-                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="4" Padding="14,12">
-                <StackPanel Spacing="4">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Classes="icon" Text="{ci:LI ScrollText}" FontSize="17"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                        <TextBlock Text="记录规则" FontSize="17" FontWeight="Bold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <TextBlock Text="• 一段噪音累计满「起算底线」秒才记一次（默认 1 秒），咳嗽、喷嚏等瞬时噪音不计数"
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次"
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」"
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数"
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" Margin="0,6,0,0">
-                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="13"
-                                   Foreground="#d97706"/>
-                        <TextBlock Grid.Column="1" Text="免责声明：分贝记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。"
-                                   FontSize="12" Foreground="#d97706" TextWrapping="Wrap"/>
-                    </Grid>
-                </StackPanel>
-                </Border>
 
                 <!-- 飞书推送 -->
                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="17"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                        <TextBlock Text="飞书推送" FontSize="17" FontWeight="Bold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <!-- 标题行可点：未启用时手动展开/折叠（状态存设置里，重启保持）；启用后始终展开 -->
+                    <Button Click="FeishuHeader_Click" Background="Transparent" BorderThickness="0" Padding="0"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Cursor="Hand">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Classes="icon" Text="{ci:LI MessageSquare}" FontSize="17"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                <TextBlock Text="飞书推送" FontSize="17" FontWeight="Bold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding FeishuExpanderGlyph}" FontSize="14"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
 
                     <CheckBox IsChecked="{Binding EnableFeishuNotify}" FontSize="14">
                         <StackPanel Orientation="Horizontal" Spacing="5">
@@ -783,7 +764,8 @@
                         </StackPanel>
                     </CheckBox>
 
-                    <StackPanel Spacing="6" IsEnabled="{Binding EnableFeishuNotify}">
+                    <StackPanel Spacing="6" IsVisible="{Binding FeishuContentVisible}"
+                                IsEnabled="{Binding EnableFeishuNotify}">
                         <TextBlock Text="Webhook 地址：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人，复制其中的地址填到这里"
                                    FontSize="11" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
@@ -859,6 +841,35 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </StackPanel>
+                </StackPanel>
+                </Border>
+
+                <!-- 规则说明 -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
+                <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="icon" Text="{ci:LI ScrollText}" FontSize="17"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="记录规则" FontSize="17" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Text="• 一段噪音累计满「起算底线」秒才记一次（默认 1 秒），咳嗽、喷嚏等瞬时噪音不计数"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" Margin="0,6,0,0">
+                        <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="13"
+                                   Foreground="#d97706"/>
+                        <TextBlock Grid.Column="1" Text="免责声明：分贝记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。"
+                                   FontSize="12" Foreground="#d97706" TextWrapping="Wrap"/>
+                    </Grid>
                 </StackPanel>
                 </Border>
 
