@@ -18,6 +18,7 @@
 
     <ItemGroup>
         <Compile Remove="tests/**/*.cs" />
+        <AvaloniaXaml Remove="tests/**/*.axaml" />
     </ItemGroup>
 
     <ItemGroup>

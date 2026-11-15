@@ -32,6 +32,9 @@ jobs:
           dotnet-version: 8.0.x
       - name: Regression checks
         run: dotnet run --project source/tests/Regression/Regression.csproj
+      - name: Touch button input checks
+        if: hashFiles('source/tests/TouchButtons/TouchButtons.csproj') != ''
+        run: dotnet run --project source/tests/TouchButtons/TouchButtons.csproj
       - name: Build package
         shell: pwsh
         env:
@@ -61,5 +64,5 @@ jobs:
           $notes = Get-Content "release-config/.github/release-notes/$env:RELEASE_TAG.md" -Raw
           $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           Set-Content $notesFile "$checksum`n`n$notes"
-          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title "$env:RELEASE_TAG 开发版：资源生命周期优化（Codex）" --notes-file $notesFile
+          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title "$env:RELEASE_TAG 开发版（Codex）" --notes-file $notesFile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

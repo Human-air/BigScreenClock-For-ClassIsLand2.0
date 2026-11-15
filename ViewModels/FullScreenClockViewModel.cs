@@ -1818,13 +1818,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     public void Minimize()
     {
-        Dispatcher.UIThread.Post(() =>
+        // 与退出保持一致：按钮事件已经在 UI 线程，不再多排一次队列。
+        if (!Dispatcher.UIThread.CheckAccess())
         {
-            if (_window == null || !IsWindowVisible) return;
-            _window.WindowState = WindowState.Minimized;
-            ShowCiMainWindow();
-            ScheduleMinimizePause();
-        });
+            Dispatcher.UIThread.Post(Minimize);
+            return;
+        }
+
+        if (_window == null || !IsWindowVisible || _window.WindowState == WindowState.Minimized) return;
+        _window.WindowState = WindowState.Minimized;
+        ShowCiMainWindow();
+        ScheduleMinimizePause();
     }
 
     // ===== 最小化暂停 =====

@@ -569,9 +569,10 @@
                             </Grid>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
                                   IsVisible="{Binding IsOpacityRowVisible}">
-                                <TextBlock Grid.Column="0" Text="透明度" VerticalAlignment="Center"
+                                <TextBlock Grid.Column="0" Text="不透明度" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                                 <Slider x:Name="GlassOpacitySlider" Grid.Column="1" Value="{Binding GlassOpacity}" Minimum="0" Maximum="100"
+                                        ToolTip.Tip="玻璃底色的不透明度：0% 为完全透明，100% 为完全不透明"
                                         TickFrequency="5" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding GlassOpacityText}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="60" TextAlignment="Center" VerticalAlignment="Center"/>

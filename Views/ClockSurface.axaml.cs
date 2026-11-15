@@ -1170,16 +1170,11 @@ public partial class ClockSurface : UserControl
     {
         if (_quickSettings is null) return;
 
-        var top = 20.0;
-        var bottom = 20.0;
-
-        if (HeaderGrid.TranslatePoint(new Point(0, HeaderGrid.Bounds.Height), this) is { } header)
-            top = header.Y + 12;
-
-        if (ButtonBar.TranslatePoint(default, this) is { } bar)
-            bottom = Math.Max(12, Bounds.Height - bar.Y + 12);
-
-        QuickSettingsCard.Margin = new Thickness(0, top, 20, bottom);
+        var headerBottom = HeaderGrid.TranslatePoint(new Point(0, HeaderGrid.Bounds.Height), this)?.Y;
+        var buttonTop = ButtonBar.TranslatePoint(default, this)?.Y;
+        var margins = QuickSettingsBounds.GetMargins(headerBottom, buttonTop, Bounds.Height);
+        QuickSettingsCard.Margin = margins.Card;
+        QuickSettingsDismissArea.Margin = margins.DismissArea;
     }
 
     private void UpdateQuickSettingsOpacity()

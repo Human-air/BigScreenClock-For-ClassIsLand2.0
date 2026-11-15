@@ -294,7 +294,7 @@
                     <Button x:Name="SettingsButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="10,6"
+                            CornerRadius="6" Padding="10,6" MinWidth="48" MinHeight="48"
                             Cursor="Hand"
                             ToolTip.Tip="设置"
                             Click="SettingsButton_Click">
@@ -306,10 +306,13 @@
                             </Style>
                         </Button.Styles>
                     </Button>
+                    <!-- 触屏按下即执行，避免抬手时指尖滑出小按钮导致点击被取消。
+                         交给 Button 自身处理 ClickMode，保留键盘操作且不叠加触摸事件处理器。 -->
                     <Button x:Name="MinimizeButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="12,6"
+                            CornerRadius="6" Padding="16,10" MinHeight="48"
+                            ClickMode="Press"
                             Cursor="Hand"
                             Click="MinimizeButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -326,7 +329,8 @@
                     <Button x:Name="ExitButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="12,6"
+                            CornerRadius="6" Padding="16,10" MinHeight="48"
+                            ClickMode="Press"
                             Cursor="Hand"
                             Click="ExitButton_Click">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -443,7 +447,10 @@
               IsVisible="False"
               PointerPressed="QuickSettingsOverlay_PointerPressed">
             <!-- 淡压一层：实时模糊之外再拉开一点对比，没有模糊图时它就是唯一的分隔 -->
-            <Border x:Name="QuickSettingsVeil" Background="#33000000"/>
+            <Border x:Name="QuickSettingsVeil" Background="#33000000" IsHitTestVisible="False"/>
+            <!-- 整屏压暗只负责画；点击关闭的区域真正避开顶栏和按钮行。
+                 根 Grid 没有背景，这两处输入可直接命中原控件，不需要转发/重放事件。 -->
+            <Border x:Name="QuickSettingsDismissArea" Background="Transparent" Margin="0,20,0,20"/>
             <!-- 面板底不用 CI 的 CardBackgroundFillColor：深色主题下那个只有 5% 白，
                  压在一张亮背景图上等于没有，白字根本读不出来。这里定死实底深色，
                  里面再套一层深色主题作用域，文字与控件都按浅色渲染，任何背景图上都清楚。 -->
