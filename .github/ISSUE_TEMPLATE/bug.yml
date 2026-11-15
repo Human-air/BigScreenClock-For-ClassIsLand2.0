@@ -1,0 +1,20 @@
+name: 问题反馈
+description: 报告运行异常或功能故障
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 维护与测试说明
+        本项目由在校学生利用课余时间维护。维护者在校期间若仅能通过手机访问仓库，可能借助 OpenAI Codex 分析及回复 Issue、编写修复代码并构建开发包；相关回复与发布说明会明确标注。受设备条件限制，部分修复无法立即在个人电脑上验证，实际设备测试主要依靠教室内的希沃设备。自动化检查或构建通过不代表问题已在所有设备上解决，也无法保证每次修复均能解决反馈中的全部问题。欢迎提供版本、复现步骤、日志及测试结果，协助后续核实。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题或建议
+      description: 请描述现象、预期行为及复现步骤；如有日志或截图，可在此附上。
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 版本及设备信息
+      description: ClassIsland 版本、插件完整版本号、系统及触摸设备信息。

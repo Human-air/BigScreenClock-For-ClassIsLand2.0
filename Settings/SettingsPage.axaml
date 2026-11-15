@@ -90,6 +90,9 @@
                             <TextBlock Text="课程信息" FontSize="14" VerticalAlignment="Center"/>
                         </StackPanel>
                     </CheckBox>
+                    <CheckBox Margin="20,2,0,0" FontSize="13"
+                              IsChecked="{Binding CourseInfoAtTop}" IsVisible="{Binding ShowCourseInfo}"
+                              Content="课程信息显示在顶部"/>
                     <!-- 课程信息子项：勾选「课程信息」后出现 -->
                     <CheckBox Margin="20,2,0,0" FontSize="13"
                               IsChecked="{Binding ShowBellTime}"
@@ -741,7 +744,7 @@
                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1" CornerRadius="4" Padding="14,12">
                 <StackPanel Spacing="8">
-                    <!-- 标题行可点：未启用时手动展开/折叠（状态存设置里，重启保持）；启用后始终展开 -->
+                    <!-- 标题行可点：展开状态独立于推送开关，重启后保持 -->
                     <Button Click="FeishuHeader_Click" Background="Transparent" BorderThickness="0" Padding="0"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Cursor="Hand">
                         <Grid ColumnDefinitions="*,Auto">

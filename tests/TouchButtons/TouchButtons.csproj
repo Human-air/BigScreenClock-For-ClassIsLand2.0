@@ -8,6 +8,10 @@
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" Version="11.3.17" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.17" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../../Helpers/CourseInfoPlacement.cs" Link="CourseInfoPlacement.cs" />
+    <Compile Include="../../Services/TrayMenuService.cs" Link="TrayMenuService.cs" />
+    <Compile Include="../../RelayCommand.cs" Link="RelayCommand.cs" />
     <Compile Include="../../Helpers/QuickSettingsBounds.cs" Link="QuickSettingsBounds.cs" />
     <None Include="../../Views/ClockSurface.axaml" Link="ClockSurface.axaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

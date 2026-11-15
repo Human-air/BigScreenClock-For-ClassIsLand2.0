@@ -78,6 +78,9 @@ public class Plugin : PluginBase
         // 变成两个实例各自注册一遍全局热键（第二个必然注册失败）
         services.AddHostedService(sp => sp.GetRequiredService<SnitchHotkeyService>());
 
+        services.AddAction<EveningSelfStudyClock.Automation.ShowClockAction>();
+        services.AddAction<EveningSelfStudyClock.Automation.HideClockAction>();
+
         services.AddSettingsPage<EveningSelfStudyClock.Settings.SettingsPage>();
     }
 }

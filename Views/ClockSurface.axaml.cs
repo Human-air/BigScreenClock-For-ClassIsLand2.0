@@ -144,6 +144,12 @@ public partial class ClockSurface : UserControl
         if (e.PropertyName is nameof(PluginSettings.AdjustingLayout))
             UpdateQuickSettingsOpacity();
 
+        if (e.PropertyName == nameof(PluginSettings.CourseInfoAtTop))
+        {
+            ApplyCourseInfoPosition();
+            return;
+        }
+
         // 显示区域：全屏 ↔ 半屏、可见宽度变化，立刻重排（背景层跟着 Shell 变窄，会自己重烘）
         if (e.PropertyName is nameof(PluginSettings.DisplayRegion)
             or nameof(PluginSettings.VisibleWidthPercent))
@@ -423,8 +429,13 @@ public partial class ClockSurface : UserControl
         // 半屏时背景填充方式被锁成「铺满整屏」，这里让背景层重新取一次参数
         ApplyBackdrop();
 
+        ApplyCourseInfoPosition();
         UpdateSizeDependentLayout();
     }
+
+    private void ApplyCourseInfoPosition() => CourseInfoPlacement.Apply(
+        CourseInfoBox, HeaderGrid, FooterGrid,
+        Plugin.Settings?.CourseInfoAtTop == true, _compactApplied == true);
 
     /// <summary>
     /// 半屏（窄）排版。宽屏那套是「顶栏一行（左天气 / 中弹幕 / 右日期）+ 底部一行（计数 / 课程信息 / 按钮）」；

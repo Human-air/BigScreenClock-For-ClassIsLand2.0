@@ -12,3 +12,5 @@ dotnet run --project tests/TouchButtons/TouchButtons.csproj
 测试省略与命中无关的时钟、课程和设置表单内容，以不同顶栏高度覆盖常规与紧凑布局。它们验证 Avalonia 输入路由与遮罩几何，不模拟 Windows 触屏驱动；希沃设备上的实际触屏行为仍需实机验证。
 
 可传入另一份 `ClockSurface.axaml` 路径运行同一检查。旧的 Release 按钮配置或可参与命中测试的整屏遮罩应导致检查失败。
+
+另直接链接生产的课程位置布局与托盘服务代码，验证课程顶部／底部切换与半屏恢复、托盘延迟就绪、菜单即时替换、重复注册、设置切换和服务停止后的清理。托盘测试使用真实 Avalonia 菜单对象与简化的 ClassIsland 服务提供方。

@@ -1724,92 +1724,94 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     public void Show()
     {
-        Dispatcher.UIThread.Post(() =>
+        if (!Dispatcher.UIThread.CheckAccess())
         {
-            // 必须在创建窗口前同步，否则绑定读到的是旧值
-            ShowDecibelMeter = _settings.ShowDecibelMeter;
-            ShowCourseInfo = _settings.ShowCourseInfo;
-            ClockFontSize = _settings.ClockFontSize;
-            CourseInfoFontSize = _settings.CourseInfoFontSize;
-            CountFontSize = _settings.CountFontSize;
-            // 主题：跟随档下 CI 主题可能在别处被改过 → 先按当前生效主题写好颜色，再刷新外观绑定
-            ApplyThemePalette();
-            RefreshClockFont();
-            // 外观颜色属性是直接读 _settings 的 getter，窗口从 Hide 退出后复用不自动刷新，
-            // 主动触发通知让绑定重新求值（修复：改完颜色后要重启 CI 才生效的问题）
-            RefreshAppearanceBindings();
-            RefreshRemindersNow();
-            UpdateEarthquakeAlert();   // 正赶上一场地震时，开屏就有（否则等下个整秒的刷新）
+            Dispatcher.UIThread.Post(Show);
+            return;
+        }
+        // 必须在创建窗口前同步，否则绑定读到的是旧值
+        ShowDecibelMeter = _settings.ShowDecibelMeter;
+        ShowCourseInfo = _settings.ShowCourseInfo;
+        ClockFontSize = _settings.ClockFontSize;
+        CourseInfoFontSize = _settings.CourseInfoFontSize;
+        CountFontSize = _settings.CountFontSize;
+        // 主题：跟随档下 CI 主题可能在别处被改过 → 先按当前生效主题写好颜色，再刷新外观绑定
+        ApplyThemePalette();
+        RefreshClockFont();
+        // 外观颜色属性是直接读 _settings 的 getter，窗口从 Hide 退出后复用不自动刷新，
+        // 主动触发通知让绑定重新求值（修复：改完颜色后要重启 CI 才生效的问题）
+        RefreshAppearanceBindings();
+        RefreshRemindersNow();
+        UpdateEarthquakeAlert();   // 正赶上一场地震时，开屏就有（否则等下个整秒的刷新）
 
-            if (_window == null)
+        if (_window == null)
+        {
+            _window = new FullScreenClockWindow { DataContext = this };
+            _window.Closed += (_, _) =>
             {
-                _window = new FullScreenClockWindow { DataContext = this };
-                _window.Closed += (_, _) =>
-                {
-                    IsWindowVisible = false;
-                    CancelMinimizePause();
-                    _pausedForMinimize = false;
-                    StopAntiScreensaver();   // 窗口是用户直接关的（不走 Hide）时，也得把屏幕睡眠限制撤掉
-                    StopUpdateTimer();
-                    _decibelService.StopMonitoring();
-                    _cameraService.StopMonitoring();
-                    UnsubscribeToClassEvents();
-                    SetMainWindowVisible(true);
-                    EndFeishuSession();   // 用户直接关窗口也要发「退出」通知
-                    _window = null;
-                };
-                // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
-                // 若 OS 把全屏窗口恢复到 Normal 就在此兜底拉回全屏（守卫见 EnsureFullScreen，Minimized 态不打扰）。
-                _window.Activated += (_, _) => EnsureFullScreen();
-                // 跟随档：CI 主题在明亮/黑暗间切换时，大屏正开着也即时换配色
-                _window.ActualThemeVariantChanged += (_, _) => ApplyThemePalette();
-            }
+                IsWindowVisible = false;
+                CancelMinimizePause();
+                _pausedForMinimize = false;
+                StopAntiScreensaver();   // 窗口是用户直接关的（不走 Hide）时，也得把屏幕睡眠限制撤掉
+                StopUpdateTimer();
+                _decibelService.StopMonitoring();
+                _cameraService.StopMonitoring();
+                UnsubscribeToClassEvents();
+                SetMainWindowVisible(true);
+                EndFeishuSession();   // 用户直接关窗口也要发「退出」通知
+                _window = null;
+            };
+            // 最小化后从任务栏点回：恢复即触发 Activated（Avalonia 11.3 无 WindowStateChanged 事件），
+            // 若 OS 把全屏窗口恢复到 Normal 就在此兜底拉回全屏（守卫见 EnsureFullScreen，Minimized 态不打扰）。
+            _window.Activated += (_, _) => EnsureFullScreen();
+            // 跟随档：CI 主题在明亮/黑暗间切换时，大屏正开着也即时换配色
+            _window.ActualThemeVariantChanged += (_, _) => ApplyThemePalette();
+        }
 
-            if (_window.IsVisible)
+        if (_window.IsVisible)
+        {
+            // 已最小化时再触发 Show（设置页按钮/托盘菜单）→ 先拉回全屏再刷新
+            if (_window.WindowState == WindowState.Minimized)
             {
-                // 已最小化时再触发 Show（设置页按钮/托盘菜单）→ 先拉回全屏再刷新
-                if (_window.WindowState == WindowState.Minimized)
-                {
-                    _window.WindowState = WindowState.Normal;
-                    _window.Show();
-                    _window.WindowState = WindowState.FullScreen;
-                }
-                // 最小化时把 CI 主界面拉了出来（见 Minimize），回到大屏就得收回去，
-                // 否则主界面一直留在大屏时钟后面/旁边
-                SetMainWindowVisible(false);
-                ResumeFromMinimizePause();   // 最小化超过设定时间被暂停的话，这里恢复运行
-                RefreshAll();
-                return;
+                _window.WindowState = WindowState.Normal;
+                _window.Show();
+                _window.WindowState = WindowState.FullScreen;
             }
-
-            // 重置新一轮记录
-            _counter.StartNewClass();
-            _counter.SetBreak(false);
-            _currentClassName = "";
-            _classSummaries.Clear();
-            _isInBreak = false;
-            _noisyDisplaySignature = "";
-            CourseInfoText = "";
-            LoadTodaySchedule();
-            SubscribeToClassEvents();
-
-            // 重新订阅分贝事件（先退订再订阅，保证不累积）
-            _decibelService.PropertyChanged -= OnDecibelPropertyChanged;
-            _decibelService.PropertyChanged += OnDecibelPropertyChanged;
-
-            StartUpdateTimer();
-            StartAntiScreensaver();
-            _decibelService.StartMonitoring();
-            // 摄像头占用检测：跟着大屏时钟的显示周期开关（用不上时不占系统资源）
-            if (_settings.ShowCameraReminder) _cameraService.StartMonitoring();
-            RefreshAll();
-
-            _window.WindowState = WindowState.FullScreen;
-            _window.Show();
-            IsWindowVisible = true;
+            // 最小化时把 CI 主界面拉了出来（见 Minimize），回到大屏就得收回去，
+            // 否则主界面一直留在大屏时钟后面/旁边
             SetMainWindowVisible(false);
-            BeginFeishuSession();   // 进入大屏时钟：发「进入」通知
-        });
+            ResumeFromMinimizePause();   // 最小化超过设定时间被暂停的话，这里恢复运行
+            RefreshAll();
+            return;
+        }
+
+        // 重置新一轮记录
+        _counter.StartNewClass();
+        _counter.SetBreak(false);
+        _currentClassName = "";
+        _classSummaries.Clear();
+        _isInBreak = false;
+        _noisyDisplaySignature = "";
+        CourseInfoText = "";
+        LoadTodaySchedule();
+        SubscribeToClassEvents();
+
+        // 重新订阅分贝事件（先退订再订阅，保证不累积）
+        _decibelService.PropertyChanged -= OnDecibelPropertyChanged;
+        _decibelService.PropertyChanged += OnDecibelPropertyChanged;
+
+        StartUpdateTimer();
+        StartAntiScreensaver();
+        _decibelService.StartMonitoring();
+        // 摄像头占用检测：跟着大屏时钟的显示周期开关（用不上时不占系统资源）
+        if (_settings.ShowCameraReminder) _cameraService.StartMonitoring();
+        RefreshAll();
+
+        _window.WindowState = WindowState.FullScreen;
+        _window.Show();
+        IsWindowVisible = true;
+        SetMainWindowVisible(false);
+        BeginFeishuSession();   // 进入大屏时钟：发「进入」通知
     }
 
     /// <summary>

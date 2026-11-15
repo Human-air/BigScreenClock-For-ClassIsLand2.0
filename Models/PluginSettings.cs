@@ -21,6 +21,7 @@ public class PluginSettings : INotifyPropertyChanged
     private string _rainColor = "#7FD4FF";
     private bool _showDecibelMeter = true;
     private bool _showCourseInfo = true;
+    private bool _courseInfoAtTop;
     private bool _showBellTime = true;
     private bool _showNoisyCounter = true;
     private bool _letterDismissed;
@@ -383,6 +384,12 @@ public class PluginSettings : INotifyPropertyChanged
     /// <summary>
     /// 是否显示课程信息
     /// </summary>
+    public bool CourseInfoAtTop
+    {
+        get => _courseInfoAtTop;
+        set { _courseInfoAtTop = value; OnPropertyChanged(); }
+    }
+
     public bool ShowCourseInfo
     {
         get => _showCourseInfo;

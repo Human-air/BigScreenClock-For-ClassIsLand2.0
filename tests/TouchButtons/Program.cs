@@ -220,4 +220,47 @@ foreach (var targetName in new[] { "ExitButton", "MinimizeButton" })
     window.Close();
     Dispatcher.UIThread.RunJobs();
 }
-Console.WriteLine($"PASS: {checks} Avalonia button and overlay input checks");
+var headerPlacement = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+var footerPlacement = new Grid();
+var coursePlacement = new Viewbox();
+footerPlacement.Children.Add(coursePlacement);
+foreach (var (top, compact) in new[] { (true,false), (true,true), (false,true), (false,false), (true,false) })
+{
+    CourseInfoPlacement.Apply(coursePlacement,headerPlacement,footerPlacement,top,compact);
+    Check(ReferenceEquals(coursePlacement.Parent, top ? headerPlacement : footerPlacement), "course moves to correct parent");
+    Check(headerPlacement.RowDefinitions.Count == (top ? 3 : 2), "course restores header rows without extra spacing");
+    Check(Grid.GetRow(coursePlacement) == (top ? 2 : 0), "course row follows position");
+    Check(Grid.GetColumnSpan(coursePlacement) == (top || compact ? 3 : 1), "course restores full/half span");
+}
+var trayProvider = new TrayTests.Provider();
+var traySettings = new EveningSelfStudyClock.Models.PluginSettings();
+var trayVm = new EveningSelfStudyClock.ViewModels.FullScreenClockViewModel();
+var trayService = new EveningSelfStudyClock.Services.TrayMenuService(trayVm,trayProvider,traySettings);
+var trayStart = trayService.StartAsync(default);
+Dispatcher.UIThread.RunJobs();
+trayStart.GetAwaiter().GetResult();
+trayService.EnsureRegistered(); // tray not ready at startup
+var firstMenu = new NativeMenu();
+trayProvider.MainTaskBarIcon = new TrayIcon { Menu = firstMenu };
+trayService.EnsureRegistered();
+Check(firstMenu.Items.Count == 1, "late tray readiness registers item");
+trayService.EnsureRegistered();
+Check(firstMenu.Items.Count == 1, "tray registration is idempotent");
+var secondMenu = new NativeMenu();
+trayProvider.MainTaskBarIcon.Menu = secondMenu;
+Check(firstMenu.Items.Count == 0 && secondMenu.Items.Count == 1, "tray menu replacement detaches old and registers new");
+traySettings.ShowTrayMenuEntry = false;
+Dispatcher.UIThread.RunJobs();
+Check(secondMenu.Items.Count == 0, "tray switch removes item immediately");
+traySettings.ShowTrayMenuEntry = true;
+Dispatcher.UIThread.RunJobs();
+Check(secondMenu.Items.Count == 1, "tray switch restores item");
+((NativeMenuItem)secondMenu.Items[0]).Command!.Execute(null);
+Check(trayVm.Shows == 1, "tray command invokes clock");
+var trayStop = trayService.StopAsync(default);
+Dispatcher.UIThread.RunJobs();
+trayStop.GetAwaiter().GetResult();
+trayService.EnsureRegistered();
+Check(secondMenu.Items.Count == 0, "stopped tray service cannot register again");
+trayProvider.MainTaskBarIcon.Dispose();
+Console.WriteLine($"PASS: {checks} Avalonia input, layout and tray checks");
