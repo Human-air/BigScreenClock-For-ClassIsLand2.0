@@ -41,6 +41,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly NoiseCounter _counter = new();
     private readonly Lazy<IExactTimeService?> _exactTimeService;
     private System.Timers.Timer? _updateTimer;
+    private CoalescedUiWork? _refreshWork;
     private FullScreenClockWindow? _window;
 
     /// <summary>
@@ -1574,7 +1575,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// 课程信息行末尾的「时间点附加信息」，格式与 CI 主界面完全一致（见 <see cref="CiTimePointFormat"/>）：
-    /// 默认「时间点持续时间」在 CI 里就是起止时刻，课程行本身已经有，所以不加；
+    /// 默认「时间点持续时间」只显示一组起止时刻；
     /// 其余类型按 CI 的写法显示一个（如「4m/1h30m」「-1h25m」「6%」「-1:24:51」）。
     /// 快下课时 CI 会把附加信息换成倒计时，这里照做。
     /// </summary>
@@ -1586,20 +1587,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         var elapsed = Math.Max(0, (long)(now - slot.Start).TotalSeconds);
         var left = Math.Max(0, (long)(slot.End - now).TotalSeconds);
 
-        // 结束前的倒计时（CI 优先于附加信息）：精确到秒，或者开了模糊倒计时就按分钟取整
-        if (_countdownEnabled && left <= _countdownSeconds)
-        {
-            var countdown = _nonExactCountdown
-                ? CiTimePointFormat.Single(left, ceiling: true)
-                : CiTimePointFormat.Exact(left);
-            return "   -" + countdown;
-        }
-
-        // 「剩余时间」在最后 ExtraInfo4ShowSecondsSeconds 秒切成秒级倒计时
-        var type = _timePointExtraType;
-        if (type == 4 && left <= _extraInfo4ShowSeconds) type = 5;
-
-        var text = CiTimePointFormat.ExtraInfo(type, elapsed, left, total);
+        var offset = _settings.ShowBellTime ? TimeSpan.FromSeconds(_timeOffsetSeconds) : TimeSpan.Zero;
+        var range = CiTimePointFormat.Range(slot.Start - offset, slot.End - offset,
+            _settings.ShowBellTime && _timeOffsetSeconds % 60 != 0);
+        var text = CiTimePointFormat.Select(_timePointExtraType, range, elapsed, left, total,
+            _countdownEnabled, _countdownSeconds, _extraInfo4ShowSeconds, _nonExactCountdown);
         return string.IsNullOrEmpty(text) ? "" : "   " + text;
     }
 
@@ -1957,14 +1949,20 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private void StartUpdateTimer()
     {
         if (_updateTimer != null) return;
+        var refreshWork = new CoalescedUiWork(
+            static action => Dispatcher.UIThread.Post(action), RefreshAll);
+        _refreshWork = refreshWork;
         _updateTimer = new System.Timers.Timer(1000); // 时间只显示到秒，1s 足够
-        _updateTimer.Elapsed += (_, _) => Dispatcher.UIThread.Post(RefreshAll);
+        _updateTimer.Elapsed += (_, _) => refreshWork.Request();
         _updateTimer.AutoReset = true;
         _updateTimer.Start();
     }
 
     private void StopUpdateTimer()
     {
+        // 先作废旧会话，已经进入 UI 队列的刷新也不能在退出/暂停后继续分配资源。
+        _refreshWork?.Dispose();
+        _refreshWork = null;
         if (_updateTimer == null) return;
         _updateTimer.Stop();
         _updateTimer.Dispose();
@@ -2138,12 +2136,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         if (current != null && current.IsClass && !string.IsNullOrEmpty(current.SubjectName))
         {
             // 上课中：显示当前课程（含实际打铃时间，如有偏移）+ 与 CI 一致的时间点附加信息
-            CourseInfoText = $"当前课程为 {current.SubjectName}   {current.Start:hh\\:mm} — {current.End:hh\\:mm}{FormatBellTime(current)}{FormatTimePointExtra(current, time)}";
+            CourseInfoText = $"当前课程为 {current.SubjectName}{FormatTimePointExtra(current, time)}";
         }
         else if (_isInBreak && nextClass != null)
         {
             // 课间：显示下节课程
-            CourseInfoText = $"下节课程为 {nextClass.SubjectName}   {nextClass.Start:hh\\:mm} — {nextClass.End:hh\\:mm}{FormatBellTime(nextClass)}";
+            CourseInfoText = $"下节课程为 {nextClass.SubjectName}{(current is null ? "" : FormatTimePointExtra(current, time))}";
         }
         else
         {
@@ -2162,20 +2160,6 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             ShowCourseProgress = false;
             CourseProgress = 0;
         }
-    }
-
-    /// <summary>
-    /// 把课表时间换算成实际打铃时间（北京真实时间）的说明文字。
-    /// 实际打铃时间 = 课表时间 - TimeOffsetSeconds。无偏移或用户关掉该子项时返回空串。
-    /// </summary>
-    private string FormatBellTime(TimeSlot slot)
-    {
-        if (!_settings.ShowBellTime || _timeOffsetSeconds == 0) return "";
-        var offset = TimeSpan.FromSeconds(_timeOffsetSeconds);
-        var bellStart = slot.Start - offset;
-        var bellEnd = slot.End - offset;
-        var fmt = _timeOffsetSeconds % 60 == 0 ? @"hh\:mm" : @"hh\:mm\:ss";
-        return $"（实际打铃 {bellStart.ToString(fmt)} — {bellEnd.ToString(fmt)}）";
     }
 
     private void SetMainWindowVisible(bool visible)

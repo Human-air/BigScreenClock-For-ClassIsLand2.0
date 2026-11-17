@@ -82,7 +82,16 @@ public sealed class BackdropLayer : Control
     private bool? _builtWantBlur;        // 上次烘的时候要不要模糊底图（换了要重来）
     private bool _needsRebuild;
     private bool _busy;
-    private bool _releasePending;   // 离开视觉树时后台正好在烘图 → 等它收工再放位图
+    private bool _attached;
+    private bool _suspended;
+    private Window? _ownerWindow;
+    private CancellationTokenSource? _imageCancellation;
+    private CancellationTokenSource? _glassCancellation;
+    private BuildRequest? _request;
+    private static readonly SemaphoreSlim GlassBuildGate = new(1, 1);
+    private bool CanWork => _attached && !_suspended && IsEffectivelyVisible
+        && (_ownerWindow is null || _ownerWindow.IsVisible && _ownerWindow.WindowState != WindowState.Minimized);
+    private readonly record struct BuildRequest(string Path, PixelSize Pixels, int Stretch, double Radius, bool Blur);
 
     private EventHandler? _layoutUpdatedHandler;
 
@@ -208,6 +217,11 @@ public sealed class BackdropLayer : Control
         _imagePath = imagePath;
         _stretch = stretch;
         _dim = dim;
+        if (glassMode != (int)GlassMode.Liquid && _glassMode == (int)GlassMode.Liquid)
+        {
+            _glassCancellation?.Cancel();
+            foreach (var panel in _panels) panel.Dispose();
+        }
         _glassMode = glassMode;
         _glassOpacity = glassOpacity;
         _blurRadius = blurRadius;
@@ -299,7 +313,9 @@ public sealed class BackdropLayer : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        _releasePending = false;   // 又回到树上了：刚才那次「离开时放掉」取消
+        _attached = true;
+        _ownerWindow = TopLevel.GetTopLevel(this) as Window;
+        if (_ownerWindow is not null) _ownerWindow.PropertyChanged += OnOwnerVisibilityChanged;
         _layoutUpdatedHandler ??= (_, _) => OnLayoutUpdated();
         LayoutUpdated += _layoutUpdatedHandler;
         RequestRebuild();
@@ -308,6 +324,9 @@ public sealed class BackdropLayer : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _attached = false;
+        if (_ownerWindow is not null) _ownerWindow.PropertyChanged -= OnOwnerVisibilityChanged;
+        _ownerWindow = null;
         if (_layoutUpdatedHandler is { } handler) LayoutUpdated -= handler;
         ReleaseBitmaps();
     }
@@ -321,16 +340,10 @@ public sealed class BackdropLayer : Control
     /// </summary>
     private void ReleaseBitmaps()
     {
+        _imageCancellation?.Cancel();
+        _glassCancellation?.Cancel();
         _glassTimer?.Stop();
-
-        // 后台正烘着图（它正读着这些像素/位图）就先让开，等它回来再放
-        if (_busy || _glassBusy)
-        {
-            _releasePending = true;
-            return;
-        }
-
-        _releasePending = false;
+        BackgroundDiagnostics.Write("release", $"imageBusy={_busy} glassBusy={_glassBusy}");
         _image?.Dispose();
         _image = null;
 
@@ -347,6 +360,27 @@ public sealed class BackdropLayer : Control
         _needsRebuild = true;
         _glassDirty = true;
         _suppressed = false;
+    }
+
+    public void Suspend()
+    {
+        _suspended = true;
+        ReleaseBitmaps();
+    }
+
+    public void Resume()
+    {
+        _suspended = false;
+        if (!CanWork) return;
+        RequestRebuild();
+        InvalidateVisual();
+    }
+
+    private void OnOwnerVisibilityChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != IsVisibleProperty && e.Property != Window.WindowStateProperty) return;
+        if (CanWork) { RequestRebuild(); InvalidateVisual(); }
+        else ReleaseBitmaps();
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -374,7 +408,11 @@ public sealed class BackdropLayer : Control
         if (size.Width < 2 || size.Height < 2) return;
 
         var want = WantedPixelSize(size);
-        if (!SamePixelBudget(_busy ? _reqPixel : _builtPixel, want)) _needsRebuild = true;
+        if (!SamePixelBudget(_busy ? _reqPixel : _builtPixel, want))
+        {
+            _needsRebuild = true;
+            _imageCancellation?.Cancel();
+        }
 
         if (!SamePixelBudget(_sheetPixel, want))
         {
@@ -443,9 +481,18 @@ public sealed class BackdropLayer : Control
         return scale;
     }
 
+    private double GlassScale(Size size, double? panelArea = null)
+    {
+        var scale = DeviceScale(size);
+        var area = panelArea ?? _panels.Sum(p => p.Rect.Width * p.Rect.Height);
+        if (area > 0) scale = Math.Min(scale, Math.Sqrt(BackdropImageSet.OpticalPixelLimit / area));
+        return scale;
+    }
+
     /// <summary>每次布局跑完后比一比：玻璃所在的矩形动了就重画（Avalonia 是保留式渲染，别人动了不会叫醒这一层）。</summary>
     private void OnLayoutUpdated()
     {
+        if (!CanWork) return;
         if (_needsRebuild) TryStartRebuild(Bounds.Size);
         if (_glassMode == (int)GlassMode.Off) return;
 
@@ -465,7 +512,7 @@ public sealed class BackdropLayer : Control
     public override void Render(DrawingContext context)
     {
         var size = Bounds.Size;
-        if (size.Width < 2 || size.Height < 2) return;
+        if (!CanWork || size.Width < 2 || size.Height < 2) return;
 
         // Render 是在 Avalonia 的渲染循环里被调用的。这个循环里**不能再对任何 Visual 标脏**
         // （InvalidateVisual 会抛 InvalidOperationException: Visual was invalidated during the render pass），
@@ -693,7 +740,7 @@ public sealed class BackdropLayer : Control
         var size = Bounds.Size;
         var entries = ComputeGlassRects(size);
         var liquid = _glassMode == (int)GlassMode.Liquid;
-        var scale = size.Width < 2 ? 0 : DeviceScale(size);
+        var scale = size.Width < 2 ? 0 : GlassScale(size, entries.Sum(e => e.Rect.Width * e.Rect.Height));
         var changed = false;
 
         var next = new List<GlassPanel>(entries.Length);
@@ -811,7 +858,8 @@ public sealed class BackdropLayer : Control
     private void MarkGlassDirty()
     {
         _glassDirty = true;
-        if (Bounds.Width < 2) return;
+        _glassCancellation?.Cancel();
+        if (!CanWork || Bounds.Width < 2) return;
 
         _glassTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         if (!_glassTimer.IsEnabled)
@@ -837,7 +885,7 @@ public sealed class BackdropLayer : Control
     /// </summary>
     private void TryStartBake()
     {
-        if (_glassBusy || !_glassDirty) return;
+        if (!CanWork || _glassBusy || !_glassDirty) return;
         // 防抖计时器还在跑就等它：否则每次布局/渲染都从这里直接烘一遍，上面那个 120ms 防抖等于白搭
         if (_glassTimer is { IsEnabled: true }) return;
         // 按着滑块期间一次都不烘（松手才开新一轮）
@@ -861,7 +909,7 @@ public sealed class BackdropLayer : Control
 
         // 用实际落屏的倍率，不是屏幕缩放：设置页那块预览缩着放，折射图按它实际画到的大小烘就行
         // （按整屏烘一张 2560×1600 的，屏幕上一共才几百像素宽，白烧 15MB + 每秒一次的重算）
-        var scale = DeviceScale(size);
+        var scale = GlassScale(size);
         var layerW = Math.Max(2, (int)Math.Round(size.Width * scale));
         var layerH = Math.Max(2, (int)Math.Round(size.Height * scale));
         if ((long)layerW * layerH > 40_000_000)
@@ -911,88 +959,112 @@ public sealed class BackdropLayer : Control
         _glassDirty = false;
         _glassBusy = true;
 
+        var cancellation = _glassCancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
         Task.Run(() =>
         {
-            foreach (var job in jobs)
+            var entered = false;
+            try
             {
-                try
+                GlassBuildGate.Wait(token);
+                entered = true;
+                foreach (var job in jobs)
                 {
-                    // 缓冲是复用的，烘之前必须先擦干净：不擦的话上一次那几块玻璃的像素会留在原地
-                    var canvas = job.Canvas ?? new uint[job.Width * job.Height];
-                    Array.Clear(canvas, 0, canvas.Length);
-
-                    LiquidGlassBaker.RenderPanel(
-                        canvas, job.Width, job.Height,
-                        job.PanelX, job.PanelY,
-                        job.PanelWidth, job.PanelHeight,
-                        job.RadiusDevice, style,
-                        new OffsetSampler(backdrop, job.Px, job.Py));
-
-                    job.Result = canvas;
-                }
-                catch
-                {
-                    // 这一块算崩了就保持它原来那张，别把大屏拖垮
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var canvas = job.Canvas ?? new uint[checked(job.Width * job.Height)];
+                        Array.Clear(canvas, 0, canvas.Length);
+                        LiquidGlassBaker.RenderPanel(canvas, job.Width, job.Height,
+                            job.PanelX, job.PanelY, job.PanelWidth, job.PanelHeight,
+                            job.RadiusDevice, style, new OffsetSampler(backdrop, job.Px, job.Py), token);
+                        job.Result = canvas;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { BackgroundDiagnostics.Write("glass-error", $"{job.Width}x{job.Height}", ex); }
                 }
             }
+            catch (OperationCanceledException) { }
+            finally { if (entered) GlassBuildGate.Release(); }
+            backdrop = null!; // 后台采样结束后不让排队的 UI 委托继续持有旧整图数组。
 
             Dispatcher.UIThread.Post(() =>
             {
                 _glassBusy = false;
-                if (_releasePending) { ReleaseBitmaps(); return; }
-
+                if (ReferenceEquals(_glassCancellation, cancellation)) _glassCancellation = null;
+                cancellation.Dispose();
+                try
+                {
+                if (!CanWork) { ReleaseBitmaps(); return; }
+                if (token.IsCancellationRequested) { _glassDirty = true; TryStartBake(); return; }
                 var stale = false;
                 foreach (var job in jobs)
                 {
                     var panel = job.Panel;
 
-                    // 算的这段时间里它又动了 / 设置又变了：这一趟结果作废，稍后再来（下面按 stale 再标脏）。
-                    // 注意这里比的是「烘的那份」对「现在这份」，所以只有真变了才算作废。
-                    if (!_panels.Contains(panel)
-                        || !SameRect(panel.Rect, job.Rect)
-                        || Math.Abs(panel.Radius - job.Radius) > 0.01
-                        || job.Version != _contentVersion
-                        || Math.Abs(job.Scale - scale) > 1e-9)
+                    try
                     {
-                        stale = true;
-                        continue;
-                    }
+                        // 算的这段时间里它又动了 / 设置又变了：这一趟结果作废，稍后再来（下面按 stale 再标脏）。
+                        // 注意这里比的是「烘的那份」对「现在这份」，所以只有真变了才算作废。
+                        if (!_panels.Contains(panel)
+                            || !SameRect(panel.Rect, job.Rect)
+                            || Math.Abs(panel.Radius - job.Radius) > 0.01
+                            || job.Version != _contentVersion
+                            || Math.Abs(job.Scale - scale) > 1e-9)
+                        {
+                            stale = true;
+                            continue;
+                        }
 
-                    if (job.Result is not { } result)
-                    {
-                        // 这一块算崩了：别再挂着 NeedsBake 一直等（那会变成每轮布局都白算一遍）
+                        if (job.Result is not { } result)
+                        {
+                            // 这一块算崩了：别再挂着 NeedsBake 一直等（那会变成每轮布局都白算一遍）
+                            panel.NeedsBake = false;
+                            continue;
+                        }
+
+                        // 位图也在 UI 线程上落：渲染器本来就在这个线程读它，锁与画不会打架。
+                        // 尺寸没变就一直复用同一张，不重烘也不新建。
+                        if (panel.Bitmap is not { } bitmap
+                            || bitmap.PixelSize.Width != job.Width || bitmap.PixelSize.Height != job.Height)
+                        {
+                            panel.Bitmap?.Dispose();
+                            panel.Bitmap = null;
+                            panel.Bitmap = bitmap = new WriteableBitmap(new PixelSize(job.Width, job.Height),
+                                                                        new Vector(96, 96), PixelFormat.Bgra8888,
+                                                                        AlphaFormat.Premul);
+                        }
+
+                        using (var frame = bitmap.Lock())
+                            CopyInto(frame, result, job.Width, job.Height);
+
+                        panel.Canvas = result;
+                        panel.Px = job.Px;
+                        panel.Py = job.Py;
+                        panel.BakedRect = job.Rect;
+                        panel.BakedRadius = job.Radius;
+                        panel.BakedVersion = job.Version;
+                        panel.BakedScale = job.Scale;
                         panel.NeedsBake = false;
-                        continue;
                     }
-
-                    // 位图也在 UI 线程上落：渲染器本来就在这个线程读它，锁与画不会打架。
-                    // 尺寸没变就一直复用同一张，不重烘也不新建。
-                    if (panel.Bitmap is not { } bitmap
-                        || bitmap.PixelSize.Width != job.Width || bitmap.PixelSize.Height != job.Height)
+                    catch (Exception ex)
                     {
-                        panel.Bitmap?.Dispose();
-                        panel.Bitmap = bitmap = new WriteableBitmap(new PixelSize(job.Width, job.Height),
-                                                                    new Vector(96, 96), PixelFormat.Bgra8888,
-                                                                    AlphaFormat.Premul);
+                        panel.Dispose();
+                        panel.NeedsBake = false;
+                        BackgroundDiagnostics.Write("glass-publish-error", $"{job.Width}x{job.Height}", ex);
                     }
-
-                    using (var frame = bitmap.Lock())
-                        CopyInto(frame, result, job.Width, job.Height);
-
-                    panel.Canvas = result;
-                    panel.Px = job.Px;
-                    panel.Py = job.Py;
-                    panel.BakedRect = job.Rect;
-                    panel.BakedRadius = job.Radius;
-                    panel.BakedVersion = job.Version;
-                    panel.BakedScale = job.Scale;
-                    panel.NeedsBake = false;
                 }
 
                 if (stale) _glassDirty = true;
 
                 InvalidateVisual();
                 if (_glassDirty) TryStartBake();
+                }
+                finally
+                {
+                    foreach (var job in jobs) { job.Canvas = null; job.Result = null; }
+                    jobs.Clear();
+                }
             });
         });
     }
@@ -1229,79 +1301,72 @@ public sealed class BackdropLayer : Control
         if (Bounds.Width > 1) TryStartRebuild(Bounds.Size);
     }
 
-    /// <summary>当前设置下要不要一张模糊底图（磨砂与折射两档要，「完整显示」的补边也要）。</summary>
     private bool WantBlurNow()
         => _glassMode is (int)GlassMode.Frosted or (int)GlassMode.Liquid
            || _stretch == (int)BackgroundImageStretch.Fit;
 
+    private bool MatchesCurrent(BuildRequest request, Size size)
+        => request.Path == _imagePath && request.Stretch == _stretch
+           && request.Blur == WantBlurNow() && Math.Abs(request.Radius - _blurRadius) < 0.01
+           && SamePixelBudget(request.Pixels, WantedPixelSize(size));
+
     private void TryStartRebuild(Size size)
     {
-        if (_busy || !_needsRebuild) return;
-        if (size.Width < 2 || size.Height < 2) return;   // 还没排布，等 ArrangeOverride 再来
-
-        // 按着滑块期间不解码、也不烘模糊图。以前这里没有这道闸：拖「磨砂颗粒度」每过一格
-        // （0.4 的判定线）就整张 4K 重来一遍 —— 一次一百多兆，几秒钟就能把 CI 的内存看门狗顶爆
-        // （学校那台设置页开着拖滑块被强杀、日志里 1.4~1.5 GiB，就是这条）。
-        // 请求不丢：_needsRebuild 一直是 true，松手时 Apply 里补一次。
-        if (_adjusting) return;
-
-        _needsRebuild = false;
-
-        var path = _imagePath;
-        var radius = _blurRadius;
-        var wantBlur = WantBlurNow();
-        var stretch = _stretch;
-
-        // 倍率得在 UI 线程上问（TopLevel 不能在后台线程碰）；按物理像素宽解码
-        var pixels = WantedPixelSize(size);
-        _reqPixel = pixels;
-
-        // 课前两分钟已经预烘好的那一套：直接拿来用，省掉这一刻的整张解码 + 模糊
-        // （4K 一张图是几百兆的瞬时开销，刚好撞上 CI 的内存看门狗）。
-        // 参数对不上（换了图 / 改了半径 / 尺寸差太多）就取不到，照旧自己烘。
-        if (BackdropPreloadCache.TryTake(path, pixels, stretch, radius, wantBlur) is { } ready)
+        if (!CanWork || !_needsRebuild || size.Width < 2 || size.Height < 2 || _adjusting) return;
+        if (_busy)
         {
-            Adopt(ready, pixels, wantBlur, path, radius);
+            if (_request is { } active && !MatchesCurrent(active, size)) _imageCancellation?.Cancel();
             return;
         }
-
+        var request = new BuildRequest(_imagePath, WantedPixelSize(size), _stretch, _blurRadius, WantBlurNow());
+        _needsRebuild = false;
+        _request = request;
+        _reqPixel = request.Pixels;
+        if (BackdropPreloadCache.TryTake(request.Path, request.Pixels, request.Stretch, request.Radius, request.Blur) is { } ready)
+        {
+            Adopt(ready, request.Pixels, request.Blur, request.Path, request.Radius);
+            return;
+        }
         _busy = true;
-
+        var cancellation = _imageCancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        BackgroundDiagnostics.Write("build-start", $"pixels={request.Pixels} mode={_glassMode}");
         Task.Run(() =>
         {
-            var set = BackdropImageSet.Build(path, pixels, stretch, radius, wantBlur);
-
+            BackdropImageSet? result = null;
+            Exception? failure = null;
+            try { result = BackdropImageSet.Build(request.Path, request.Pixels, request.Stretch, request.Radius, request.Blur, token); }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { failure = ex; }
             Dispatcher.UIThread.Post(() =>
             {
                 _busy = false;
-                if (_releasePending)
+                if (ReferenceEquals(_imageCancellation, cancellation)) _imageCancellation = null;
+                cancellation.Dispose();
+                var accepted = false;
+                try
                 {
-                    // 这期间离开了视觉树：结果扔掉，位图也一并放掉
-                    set.Dispose();
-                    ReleaseBitmaps();
-                    return;
-                }
-                // 期间设置又变了：但只有「烘图真正吃的那几项」变了才值得重来一遍。
-                // 换一次壁纸，设置页会连着写好几项设置（图片路径、填充方式、遮罩……），
-                // 其中只有一项能让这张图作废，后几次写的是同一张图 —— 不做这个判断，
-                // 同一张图会被烘两遍，白造上百兆垃圾（换图那一秒内存窜一截就是这么来的）。
-                var stale = _needsRebuild
-                            && (_imagePath != path || _blurRadius != radius || _stretch != stretch
-                                || WantBlurNow() != wantBlur || _reqPixel != pixels);
-
-                if (stale)
-                {
-                    set.Dispose();
-                }
-                else
-                {
+                    if (!CanWork) return;
+                    if (token.IsCancellationRequested || !MatchesCurrent(request, Bounds.Size))
+                    {
+                        _needsRebuild = true;
+                        return;
+                    }
+                    if (failure is not null) BackgroundDiagnostics.Write("build-error", $"pixels={request.Pixels}", failure);
+                    if (result is null) return;
+                    if (result.BuildError is not null) BackgroundDiagnostics.Write("image-error", $"pixels={request.Pixels}", result.BuildError);
                     _needsRebuild = false;
-                    Adopt(set, pixels, wantBlur, path, radius);
-
-                    // 这一份是自己烘的，缓存里那份同样参数的就多余了（后台别一直攥着上百兆）
-                    BackdropPreloadCache.ReleaseIfMatches(path, pixels, stretch, radius, wantBlur);
+                    Adopt(result, request.Pixels, request.Blur, request.Path, request.Radius);
+                    accepted = true;
+                    BackdropPreloadCache.ReleaseIfMatches(request.Path, request.Pixels, request.Stretch, request.Radius, request.Blur);
+                    BackgroundDiagnostics.Write("build-complete", $"pixels={request.Pixels} empty={result.IsEmpty}");
                 }
-                TryStartRebuild(Bounds.Size);
+                finally
+                {
+                    if (!accepted) result?.Dispose();
+                    result = null; // 已完成的回调不再持有旧图，即使调度器暂留委托也可回收。
+                    if (CanWork) TryStartRebuild(Bounds.Size);
+                }
             });
         });
     }

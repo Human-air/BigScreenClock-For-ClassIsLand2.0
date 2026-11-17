@@ -892,7 +892,7 @@
                          分开写是因为 ClockSurface 的 DataContext 一旦换成 ViewModel，
                          它自己身上的宽高绑定就会跑去 ViewModel 上找 PreviewWidth 了。 -->
                     <Panel Width="{Binding PreviewWidth}" Height="{Binding PreviewHeight}">
-                        <views:ClockSurface IsPreview="True" IsHitTestVisible="False"
+                        <views:ClockSurface x:Name="PreviewSurface" IsPreview="True" IsHitTestVisible="False"
                                             BackdropCornerRadius="12"
                                             DataContext="{Binding PreviewVm}"/>
                     </Panel>

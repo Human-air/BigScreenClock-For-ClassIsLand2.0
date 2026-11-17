@@ -12,24 +12,38 @@ namespace EveningSelfStudyClock.Views;
 /// </summary>
 public partial class FullScreenClockWindow : Window
 {
-    private CancellationTokenSource? _hideCursorCts;
+    private readonly DispatcherTimer _hideCursorTimer;
 
     public FullScreenClockWindow()
     {
         InitializeComponent();
+        // 鼠标每移动一次只重置同一支定时器，避免每秒创建数十个延迟任务和 CTS。
+        _hideCursorTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _hideCursorTimer.Tick += OnHideCursor;
         KeyDown += OnKeyDown;
         PointerMoved += OnPointerMoved;
 
         // 窗口收起时没有限位在起作用了，把滑块范围放回整段（不然上次地震留下的下限会一直卡着设置页）
         PropertyChanged += (_, e) =>
         {
-            if (e.Property != Visual.IsVisibleProperty || IsVisible) return;
-            // 关于窗口是主窗口的从属窗口，主窗口藏起来时它会跟着藏、却不会触发 Closed，
-            // 弹出时给大屏套的蒙版就会一直留在 ClockSurface 上（重开大屏还是糊的）。这里主动收掉。
-            Surface.DismissAboutPopup();
+            if (e.Property != Visual.IsVisibleProperty && e.Property != WindowStateProperty) return;
+            if (IsVisible && WindowState != WindowState.Minimized)
+            {
+                Surface.ResumeVisualWork();
+                return;
+            }
+
+            _hideCursorTimer.Stop();
+            Surface.SuspendVisualWork();
             (DataContext as FullScreenClockViewModel)?.ResetPositionLimits();
         };
-        Closed += (_, _) => (DataContext as FullScreenClockViewModel)?.ResetPositionLimits();
+        Closed += (_, _) =>
+        {
+            _hideCursorTimer.Stop();
+            _hideCursorTimer.Tick -= OnHideCursor;
+            Surface.SuspendVisualWork();
+            (DataContext as FullScreenClockViewModel)?.ResetPositionLimits();
+        };
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -58,17 +72,16 @@ public partial class FullScreenClockWindow : Window
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
         Cursor = Cursor.Default;
-        _hideCursorCts?.Cancel();
+        _hideCursorTimer.Stop();
+        // 快速设置开着、窗口隐藏或最小化时不安排隐藏鼠标的工作。
+        if (Surface.IsQuickSettingsOpen || !IsVisible || WindowState == WindowState.Minimized) return;
+        _hideCursorTimer.Start();
+    }
 
-        // 快速设置开着时别把鼠标藏起来：面板里要拖滑块、点下拉框
-        if (Surface.IsQuickSettingsOpen) return;
-
-        _hideCursorCts = new CancellationTokenSource();
-        var token = _hideCursorCts.Token;
-        Task.Delay(10000, token).ContinueWith(_ =>
-        {
-            if (!token.IsCancellationRequested)
-                Dispatcher.UIThread.Post(() => Cursor = null);
-        }, TaskScheduler.Default);
+    private void OnHideCursor(object? sender, EventArgs e)
+    {
+        _hideCursorTimer.Stop();
+        if (IsVisible && WindowState != WindowState.Minimized && !Surface.IsQuickSettingsOpen)
+            Cursor = null;
     }
 }

@@ -107,7 +107,7 @@ public static class LiquidGlassBaker
     public static void RenderPanel(
         uint[] layer, int layerWidth, int layerHeight,
         double panelX, double panelY, double panelWidth, double panelHeight, double radius,
-        in LiquidGlassStyle style, IBackdropSampler backdrop)
+        in LiquidGlassStyle style, IBackdropSampler backdrop, CancellationToken cancellationToken = default)
     {
         if (layer.Length < layerWidth * layerHeight) return;
         if (panelWidth < 2 || panelHeight < 2) return;
@@ -146,6 +146,7 @@ public static class LiquidGlassBaker
 
         for (var y = y0; y <= y1; y++)
         {
+            if ((y & 15) == 0) cancellationToken.ThrowIfCancellationRequested();
             var localY = y + 0.5 - panelY;      // 相对玻璃左上角
             var cy = localY - halfH;            // 相对玻璃中心
             var rowBase = y * layerWidth;

@@ -25,6 +25,7 @@ public class SnitchHotkeyService : IHostedService, IDisposable
     private readonly object _gate = new();
 
     private Thread? _thread;
+    private bool _stopped;
     private IntPtr _hwnd;
     private uint _registeredMods;
     private uint _registeredVk;
@@ -47,23 +48,34 @@ public class SnitchHotkeyService : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _settings.PropertyChanged += OnSettingsPropertyChanged;
-        ApplyRegistration();
+        lock (_gate)
+        {
+            _stopped = false;
+            _settings.PropertyChanged -= OnSettingsPropertyChanged;
+            _settings.PropertyChanged += OnSettingsPropertyChanged;
+            ApplyRegistration();
+        }
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _settings.PropertyChanged -= OnSettingsPropertyChanged;
-        Unregister();
-        QuitThread();
+        StopRegistration();
         return Task.CompletedTask;
     }
 
-    public void Dispose()
+    public void Dispose() => StopRegistration();
+
+    private void StopRegistration()
     {
-        Unregister();
-        QuitThread();
+        lock (_gate)
+        {
+            // An already-dispatched settings event must not resurrect the native worker after teardown.
+            _stopped = true;
+            _settings.PropertyChanged -= OnSettingsPropertyChanged;
+            UnregisterInternal();
+            QuitThread();
+        }
     }
 
     private void OnSettingsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -79,6 +91,7 @@ public class SnitchHotkeyService : IHostedService, IDisposable
     {
         lock (_gate)
         {
+            if (_stopped) return;
             UnregisterInternal();
 
             if (!_settings.EnableSnitch) return;
@@ -89,14 +102,6 @@ public class SnitchHotkeyService : IHostedService, IDisposable
 
             _registeredMods = mods;
             _registeredVk = vk;
-        }
-    }
-
-    private void Unregister()
-    {
-        lock (_gate)
-        {
-            UnregisterInternal();
         }
     }
 

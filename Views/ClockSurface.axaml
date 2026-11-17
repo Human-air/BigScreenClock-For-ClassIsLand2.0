@@ -294,9 +294,10 @@
                     <Button x:Name="SettingsButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="10,6" MinWidth="48" MinHeight="48"
+                            CornerRadius="6" Padding="10,6"
                             Cursor="Hand"
                             ToolTip.Tip="设置"
+                            ClickMode="Press"
                             Click="SettingsButton_Click">
                         <TextBlock Classes="icon" Text="{ci:LI Settings}" FontSize="16"
                                    Foreground="{Binding Chrome.ButtonForeground}" VerticalAlignment="Center"/>
@@ -311,7 +312,7 @@
                     <Button x:Name="MinimizeButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="16,10" MinHeight="48"
+                            CornerRadius="6" Padding="12,6"
                             ClickMode="Press"
                             Cursor="Hand"
                             Click="MinimizeButton_Click">
@@ -329,7 +330,7 @@
                     <Button x:Name="ExitButton"
                             FontSize="15" Foreground="{Binding Chrome.ButtonForeground}"
                             Background="{Binding Chrome.ButtonBackground}" BorderThickness="0"
-                            CornerRadius="6" Padding="16,10" MinHeight="48"
+                            CornerRadius="6" Padding="12,6"
                             ClickMode="Press"
                             Cursor="Hand"
                             Click="ExitButton_Click">

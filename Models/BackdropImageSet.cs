@@ -15,6 +15,15 @@ namespace EveningSelfStudyClock.Models;
 /// </summary>
 public sealed class BackdropImageSet : IDisposable
 {
+    // Shared by the live window, preview and preloader: only one large decode/blur at a time.
+    private static readonly SemaphoreSlim BuildGate = new(1, 1);
+
+    /// <summary>光学采样最多约 1080p；清晰背景仍按实际显示尺寸解码。</summary>
+    public const int OpticalPixelLimit = 1920 * 1080;
+
+    /// <summary>构建失败的原因，供调用方写诊断日志；取消通过异常传播。</summary>
+    public Exception? BuildError { get; private set; }
+
     /// <summary>是按哪张图烘的（绝对路径）。</summary>
     public string Path { get; private init; } = "";
 
@@ -40,10 +49,10 @@ public sealed class BackdropImageSet : IDisposable
     public bool IsEmpty => Sharp is null;
 
     /// <summary>
-    /// 同步烘一套。纯 CPU 的活，可以扔在后台线程上；任何异常都吞掉并返回空的一套
-    /// （图读不了不该把整个大屏拖垮）。
+    /// 同步烘一套。后台执行，跨窗口串行。普通失败返回空结果并保留 BuildError，取消则抛出取消异常。
     /// </summary>
-    public static BackdropImageSet Build(string path, PixelSize pixels, int stretch, double blurRadius, bool wantBlur)
+    public static BackdropImageSet Build(string path, PixelSize pixels, int stretch, double blurRadius, bool wantBlur,
+        CancellationToken cancellationToken = default)
     {
         var set = new BackdropImageSet
         {
@@ -53,34 +62,65 @@ public sealed class BackdropImageSet : IDisposable
             WantBlur = wantBlur,
             Pixel = pixels,
         };
+        cancellationToken.ThrowIfCancellationRequested();
+        if (path.Length == 0) return set;
+        if (!File.Exists(path))
+        {
+            set.BuildError = new FileNotFoundException("背景图片不存在。", path);
+            return set;
+        }
 
+        // The gate bounds temporary buffers across independent BackdropLayer instances.
+        BuildGate.Wait(cancellationToken);
         try
         {
-            if (path.Length > 0 && File.Exists(path))
-            {
-                // 解码尺寸要按**原图**多大来定：解码器给多宽就解多宽，小图会被放大着解，
-                // 白白多占一倍半内存还多插一遍值。原图尺寸只读文件头，不解码。
-                var native = ImageHeader.ReadSize(path) ?? pixels;
-                var decode = BackgroundImageMap.DecodeSize(native, pixels, stretch);
+            cancellationToken.ThrowIfCancellationRequested();
+            var native = ImageHeader.ReadSize(path) ?? pixels;
+            var decode = BackgroundImageMap.DecodeSize(native, pixels, stretch);
+            using var stream = File.OpenRead(path);
+            set.Sharp = Bitmap.DecodeToWidth(stream, decode.Width, BitmapInterpolationMode.HighQuality);
+            cancellationToken.ThrowIfCancellationRequested();
 
-                using var stream = File.OpenRead(path);
-                set.Sharp = Bitmap.DecodeToWidth(stream, decode.Width, BitmapInterpolationMode.HighQuality);
-                // 折射要在 CPU 上逐像素采样，顺手把像素倒成连续数组（位图每次读都得先 Lock，太贵）
-                set.SharpPixels = ReadPixels(set.Sharp);
-                set.SharpPixelsSize = set.Sharp.PixelSize;
-                if (wantBlur)
-                {
-                    set.Blur = BakeBlur(set.Sharp, BlurRadiusInImagePixels(blurRadius, set.Sharp.PixelSize, pixels, stretch));
-                    if (set.Blur is not null) set.BlurPixels = ReadPixels(set.Blur);
-                }
+            // Clear background rendering keeps the requested resolution. Refraction and blur
+            // need smooth optical samples, not another full 4K copy for every retained buffer.
+            var opticalSize = OpticalSize(set.Sharp.PixelSize);
+            using var reduced = opticalSize == set.Sharp.PixelSize
+                ? null
+                : set.Sharp.CreateScaledBitmap(opticalSize, BitmapInterpolationMode.HighQuality);
+            var optical = reduced ?? set.Sharp;
+            cancellationToken.ThrowIfCancellationRequested();
+            set.SharpPixels = ReadPixels(optical, cancellationToken);
+            set.SharpPixelsSize = optical.PixelSize;
+            if (wantBlur)
+            {
+                var blurred = BakeBlur(optical,
+                    BlurRadiusInImagePixels(blurRadius, optical.PixelSize, pixels, stretch), cancellationToken);
+                set.Blur = blurred.Bitmap;
+                set.BlurPixels = blurred.Pixels;
             }
+            cancellationToken.ThrowIfCancellationRequested();
         }
-        catch
+        catch (OperationCanceledException)
         {
             set.Dispose();
+            throw;
         }
-
+        catch (Exception ex)
+        {
+            set.BuildError = ex;
+            set.Dispose();
+        }
+        finally { BuildGate.Release(); }
         return set;
+    }
+
+    private static PixelSize OpticalSize(PixelSize source)
+    {
+        var count = (long)source.Width * source.Height;
+        if (count <= OpticalPixelLimit) return source;
+        var scale = Math.Sqrt(OpticalPixelLimit / (double)count);
+        return new PixelSize(Math.Max(1, (int)Math.Floor(source.Width * scale)),
+            Math.Max(1, (int)Math.Floor(source.Height * scale)));
     }
 
     /// <summary>
@@ -93,7 +133,7 @@ public sealed class BackdropImageSet : IDisposable
     /// </summary>
     public bool Matches(string path, PixelSize pixels, int stretch, double blurRadius, bool wantBlur)
     {
-        if (path != Path || stretch != Stretch || wantBlur != WantBlur) return false;
+        if (IsEmpty || path != Path || stretch != Stretch || wantBlur != WantBlur) return false;
 
         // 半径只在「要模糊」时才算数（不要模糊时这份参数根本没用上），容差与 Apply 里的重烘判断一致
         if (wantBlur && Math.Abs(blurRadius - BlurRadius) > 0.4) return false;
@@ -110,12 +150,15 @@ public sealed class BackdropImageSet : IDisposable
 
     public void Dispose()
     {
-        Sharp?.Dispose();
+        var sharp = Sharp;
+        var blur = Blur;
         Sharp = null;
-        Blur?.Dispose();
         Blur = null;
         SharpPixels = null;
         BlurPixels = null;
+        SharpPixelsSize = default;
+        try { sharp?.Dispose(); }
+        finally { blur?.Dispose(); }
     }
 
     /// <summary>
@@ -142,80 +185,70 @@ public sealed class BackdropImageSet : IDisposable
     }
 
     /// <summary>
-    /// 烘一张模糊底图：把清晰图的像素整张拷出来、做一遍 Stack Blur。尺寸与清晰图一模一样。
-    ///
-    /// 为什么是「模糊整张图」而不是「按窗口尺寸烘一张模糊的全屏画面」：
-    /// 全屏画面得靠 RenderTargetBitmap 渲，那是渲染后端相关的（换后端、在后台线程上渲都可能出岔子），
-    /// 一旦抛异常整块背景图就没了。模糊整张图是纯 CPU 的，不碰渲染器。
-    /// 至于「玻璃里透着模糊、玻璃外是清晰」两者对得上，靠的是绘制时共用同一个
-    /// <see cref="BackgroundImageMap.ComputeDestRect"/>，与底图尺寸无关。
+    /// 模糊低分辨率光学底图，最终像素数组直接作为折射快照使用，不再另拷一份。
+    /// 模糊半径按光学图的实际像素换算，因此屏幕上的模糊尺度保持一致。
     /// </summary>
-    private static WriteableBitmap? BakeBlur(Bitmap sharp, double radius)
+    private static (WriteableBitmap? Bitmap, uint[]? Pixels) BakeBlur(
+        Bitmap source, double radius, CancellationToken cancellationToken)
     {
-        var pixels = sharp.PixelSize;
-        if (pixels.Width < 2 || pixels.Height < 2) return null;
-
-        var blur = new WriteableBitmap(pixels, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        using var framebuffer = blur.Lock();
-        sharp.CopyPixels(framebuffer, AlphaFormat.Premul);
-        BlurFramebuffer(framebuffer, pixels.Width, pixels.Height, (int)Math.Round(radius));
-        return blur;
+        var size = source.PixelSize;
+        if (size.Width < 2 || size.Height < 2) return (null, null);
+        var bitmap = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+        try
+        {
+            using var framebuffer = bitmap.Lock();
+            source.CopyPixels(framebuffer, AlphaFormat.Premul);
+            var pixels = CopyOut(framebuffer, size, cancellationToken);
+            StackBlur.Apply(pixels, size.Width, size.Height, (int)Math.Round(radius), cancellationToken);
+            CopyInto(framebuffer, pixels, size, cancellationToken);
+            return (bitmap, pixels);
+        }
+        catch
+        {
+            // Until the method returns, this bitmap is not owned by set.Blur.
+            bitmap.Dispose();
+            throw;
+        }
     }
 
-    /// <summary>
-    /// 把一张位图的像素倒进连续数组。位图每行可能带对齐 padding，必须逐行拷，
-    /// 不能把首地址直接当成 width×height 的连续内存。
-    /// </summary>
-    private static uint[]? ReadPixels(Bitmap source)
+    private static uint[]? ReadPixels(Bitmap source, CancellationToken cancellationToken)
     {
         var size = source.PixelSize;
         if (size.Width < 1 || size.Height < 1) return null;
-
-        // CopyPixels 得先有个锁住的缓冲当落脚点，借一张临时位图用一下
-        var staging = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-        try
-        {
-            using var frame = staging.Lock();
-            source.CopyPixels(frame, AlphaFormat.Premul);
-            return CopyOut(frame, size);
-        }
-        finally { staging.Dispose(); }
+        using var staging = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+        using var frame = staging.Lock();
+        source.CopyPixels(frame, AlphaFormat.Premul);
+        return CopyOut(frame, size, cancellationToken);
     }
 
-    private static unsafe uint[] CopyOut(ILockedFramebuffer frame, PixelSize size)
+    private static unsafe uint[] CopyOut(ILockedFramebuffer frame, PixelSize size, CancellationToken cancellationToken)
     {
-        var stride = frame.RowBytes;
-        var origin = (byte*)frame.Address;
-        var rowBytes = (long)size.Width * 4;
-        var pixels = new uint[size.Width * size.Height];
-
+        var rowBytes = checked((long)size.Width * 4);
+        var pixels = new uint[checked(size.Width * size.Height)];
         fixed (uint* dst = pixels)
         {
             for (var y = 0; y < size.Height; y++)
-                Buffer.MemoryCopy(origin + (long)y * stride, dst + (long)y * size.Width, rowBytes, rowBytes);
+            {
+                if ((y & 31) == 0) cancellationToken.ThrowIfCancellationRequested();
+                Buffer.MemoryCopy((byte*)frame.Address + (long)y * frame.RowBytes,
+                    dst + (long)y * size.Width, rowBytes, rowBytes);
+            }
         }
         return pixels;
     }
 
-    /// <summary>把锁住的缓冲倒进连续数组、模糊、再倒回去（缓冲的每行可能带 padding，不能直接当连续内存用）。</summary>
-    private static unsafe void BlurFramebuffer(ILockedFramebuffer framebuffer, int width, int height, int radius)
+    private static unsafe void CopyInto(ILockedFramebuffer frame, uint[] pixels, PixelSize size,
+        CancellationToken cancellationToken)
     {
-        if (radius < 1) return;
-
-        var stride = framebuffer.RowBytes;
-        var origin = (byte*)framebuffer.Address;
-        var rowBytes = (long)width * 4;
-        var pixels = new uint[width * height];
-
-        fixed (uint* buffer = pixels)
+        var rowBytes = checked((long)size.Width * 4);
+        fixed (uint* src = pixels)
         {
-            for (var y = 0; y < height; y++)
-                Buffer.MemoryCopy(origin + (long)y * stride, buffer + (long)y * width, rowBytes, rowBytes);
-
-            StackBlur.Apply(pixels, width, height, radius);
-
-            for (var y = 0; y < height; y++)
-                Buffer.MemoryCopy(buffer + (long)y * width, origin + (long)y * stride, rowBytes, rowBytes);
+            for (var y = 0; y < size.Height; y++)
+            {
+                if ((y & 31) == 0) cancellationToken.ThrowIfCancellationRequested();
+                Buffer.MemoryCopy(src + (long)y * size.Width,
+                    (byte*)frame.Address + (long)y * frame.RowBytes, rowBytes, rowBytes);
+            }
         }
     }
 }

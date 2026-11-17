@@ -96,13 +96,25 @@ public partial class ClockSurface : UserControl
     {
         base.OnAttachedToVisualTree(e);
         HookSignals();
+        ResumeVisualWork();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
         UnhookSignals();
+        SuspendVisualWork();
     }
+
+    public void SuspendVisualWork()
+    {
+        StopMarquee(AlertDetailScroll);
+        CloseQuickSettings();
+        DismissAboutPopup();
+        Backdrop.Suspend();
+    }
+
+    public void ResumeVisualWork() => Backdrop.Resume();
 
     private void HookSignals()
     {

@@ -14,6 +14,21 @@ namespace EveningSelfStudyClock.Services;
 /// </remarks>
 public static class CiTimePointFormat
 {
+    public static string Range(TimeSpan start, TimeSpan end, bool seconds = false)
+    {
+        var format = seconds ? @"hh\:mm\:ss" : @"hh\:mm";
+        return start.ToString(format) + " — " + end.ToString(format);
+    }
+
+    public static string Select(int type, string range, long elapsed, long left, long total,
+        bool countdownEnabled, int countdownSeconds, int secondsThreshold, bool nonExact)
+    {
+        if (countdownEnabled && left <= countdownSeconds)
+            return "-" + (nonExact ? Single(left, true) : Exact(left));
+        if (type == 4 && left <= secondsThreshold) type = 5;
+        return type == 0 ? range : ExtraInfo(type, elapsed, left, total);
+    }
+
     /// <summary>附加信息类型 → 显示文本。0（时间点持续时间）返回空串：课程行本身就写着起止时间。</summary>
     public static string ExtraInfo(int type, long elapsedSeconds, long leftSeconds, long totalSeconds)
     {

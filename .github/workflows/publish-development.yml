@@ -35,6 +35,14 @@ jobs:
       - name: Touch button input checks
         if: hashFiles('source/tests/TouchButtons/TouchButtons.csproj') != ''
         run: dotnet run --project source/tests/TouchButtons/TouchButtons.csproj
+      - name: Image memory regression
+        run: dotnet run --project source/tests/BackgroundMemory/BackgroundMemory.csproj
+      - name: Backdrop lifecycle stress
+        run: dotnet run --project source/tests/BackdropLifecycle/BackdropLifecycle.csproj
+      - name: Bounded UI queue lifecycle
+        run: dotnet run --project source/tests/UiWork/UiWork.csproj
+      - name: Hotkey lifecycle
+        run: dotnet run --project source/tests/HotkeyLifetime/HotkeyLifetime.csproj
       - name: Build package
         shell: pwsh
         env:

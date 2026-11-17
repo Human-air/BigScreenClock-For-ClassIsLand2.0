@@ -112,6 +112,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         // CI 每打开一次设置页都可能新建一个页面，不摘的话旧页面永远活着，还接着干 UI 活。
         Loaded += (_, _) =>
         {
+            if (!Embedded) PreviewSurface.ResumeVisualWork();
             HookPositionLimits();
             HookLayoutSliders();
             SubscribeSharedEvents();
@@ -122,7 +123,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
                 _ = RefreshReleaseNotesAsync();
             }
         };
-        Unloaded += (_, _) => { UnhookPositionLimits(); StopLayoutAdjust(); UnsubscribeSharedEvents(); };
+        Unloaded += (_, _) =>
+        {
+            PreviewSurface.SuspendVisualWork();
+            UnhookPositionLimits();
+            StopLayoutAdjust();
+            UnsubscribeSharedEvents();
+        };
 
         if (Embedded) ApplyEmbeddedLayout();
 
@@ -153,7 +160,10 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     private void ApplyEmbeddedLayout()
     {
         RootGrid.ColumnDefinitions[1].Width = new GridLength(0);
+        PreviewSurface.SuspendVisualWork();
         PreviewPanel.IsVisible = false;
+        // 隐藏并不等于离开视觉树：快速设置无需另一份预览，直接摘掉右栏内容。
+        PreviewPanel.Children.Clear();
     }
 
     private void ShowLetterIfNeeded()
@@ -855,6 +865,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     private void HookPositionLimits()
     {
         if (_clockViewModel is null) return;
+        _clockViewModel.PropertyChanged -= OnClockViewModelChanged;
         _clockViewModel.PropertyChanged += OnClockViewModelChanged;
         OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.ClockPositionMin)));
         OnClockViewModelChanged(null, new PropertyChangedEventArgs(nameof(FullScreenClockViewModel.VolumePositionMin)));

@@ -68,11 +68,10 @@ public class AutoTriggerService : BackgroundService
         // DoCheck 只在「状态或课程真的变了」时才动手，所以每秒跑一次也不会重复开关窗口。
         _lessonsService.PostMainTimerTicked += OnClassOrStateChanged;
 
-        // 初始检查
-        DoCheck();
-
         try
         {
+            // 初始检查也在 finally 保护范围内，失败时仍会摘掉课程服务订阅。
+            DoCheck();
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (OperationCanceledException)

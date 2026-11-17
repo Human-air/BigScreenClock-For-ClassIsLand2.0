@@ -60,7 +60,7 @@ foreach (var name in new[] { "ExitButton", "MinimizeButton" })
         Check(clicks == before + 1, $"{name}/{type}: outside release must not activate twice");
     }
 
-    Check(button.Bounds.Height >= 48, $"{name}: touch target must be at least 48 DIP tall");
+    Check(button.Padding == new Thickness(12, 6), $"{name}: original compact padding is preserved");
 
     var count = clicks;
     var mouse = new Pointer(2, PointerType.Mouse, true);
@@ -228,6 +228,7 @@ foreach (var (top, compact) in new[] { (true,false), (true,true), (false,true), 
 {
     CourseInfoPlacement.Apply(coursePlacement,headerPlacement,footerPlacement,top,compact);
     Check(ReferenceEquals(coursePlacement.Parent, top ? headerPlacement : footerPlacement), "course moves to correct parent");
+    if (top) Check(coursePlacement.Margin.Top + headerPlacement.RowSpacing >= 18, "top course glass has separation from header bubbles");
     Check(headerPlacement.RowDefinitions.Count == (top ? 3 : 2), "course restores header rows without extra spacing");
     Check(Grid.GetRow(coursePlacement) == (top ? 2 : 0), "course row follows position");
     Check(Grid.GetColumnSpan(coursePlacement) == (top || compact ? 3 : 1), "course restores full/half span");

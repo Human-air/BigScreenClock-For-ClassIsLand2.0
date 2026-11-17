@@ -117,7 +117,7 @@ public class BackdropPreloadService : BackgroundService
 
             if (BackdropPreloadCache.IsReadyFor(path, size, stretch, radius, wantBlur)) return;
             token.ThrowIfCancellationRequested();
-            pending = await Task.Run(() => BackdropImageSet.Build(path, size, stretch, radius, wantBlur), token);
+            pending = await Task.Run(() => BackdropImageSet.Build(path, size, stretch, radius, wantBlur, token), token);
             token.ThrowIfCancellationRequested();
 
             if (pending.IsEmpty)
@@ -126,11 +126,11 @@ public class BackdropPreloadService : BackgroundService
                 return;
             }
 
-            if (!BackdropPreloadCache.Publish(pending, generation)) return;
-            pending = null; // 所有权已经交给缓存
-
-            // 提前回收预烘时的临时数组，避免开屏时仍占着内存。
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+            var published = await Dispatcher.UIThread.InvokeAsync(() =>
+                !token.IsCancellationRequested && !_viewModel.IsWindowVisible
+                && BackdropPreloadCache.Publish(pending, generation));
+            if (!published) return;
+            pending = null; // 所有权已经交给缓存；窗口已打开时不再额外保留一套预烘资源。
 
             Log($"已就绪：{Path.GetFileName(path)} @ {size.Width}×{size.Height}，" +
                 $"模糊半径 {radius:0.#}，距上课 {lead.TotalSeconds:0} 秒");

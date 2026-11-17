@@ -18,8 +18,8 @@ public static unsafe class StackBlur
     /// <summary>
     /// 模糊半径的硬上限。
     ///
-    /// 下面那张除法查找表是 <c>256 × (radius+1)²</c> 个 <c>short</c>，**随半径平方涨**：
-    /// 半径 88 时约 4 MB，半径 625 时 200 MB，半径 1667 时 1.4 GB —— 单个数组就能顶爆
+    /// 下面那张除法查找表是 <c>256 × (radius+1)²</c> 个 <c>byte</c>，**随半径平方涨**：
+    /// 半径 88 时约 2 MB，半径 625 时 100 MB，半径 1667 时约 700 MB —— 单个数组就能顶爆
     /// CI 那条 1.40 GiB 的内存看门狗。而半径一放大几十倍，恰恰是「极长条图片」能干出来的事
     /// （底图按它自己的像素烘，屏幕上一屏才多少个像素）。所以这里兜一道底。
     /// </summary>
@@ -29,17 +29,18 @@ public static unsafe class StackBlur
     /// 就地模糊。<paramref name="pixels"/> 是行优先、连续排布的 BGRA 像素。
     /// </summary>
     /// <param name="radius">模糊半径（像素）。小于 1 直接返回；大于 <see cref="MaxRadius"/> 按上限算。</param>
-    public static void Apply(uint[] pixels, int width, int height, int radius)
+    public static void Apply(uint[] pixels, int width, int height, int radius, CancellationToken cancellationToken = default)
     {
         if (radius > MaxRadius) radius = MaxRadius;   // 见 MaxRadius：防的是查找表按平方涨
         if (radius < 1 || width < 2 || height < 2) return;
-        if (pixels.Length < width * height) return;
+        if ((long)width * height > pixels.Length) return;
+        cancellationToken.ThrowIfCancellationRequested();
 
         fixed (uint* pix = pixels)
-            Blur(pix, width, height, radius);
+            Blur(pix, width, height, radius, cancellationToken);
     }
 
-    private static void Blur(uint* pix, int width, int height, int radius)
+    private static void Blur(uint* pix, int width, int height, int radius, CancellationToken cancellationToken)
     {
         var wm = width - 1;
         var hm = height - 1;
@@ -51,14 +52,14 @@ public static unsafe class StackBlur
         divsum *= divsum;
 
         // 查表代替除法：dv[加权和] = 加权和 / divsum
-        var dv = new short[256 * divsum];
+        var dv = new byte[256 * divsum];
         for (var i = 0; i < 256 * divsum; i++)
-            dv[i] = (short)(i / divsum);
+            dv[i] = (byte)(i / divsum);
 
-        // 横竖两遍的中间结果（每通道 0~255）
-        var r = new short[wh];
-        var g = new short[wh];
-        var b = new short[wh];
+        // 中间颜色始终在 0~255 内，byte 足够；不用为三通道分配三份 short[]。
+        var r = new byte[wh];
+        var g = new byte[wh];
+        var b = new byte[wh];
 
         // 环形队列：最多同时装着 div 个像素的三个通道
         var stack = new int[div * 3];
@@ -73,6 +74,7 @@ public static unsafe class StackBlur
         // ===== 横向 =====
         for (var y = 0; y < height; y++)
         {
+            if ((y & 31) == 0) cancellationToken.ThrowIfCancellationRequested();
             int rsum = 0, gsum = 0, bsum = 0;
             int routsum = 0, goutsum = 0, boutsum = 0;
             int rinsum = 0, ginsum = 0, binsum = 0;
@@ -160,6 +162,7 @@ public static unsafe class StackBlur
         // ===== 纵向（读上面存下的 r/g/b，直接写回 pix）=====
         for (var x = 0; x < width; x++)
         {
+            if ((x & 31) == 0) cancellationToken.ThrowIfCancellationRequested();
             int rsum = 0, gsum = 0, bsum = 0;
             int routsum = 0, goutsum = 0, boutsum = 0;
             int rinsum = 0, ginsum = 0, binsum = 0;

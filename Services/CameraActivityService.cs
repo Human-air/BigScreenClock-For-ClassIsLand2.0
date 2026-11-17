@@ -103,50 +103,76 @@ public sealed class CameraActivityService : IDisposable
     public List<CameraDevice> EnumerateDevices()
     {
         var devices = new List<CameraDevice>();
+        IMFAttributes? attributes = null;
+        IntPtr array = IntPtr.Zero;
+        uint count = 0;
+        var enumerationSucceeded = false;
         try
         {
             EnsureMediaFoundation();
-
-            var hr = PInvoke.MFCreateAttributes(out var attributes, 1);
-            if (hr.Failed) return devices;
+            var hr = PInvoke.MFCreateAttributes(out attributes, 1);
+            if (hr.Failed || attributes is null) return devices;
 
             attributes.SetGUID(PInvoke.MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
                                PInvoke.MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
 
-            // MFEnumDeviceSources 返回的是「接口指针数组」，CsWin32 生成的托管签名把数组当成了
-            // 单个 out 接口，这里用原始声明按真实 ABI 取（调用后数组与各接口都要自己释放）。
-            var enumerateHr = MFEnumDeviceSourcesRaw(attributes, out var array, out var count);
+            // Array entries retain the native references returned by MFEnumDeviceSources.
+            // GetObjectForIUnknown creates an additional RCW acquisition, released separately below.
+            var enumerateHr = MFEnumDeviceSourcesRaw(attributes, out array, out count);
             if (enumerateHr < 0) return devices;
+            enumerationSucceeded = true;
+            if (array == IntPtr.Zero) return devices;
 
-            try
+            for (uint i = 0; i < count; i++)
             {
-                for (var i = 0; i < count; i++)
+                var ptr = Marshal.ReadIntPtr(array, checked((int)i * IntPtr.Size));
+                if (ptr == IntPtr.Zero) continue;
+                object? ownedActivation = null;
+                try
                 {
-                    var ptr = Marshal.ReadIntPtr(array, i * IntPtr.Size);
-                    if (ptr == IntPtr.Zero) continue;
-
-                    var activate = (IMFActivate)Marshal.GetObjectForIUnknown(ptr);
+                    ownedActivation = Marshal.GetObjectForIUnknown(ptr);
+                    var activate = (IMFActivate)ownedActivation;
                     var name = AttrString(activate, PInvoke.MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME).Trim();
                     var link = AttrString(activate, PInvoke.MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK).Trim();
                     if (name.Length > 0) devices.Add(new CameraDevice(name, link));
                 }
-            }
-            finally
-            {
-                for (var i = 0; i < count; i++)
-                {
-                    var ptr = Marshal.ReadIntPtr(array, i * IntPtr.Size);
-                    if (ptr != IntPtr.Zero) Marshal.Release(ptr);
-                }
-                CoTaskMemFreeRaw(array);
+                finally { ReleaseOwnedComObject(ownedActivation); }
             }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[摄像头] 枚举设备失败：{ex}");
         }
-
+        finally
+        {
+            try
+            {
+                if (array != IntPtr.Zero)
+                {
+                    try
+                    {
+                        // On failure the returned count is not guaranteed valid; do not dereference it.
+                        if (enumerationSucceeded)
+                            for (uint i = 0; i < count; i++)
+                            {
+                                var ptr = Marshal.ReadIntPtr(array, checked((int)i * IntPtr.Size));
+                                if (ptr != IntPtr.Zero) Marshal.Release(ptr);
+                            }
+                    }
+                    finally { CoTaskMemFreeRaw(array); }
+                }
+            }
+            finally { ReleaseOwnedComObject(attributes); }
+        }
         return devices;
+    }
+
+    // Only for factory-created/enumerated locals we own. Never apply to borrowed activity reports.
+    private static void ReleaseOwnedComObject(object? value)
+    {
+        if (value is null || !Marshal.IsComObject(value)) return;
+        try { Marshal.ReleaseComObject(value); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[摄像头] 释放本地 COM 引用失败：{ex.Message}"); }
     }
 
     /// <summary>MF 活动上报回调（MF 的后台线程调用）：把上报整理解成占用快照。</summary>
@@ -208,22 +234,28 @@ public sealed class CameraActivityService : IDisposable
 
     private static string ProcessName(uint pid)
     {
-        try { return Process.GetProcessById((int)pid).ProcessName; }
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            return process.ProcessName;
+        }
         catch { return "未知程序"; }   // 进程已退出/受保护进程读不到名字
     }
 
     /// <summary>读 IMFActivate 上的字符串属性（MF 分配的内存要自己释放）。</summary>
     private static unsafe string AttrString(IMFActivate activate, Guid key)
     {
+        PWSTR value = default;
         try
         {
-            activate.GetAllocatedString(key, out var value, out _);
-            if (value.Value == null) return "";
-            var text = value.ToString();
-            PInvoke.CoTaskMemFree(value.Value);
-            return text;
+            activate.GetAllocatedString(key, out value, out _);
+            return value.Value == null ? "" : value.ToString();
         }
         catch { return ""; }
+        finally
+        {
+            if (value.Value != null) PInvoke.CoTaskMemFree(value.Value);
+        }
     }
 
     private unsafe delegate void StringGetter(PWSTR buffer, uint cch, out uint written);

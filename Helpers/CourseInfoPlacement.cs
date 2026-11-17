@@ -18,6 +18,9 @@ public static class CourseInfoPlacement
         if (!atTop && header.RowDefinitions.Count == 3
             && !header.Children.Any(child => Grid.GetRow(child) >= 2))
             header.RowDefinitions.RemoveAt(2);
+        course.Margin = atTop
+            ? new Avalonia.Thickness(0, Math.Max(0, 18 - header.RowSpacing), 0, 6)
+            : new Avalonia.Thickness(24, 0);
         Grid.SetRow(course, atTop ? 2 : 0);
         Grid.SetColumn(course, atTop || compact ? 0 : 1);
         Grid.SetColumnSpan(course, atTop || compact ? 3 : 1);

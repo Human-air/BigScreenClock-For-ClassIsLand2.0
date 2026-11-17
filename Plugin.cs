@@ -37,6 +37,7 @@ public class Plugin : PluginBase
     public override void Initialize(HostBuilderContext context, IServiceCollection services)
     {
         ConfigFolder = PluginConfigFolder;
+        BackgroundDiagnostics.DestinationFolder = ConfigFolder;
 
         var settingsPath = Path.Combine(ConfigFolder, "Settings.json");
         Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(settingsPath);
