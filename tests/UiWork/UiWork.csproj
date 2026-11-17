@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Helpers/ClockDisplayPulse.cs" Link="ClockDisplayPulse.cs" />
     <Compile Include="../../Services/CiTimePointFormat.cs" Link="CiTimePointFormat.cs" />
     <Compile Include="../../Helpers/CoalescedUiWork.cs" Link="CoalescedUiWork.cs" />
   </ItemGroup>

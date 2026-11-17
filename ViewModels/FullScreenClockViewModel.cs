@@ -41,6 +41,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly NoiseCounter _counter = new();
     private readonly Lazy<IExactTimeService?> _exactTimeService;
     private System.Timers.Timer? _updateTimer;
+    private DispatcherTimer? _clockTimer;
     private CoalescedUiWork? _refreshWork;
     private FullScreenClockWindow? _window;
 
@@ -1701,6 +1702,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     public void RefreshForPreview()
     {
+        UpdateClockText(DateTime.Now);
         ShowDecibelMeter = _settings.ShowDecibelMeter;
         ShowCourseInfo = _settings.ShowCourseInfo;
         ClockFontSize = _settings.ClockFontSize;
@@ -1949,6 +1951,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private void StartUpdateTimer()
     {
         if (_updateTimer != null) return;
+        var clockPulse = new ClockDisplayPulse(UpdateClockText);
+        _clockTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(100) };
+        _clockTimer.Tick += (_, _) => clockPulse.Tick(DateTime.Now);
+        clockPulse.Tick(DateTime.Now);
+        _clockTimer.Start();
         var refreshWork = new CoalescedUiWork(
             static action => Dispatcher.UIThread.Post(action), RefreshAll);
         _refreshWork = refreshWork;
@@ -1961,6 +1968,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private void StopUpdateTimer()
     {
         // 先作废旧会话，已经进入 UI 队列的刷新也不能在退出/暂停后继续分配资源。
+        _clockTimer?.Stop();
+        _clockTimer = null;
         _refreshWork?.Dispose();
         _refreshWork = null;
         if (_updateTimer == null) return;
@@ -1969,13 +1978,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _updateTimer = null;
     }
 
+    private void UpdateClockText(DateTime now)
+    {
+        var time = now.ToString("HH:mm:ss");
+        var date = now.ToString("yyyy年M月d日 dddd");
+        if (CurrentTime != time) CurrentTime = time;
+        if (CurrentDate != date) CurrentDate = date;
+        UpdateDateSubtitle();
+    }
+
     private void RefreshAll()
     {
-        var now = DateTime.Now;
-        CurrentTime = now.ToString("HH:mm:ss");
-        CurrentDate = now.ToString("yyyy年M月d日 dddd");
-        UpdateDateSubtitle();   // 日期下方副标题（深夜/周五/月初），每秒刷新
-
         try
         {
             var lessonsService = _serviceProvider.GetRequiredService<ILessonsService>();

@@ -74,6 +74,15 @@ for (var mode = 0; mode <= 5; mode++)
     Check(text.Contains("—") == (mode == 0), "time modes never mix start/end with progress or countdown");
 }
 Check(!EveningSelfStudyClock.Services.CiTimePointFormat.Select(0,rangeText,3595,5,3600,true,10,10,false).Contains("—"), "CI countdown override replaces range");
+var clockTimes = new List<DateTime>();
+var pulse = new ClockDisplayPulse(clockTimes.Add);
+var baseTime = new DateTime(2026,11,17,20,0,0);
+foreach(var milliseconds in new[]{950,1050,1150,1950,2050,2950,3050}) pulse.Tick(baseTime.AddMilliseconds(milliseconds));
+Check(clockTimes.Count==4 && clockTimes.Select(t=>t.Second).SequenceEqual(new[]{0,1,2,3}), "100ms wall-clock samples tolerate timer jitter without duplicated updates");
+pulse.Tick(baseTime.AddSeconds(10));
+Check(clockTimes.Last().Second==10, "after a real stall display current time instead of replaying obsolete seconds");
+pulse.Tick(baseTime.AddSeconds(5));
+Check(clockTimes.Last().Second==5, "system time adjustment is reflected immediately");
 Console.WriteLine($"PASS: {checks} bounded UI work lifecycle checks");
 
 [MethodImpl(MethodImplOptions.NoInlining)]
