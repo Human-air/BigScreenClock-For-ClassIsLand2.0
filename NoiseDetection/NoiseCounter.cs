@@ -12,7 +12,7 @@ public enum CountDecision
 
 /// <summary>
 /// V2.1 计数规则（纯算法，无任何外部依赖，便于单元测试）。
-/// 「一段算一次、已按占比归属」由 NoiseEventDetector 在段结束结算时保证（每段至多一次事件），
+/// 「一段算一次、吵闹证据锁定」由 NoiseEventDetector 在段结束结算时保证（每段至多一次事件），
 /// 本类只应用 保护 / 课间 规则：课间、上课初期保护期内不计数，其余一律计数（已无冷却）。
 /// </summary>
 public sealed class NoiseCounter

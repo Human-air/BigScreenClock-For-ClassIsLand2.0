@@ -367,6 +367,8 @@
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
+                    <TextBlock Text="新计数算法检测包：连续吵闹 5 秒或最近 10 秒累计吵闹 6 秒后锁定；延长一般时间不会降级，段结束时结算一次。"
+                               TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
                     <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
                           RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="起算底线" VerticalAlignment="Center"
@@ -860,11 +862,11 @@
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="• 一段噪音累计满「起算底线」秒才记一次（默认 1 秒），咳嗽、喷嚏等瞬时噪音不计数"
+                    <TextBlock Text="• 一段噪音累计满「起算底线」（默认 1 秒），段结束时结算一次；未达到底线的短段不计数"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                     <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」"
+                    <TextBlock Text="• 连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为「吵闹」，否则记「一般」"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                     <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>

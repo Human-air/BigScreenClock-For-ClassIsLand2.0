@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace EveningSelfStudyClock.NoiseDetection;
 
@@ -31,19 +32,11 @@ public sealed class SampleResult
 }
 
 /// <summary>
-/// V2.1 噪音事件检测器（纯算法，无任何外部依赖，便于单元测试）。
-/// 职责：EMA 平滑 + 迟滞分级 + 「段」状态机。
-/// 输入：每块原始 RMS + 真实块时长；输出：显示等级 + 段结束事件 + 实时段归属。
-///
-/// 「一段算一次、短回落合并」规则（取代旧"连续持续 + 冷却"方案）：
-/// - 进入可计等级（一般/吵闹）后开段，段内累计「有效时长」= 真正处于一般/吵闹的时间，
-///   一般↔吵闹来回波动只影响实时归属，不重置累计；
-/// - 回落到不可计等级（安静/良好）开始回落计时，回落 ≤ FallWindowSeconds 不断段、有效时长
-///   不清零（说话之间的短暂停顿并进同一段）；回落 > FallWindowSeconds 段才结束；
-/// - 段结束结算一次：有效时长 ≥ SustainSeconds（起算底线）→ 按段内占比归属产事件
-///   （吵闹占比 ≥ NoisyRatioThreshold 记吵闹，否则记一般）；有效时长不足的短段（喷嚏/咳嗽）丢弃；
-/// - 每段至多一次事件（在段结束时），不会中途改记；
-/// - SegmentLevel 实时反映当前段起算后的临时归属（供「正在记录」提示，随占比变化切换）。
+/// V3 检测包：EMA 平滑 + 迟滞分级 + 最近时间窗锁定 + 段结束结算。
+/// 连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为吵闹。
+/// 一般时间不稀释已取得的锁定；先一般后吵闹也可升级，不在起算时提前定格。
+/// 起算底线、短回落合并、每段结束只结算一次保持不变；计数层没有冷却。
+/// 瞬时 Level 独立反映当前音量，SegmentLevel 是本段最终归属的实时状态。
 /// </summary>
 public sealed class NoiseEventDetector
 {
@@ -66,10 +59,10 @@ public sealed class NoiseEventDetector
     /// </summary>
     public double FallWindowSeconds { get; set; } = 5.0;
 
-    /// <summary>
-    /// 段内「吵闹」有效时长占比达到该比例，本段即归属「吵闹」；否则归属「一般」。默认 0.5。
-    /// </summary>
-    public double NoisyRatioThreshold { get; set; } = 0.5;
+    // 本检测包先固定参数，便于收集同一规则下的真机反馈。
+    public const double NoisyWindowSeconds = 10.0;
+    public const double NoisyWindowRequiredSeconds = 6.0;
+    public const double NoisyContinuousSeconds = 5.0;
 
     private double _smooth;
     private bool _initialized;
@@ -78,8 +71,12 @@ public sealed class NoiseEventDetector
 
     // 段状态
     private bool _segmentActive;           // 当前是否有段
-    private double _segmentNormalSeconds;  // 段内「一般」有效时长（秒）
-    private double _segmentNoisySeconds;   // 段内「吵闹」有效时长（秒）
+    private double _effectiveSeconds;
+    private double _continuousNoisySeconds;
+    private bool _noisyLocked;
+    // 仅保存最近 10 秒的吵闹音频块（生产采样间隔至少 100ms），不保存音频数据。
+    // 锁定后立即清空，并停止采集证据，长期处于同一段也不会积累历史样本。
+    private readonly Queue<(double Start, double End)> _recentNoisy = new();
     private double _fallSeconds;           // 当前连续回落时长（秒）
     private NoiseLevel? _segmentLevel;     // 实时归属（起算后非空）
 
@@ -99,8 +96,10 @@ public sealed class NoiseEventDetector
         _level = NoiseLevel.Quiet;
         _time = 0;
         _segmentActive = false;
-        _segmentNormalSeconds = 0;
-        _segmentNoisySeconds = 0;
+        _effectiveSeconds = 0;
+        _continuousNoisySeconds = 0;
+        _noisyLocked = false;
+        _recentNoisy.Clear();
         _fallSeconds = 0;
         _segmentLevel = null;
     }
@@ -111,7 +110,9 @@ public sealed class NoiseEventDetector
     /// </summary>
     public SampleResult Process(double rawRms, double dtSeconds = 0.1)
     {
-        if (dtSeconds <= 0) dtSeconds = 0.1;
+        // 无效采样不改变平滑器、分段或证据，避免 NaN 污染后续整节课。
+        if (!double.IsFinite(rawRms) || rawRms < 0 || !double.IsFinite(dtSeconds) || dtSeconds <= 0)
+            return new SampleResult { Level = _level, SmoothedRms = _smooth, SegmentLevel = SegmentLevel };
         _time += dtSeconds;
 
         if (!_initialized)
@@ -132,47 +133,42 @@ public sealed class NoiseEventDetector
 
         NoiseLevel? fired = null;
 
-        if (IsCountable(_level))
+        var countable = IsCountable(_level);
+        if (!_segmentActive && countable)
         {
-            // 回到可计等级：开段（或继续段），回落计时清零
-            if (!_segmentActive)
-            {
-                _segmentActive = true;
-                _segmentNormalSeconds = 0;
-                _segmentNoisySeconds = 0;
-                _segmentLevel = null;
-            }
-            _fallSeconds = 0;
-
-            // 累计有效时长（一般/吵闹分别计）
-            if (_level == NoiseLevel.Noisy) _segmentNoisySeconds += dtSeconds;
-            else _segmentNormalSeconds += dtSeconds;
-
-            // 实时归属：起算后按当前段内占比临时判定（供「正在记录」提示切换）
-            var total = _segmentNormalSeconds + _segmentNoisySeconds;
-            if (total >= SustainSeconds)
-            {
-                var ratio = total > 0 ? _segmentNoisySeconds / total : 0;
-                _segmentLevel = ratio >= NoisyRatioThreshold ? NoiseLevel.Noisy : NoiseLevel.Normal;
-            }
+            _segmentActive = true;
+            _effectiveSeconds = 0;
+            _continuousNoisySeconds = 0;
+            _noisyLocked = false;
+            _recentNoisy.Clear();
+            _segmentLevel = null;
         }
-        else if (_segmentActive)
+
+        if (_segmentActive)
         {
-            // 掉到不可计等级：进入回落计时，超过回落窗口段才结束
-            _fallSeconds += dtSeconds;
-            if (_fallSeconds > FallWindowSeconds)
+            UpdateNoisyEvidence(dtSeconds);
+            if (countable)
             {
-                var total = _segmentNormalSeconds + _segmentNoisySeconds;
-                if (total >= SustainSeconds)
-                {
-                    var ratio = total > 0 ? _segmentNoisySeconds / total : 0;
-                    fired = ratio >= NoisyRatioThreshold ? NoiseLevel.Noisy : NoiseLevel.Normal;
-                }
-                _segmentActive = false;
-                _segmentNormalSeconds = 0;
-                _segmentNoisySeconds = 0;
                 _fallSeconds = 0;
-                _segmentLevel = null;
+                _effectiveSeconds += dtSeconds;
+                if (_effectiveSeconds + 1e-9 >= SustainSeconds)
+                    _segmentLevel = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
+            }
+            else
+            {
+                _fallSeconds += dtSeconds;
+                if (_fallSeconds > FallWindowSeconds)
+                {
+                    if (_effectiveSeconds + 1e-9 >= SustainSeconds)
+                        fired = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
+                    _segmentActive = false;
+                    _effectiveSeconds = 0;
+                    _continuousNoisySeconds = 0;
+                    _noisyLocked = false;
+                    _recentNoisy.Clear();
+                    _fallSeconds = 0;
+                    _segmentLevel = null;
+                }
             }
         }
 
@@ -185,6 +181,34 @@ public sealed class NoiseEventDetector
             EventLevel = fired,
             SegmentLevel = _segmentActive ? _segmentLevel : null
         };
+    }
+
+    private void UpdateNoisyEvidence(double dtSeconds)
+    {
+        if (_noisyLocked) return;
+        var cutoff = _time - NoisyWindowSeconds;
+        while (_recentNoisy.TryPeek(out var oldest) && oldest.End <= cutoff)
+            _recentNoisy.Dequeue();
+
+        if (_level == NoiseLevel.Noisy)
+        {
+            _continuousNoisySeconds += dtSeconds;
+            _recentNoisy.Enqueue((_time - dtSeconds, _time));
+        }
+        else
+            _continuousNoisySeconds = 0;
+
+        // 首块可仅部分落在时间窗内；按真实时长裁剪，不按样本数估算秒数。
+        double recentSeconds = 0;
+        foreach (var block in _recentNoisy)
+            recentSeconds += block.End - Math.Max(block.Start, cutoff);
+
+        if (_continuousNoisySeconds + 1e-9 >= NoisyContinuousSeconds ||
+            recentSeconds + 1e-9 >= NoisyWindowRequiredSeconds)
+        {
+            _noisyLocked = true;
+            _recentNoisy.Clear();
+        }
     }
 
     private static bool IsCountable(NoiseLevel level)

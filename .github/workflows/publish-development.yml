@@ -6,6 +6,10 @@ on:
         description: Existing five-part development version tag
         required: true
         type: string
+      title:
+        description: Optional release title
+        required: false
+        type: string
 permissions:
   contents: write
 jobs:
@@ -35,6 +39,9 @@ jobs:
       - name: Touch button input checks
         if: hashFiles('source/tests/TouchButtons/TouchButtons.csproj') != ''
         run: dotnet run --project source/tests/TouchButtons/TouchButtons.csproj
+      - name: Noise counting algorithm checks
+        if: hashFiles('source/tests/NoiseAlgorithm/NoiseAlgorithm.csproj') != ''
+        run: dotnet run --project source/tests/NoiseAlgorithm/NoiseAlgorithm.csproj
       - name: Image memory regression
         run: dotnet run --project source/tests/BackgroundMemory/BackgroundMemory.csproj
       - name: Backdrop lifecycle stress
@@ -67,10 +74,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TITLE: ${{ inputs.title }}
         run: |
           $checksum = Get-Content source/cipx/checksums.md -Raw
           $notes = Get-Content "release-config/.github/release-notes/$env:RELEASE_TAG.md" -Raw
           $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           Set-Content $notesFile "$checksum`n`n$notes"
-          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title "$env:RELEASE_TAG 开发版（Codex）" --notes-file $notesFile
+          $title = $env:RELEASE_TITLE
+          if ([string]::IsNullOrWhiteSpace($title)) { $title = "$env:RELEASE_TAG 开发版（Codex）" }
+          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title $title --notes-file $notesFile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

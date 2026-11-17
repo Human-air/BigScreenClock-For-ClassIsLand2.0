@@ -313,7 +313,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// 持续事件（一般/吵闹）→ 计数。事件在音频线程引发，这里调度到 UI 线程。
-    /// 事件等级已由探测器按段内一般/吵闹占比判定，计数层只应用 冷却/保护 规则。
+    /// 事件等级由探测器按最近时间窗锁定判定，计数层只应用课间/保护规则，无冷却。
     /// </summary>
     private void OnNoiseEventRaised(object? sender, NoiseEventRaisedEventArgs e)
     {
@@ -1681,9 +1681,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         {
             var parts = new List<string>
             {
-                $"一段噪音累计满 {_settings.NoisySustainSeconds:0.#} 秒记一次",
+                $"一段噪音累计满 {_settings.NoisySustainSeconds:0.#} 秒，段结束时记一次",
                 $"一段内回落不超过 {_settings.FallWindowSeconds:0.#} 秒并成一次",
-                "一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」",
+                "连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为「吵闹」，否则记「一般」",
             };
             if (_settings.SkipFirst3Min) parts.Add($"上课开始后 {_settings.SkipFirstMinutes} 分钟内不记录");
             return string.Join("，", parts);
