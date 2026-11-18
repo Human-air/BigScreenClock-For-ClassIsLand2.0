@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Avalonia;
@@ -9,6 +10,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.Views;
 
@@ -239,6 +241,57 @@ while (detached.IsAlive && finish.Elapsed < TimeSpan.FromSeconds(25))
     Thread.Sleep(30);
 }
 Check(!detached.IsAlive, "detached layer is collectible after pending work completes");
+BackgroundDiagnostics.DestinationFolder = folder;
+var adaptive = Create();
+adaptive.Layer.Apply(imagePath, 0, 0, (int)GlassMode.Liquid, 35, 24, 50, 45, autoGlassFallback: true);
+Wait(adaptive.Window, () => Idle(adaptive.Layer) && GlassReady(adaptive.Layer), "adaptive liquid ready");
+var originalSharp = Image(adaptive.Layer)!.Sharp;
+var notices = new List<(GlassMode From, GlassMode To, GlassFallbackReason Reason)>();
+adaptive.Layer.GlassFallbackApplied += (from, to, reason) => notices.Add((from, to, reason));
+void Stall(int seconds) => adaptive.Layer.ObserveUiStall(TimeSpan.FromSeconds(seconds), 1000);
+Stall(1); Stall(3);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid, "two stall signals do not trigger fallback");
+Stall(5);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "first fallback is frosted");
+Check(ReferenceEquals(Image(adaptive.Layer)!.Sharp, originalSharp) && adaptive.Layer.HasBlurredBackdrop,
+    "frosted preserves the sharp wallpaper and the blur bitmap");
+Check(Image(adaptive.Layer)!.SharpPixels is null && Image(adaptive.Layer)!.BlurPixels is null &&
+    GlassPixels(adaptive.Layer) == 0, "frosted releases refraction snapshots and panel bitmaps");
+Stall(8); Stall(10); Stall(41);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "expired or pre-downgrade stall signals cannot trigger next stage");
+Stall(43); Stall(45);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Translucent, "persistent pressure after frosted selects translucent");
+Check(notices.SequenceEqual(new[]
+{
+    (GlassMode.Liquid, GlassMode.Frosted, GlassFallbackReason.UiStall),
+    (GlassMode.Frosted, GlassMode.Translucent, GlassFallbackReason.UiStall),
+}), "both downgrade notices carry the exact original mode, new mode and reason");
+Check(ReferenceEquals(Image(adaptive.Layer)!.Sharp, originalSharp) && Image(adaptive.Layer)!.OpticalBytes == 0,
+    "translucent preserves the same sharp wallpaper and releases all optics");
+adaptive.Layer.Width = 1920; Pump(adaptive.Window);
+Wait(adaptive.Window, () => Idle(adaptive.Layer) && Image(adaptive.Layer)?.Pixel.Width == 1920,
+    "translucent continues loading the wallpaper on resize");
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Translucent && Image(adaptive.Layer)!.OpticalBytes == 0,
+    "resize does not silently restore liquid or allocate optics");
+adaptive.Layer.Apply(imagePath, 0, 0, (int)GlassMode.Liquid, 35, 24, 50, 45, autoGlassFallback: false);
+Wait(adaptive.Window, () => Idle(adaptive.Layer) && GlassReady(adaptive.Layer), "switch off fallback restores liquid and snapshots");
+Stall(48); Stall(50); Stall(52);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid && Image(adaptive.Layer)!.SharpPixels is not null,
+    "disabling the option keeps the configured mode and restores samples");
+adaptive.Window.Close();
+
+BackgroundDiagnostics.Write("image-error", "pixels=3840x2160", new IOException("private-wallpaper-path"));
+using (var zip = new ZipArchive(new MemoryStream(BackgroundDiagnostics.CreateArchive("pluginVersion=1.2.2.0.4"))))
+{
+    Check(zip.Entries.Count == 2 && zip.GetEntry("summary.txt") is not null, "export contains only the summary and known diagnostic logs");
+    using var log = new StreamReader(zip.GetEntry("ClockDiagnostics.log")!.Open());
+    var content = log.ReadToEnd();
+    Check(content.Contains("from=Liquid to=Frosted") && content.Contains("from=Frosted to=Translucent") &&
+        content.Contains("privateMiB="), "export includes both fallback transitions and process memory");
+    Check(content.Contains("error=IOException") && !content.Contains("private-wallpaper-path"),
+        "export records error type without the private error text");
+}
+BackgroundDiagnostics.DestinationFolder = null;
 BackdropPreloadCache.Clear();
 using (var process = Process.GetCurrentProcess())
     Console.WriteLine($"REPORT private MiB={process.PrivateMemorySize64 / 1048576d:F1}, managed MiB={GC.GetTotalMemory(false) / 1048576d:F1}");

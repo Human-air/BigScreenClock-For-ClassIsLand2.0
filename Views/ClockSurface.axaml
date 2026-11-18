@@ -3,6 +3,7 @@
              x:Class="EveningSelfStudyClock.Views.ClockSurface"
              xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
              xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
+             xmlns:converters="using:Avalonia.Data.Converters"
              xmlns:views="clr-namespace:EveningSelfStudyClock.Views"
              FontFamily="Microsoft YaHei,SimHei,sans-serif">
 
@@ -355,51 +356,66 @@
             <Border x:Name="ReminderPanel" Grid.Row="1" Grid.RowSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top"
                     Margin="0,16,0,0"
                     MaxWidth="{Binding ReminderPanelMaxWidth}" MaxHeight="400"
-                    IsHitTestVisible="True"
-                    IsVisible="{Binding ShowReminderPanel}">
+                    IsHitTestVisible="True">
+                <Border.IsVisible>
+                    <MultiBinding Converter="{x:Static converters:BoolConverters.Or}">
+                        <Binding Path="ShowReminderPanel"/>
+                        <Binding ElementName="GlassFallbackNotice" Path="IsVisible"/>
+                    </MultiBinding>
+                </Border.IsVisible>
                 <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="8">
-                        <!-- 降雨提醒（未并入第一行才在面板显示）：☔ + 主标题 + 小字号副标题，用降水色 -->
-                        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowRainReminderPanel}">
-                            <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"
-                                       Foreground="{Binding RainColorBrush}"/>
-                            <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
-                                       Foreground="{Binding RainColorBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding RainSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
-                                       IsVisible="{Binding HasRainSubtitle}"/>
-                        </StackPanel>
-                        <!-- 倒计时（未并入第一行才在面板显示） -->
-                        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowCountdownPanel}">
-                            <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"
-                                       Foreground="{Binding Chrome.TextPrimary}"/>
-                            <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
-                                       Foreground="{Binding Chrome.Countdown}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding CountdownSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
-                                       IsVisible="{Binding HasCountdownSubtitle}"/>
-                        </StackPanel>
-                        <!-- 文本（未并入第一行才在面板显示；跟随 CI 主界面文本组件） -->
-                        <TextBlock Text="{Binding ReminderText}" FontSize="{Binding ReminderTextFontSize}"
-                                   Foreground="{Binding ReminderTextBrush}"
-                                   TextWrapping="Wrap" IsVisible="{Binding ShowTextPanel}"/>
-                        <!-- 预警（排最下，区级统一发布按等级着色；点击标题右侧「>」在标题同一行右侧横向展开详情全文） -->
-                        <StackPanel Spacing="3" IsVisible="{Binding ShowAlertsRow}">
-                            <ItemsControl ItemsSource="{Binding AlertItems}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <!-- 悬停该条预警即在顶部弹幕带循环滚动其详情、移开即消失；
-                                             点击则滚一整遍后自动收起（没滚完时重复点击不生效） -->
-                                        <StackPanel Orientation="Horizontal" Spacing="5"
-                                                    Cursor="Hand"
-                                                    PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited"
-                                                    PointerPressed="AlertPointerPressed">
-                                            <TextBlock Classes="icon" Text="{Binding Icon}" FontSize="{Binding IconFontSize}"
-                                                       Foreground="{Binding Foreground}" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Foreground}"
-                                                       FontSize="{Binding FontSize}" FontWeight="Bold" TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                        <Grid x:Name="GlassFallbackNotice" IsVisible="False" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                            <TextBlock x:Name="GlassFallbackNoticeText" Foreground="{Binding Chrome.TextPrimary}"
+                                       TextWrapping="Wrap" FontSize="15" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="×" Click="DismissGlassFallbackNotice_Click" ClickMode="Press"
+                                    AutomationProperties.Name="关闭玻璃降级提示" ToolTip.Tip="关闭提示"
+                                    Foreground="{Binding Chrome.ButtonForeground}" Background="{Binding Chrome.ButtonBackground}"
+                                    BorderThickness="0" Padding="8,3" VerticalAlignment="Center"/>
+                        </Grid>
+                        <StackPanel Spacing="8" IsVisible="{Binding ShowReminderPanel}">
+                            <!-- 降雨提醒（未并入第一行才在面板显示）：☔ + 主标题 + 小字号副标题，用降水色 -->
+                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowRainReminderPanel}">
+                                <TextBlock Classes="icon" Text="{ci:LI CloudRain}" FontSize="20" VerticalAlignment="Center"
+                                           Foreground="{Binding RainColorBrush}"/>
+                                <TextBlock Text="{Binding RainReminderTitle}" FontSize="19" FontWeight="Bold"
+                                           Foreground="{Binding RainColorBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding RainSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
+                                           IsVisible="{Binding HasRainSubtitle}"/>
+                            </StackPanel>
+                            <!-- 倒计时（未并入第一行才在面板显示） -->
+                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowCountdownPanel}">
+                                <TextBlock Classes="icon" Text="{ci:LI Timer}" FontSize="20" VerticalAlignment="Center"
+                                           Foreground="{Binding Chrome.TextPrimary}"/>
+                                <TextBlock Text="{Binding CountdownText}" FontSize="19" FontWeight="Bold"
+                                           Foreground="{Binding Chrome.Countdown}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding CountdownSubtitle}" FontSize="12" Foreground="{Binding Chrome.TextSecondary}" VerticalAlignment="Center"
+                                           IsVisible="{Binding HasCountdownSubtitle}"/>
+                            </StackPanel>
+                            <!-- 文本（未并入第一行才在面板显示；跟随 CI 主界面文本组件） -->
+                            <TextBlock Text="{Binding ReminderText}" FontSize="{Binding ReminderTextFontSize}"
+                                       Foreground="{Binding ReminderTextBrush}"
+                                       TextWrapping="Wrap" IsVisible="{Binding ShowTextPanel}"/>
+                            <!-- 预警（排最下，区级统一发布按等级着色；点击标题右侧「>」在标题同一行右侧横向展开详情全文） -->
+                            <StackPanel Spacing="3" IsVisible="{Binding ShowAlertsRow}">
+                                <ItemsControl ItemsSource="{Binding AlertItems}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- 悬停该条预警即在顶部弹幕带循环滚动其详情、移开即消失；
+                                                 点击则滚一整遍后自动收起（没滚完时重复点击不生效） -->
+                                            <StackPanel Orientation="Horizontal" Spacing="5"
+                                                        Cursor="Hand"
+                                                        PointerEntered="AlertPointerEntered" PointerExited="AlertPointerExited"
+                                                        PointerPressed="AlertPointerPressed">
+                                                <TextBlock Classes="icon" Text="{Binding Icon}" FontSize="{Binding IconFontSize}"
+                                                           Foreground="{Binding Foreground}" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding DisplayText}" Foreground="{Binding Foreground}"
+                                                           FontSize="{Binding FontSize}" FontWeight="Bold" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

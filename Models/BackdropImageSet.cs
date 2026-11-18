@@ -39,6 +39,10 @@ public sealed class BackdropImageSet : IDisposable
     /// <summary>下这份订单时要的物理像素尺寸（烘出来的位图可能因只缩不放而小于它，看 <see cref="Sharp"/>）。</summary>
     public PixelSize Pixel { get; private init; }
 
+    public PixelSize SourceSize { get; private set; }
+    public long OpticalBytes => 4L * ((SharpPixels?.LongLength ?? 0) + (BlurPixels?.LongLength ?? 0) +
+        (Blur is { } blur ? (long)blur.PixelSize.Width * blur.PixelSize.Height : 0));
+
     public Bitmap? Sharp { get; private set; }
     public WriteableBitmap? Blur { get; private set; }
     public uint[]? SharpPixels { get; private set; }
@@ -52,7 +56,7 @@ public sealed class BackdropImageSet : IDisposable
     /// 同步烘一套。后台执行，跨窗口串行。普通失败返回空结果并保留 BuildError，取消则抛出取消异常。
     /// </summary>
     public static BackdropImageSet Build(string path, PixelSize pixels, int stretch, double blurRadius, bool wantBlur,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool captureSamples = true)
     {
         var set = new BackdropImageSet
         {
@@ -76,10 +80,13 @@ public sealed class BackdropImageSet : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             var native = ImageHeader.ReadSize(path) ?? pixels;
+            set.SourceSize = native;
             var decode = BackgroundImageMap.DecodeSize(native, pixels, stretch);
             using var stream = File.OpenRead(path);
             set.Sharp = Bitmap.DecodeToWidth(stream, decode.Width, BitmapInterpolationMode.HighQuality);
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (!wantBlur && !captureSamples) return set;
 
             // Clear background rendering keeps the requested resolution. Refraction and blur
             // need smooth optical samples, not another full 4K copy for every retained buffer.
@@ -89,14 +96,17 @@ public sealed class BackdropImageSet : IDisposable
                 : set.Sharp.CreateScaledBitmap(opticalSize, BitmapInterpolationMode.HighQuality);
             var optical = reduced ?? set.Sharp;
             cancellationToken.ThrowIfCancellationRequested();
-            set.SharpPixels = ReadPixels(optical, cancellationToken);
-            set.SharpPixelsSize = optical.PixelSize;
+            if (captureSamples)
+            {
+                set.SharpPixels = ReadPixels(optical, cancellationToken);
+                set.SharpPixelsSize = optical.PixelSize;
+            }
             if (wantBlur)
             {
                 var blurred = BakeBlur(optical,
                     BlurRadiusInImagePixels(blurRadius, optical.PixelSize, pixels, stretch), cancellationToken);
                 set.Blur = blurred.Bitmap;
-                set.BlurPixels = blurred.Pixels;
+                if (captureSamples) set.BlurPixels = blurred.Pixels;
             }
             cancellationToken.ThrowIfCancellationRequested();
         }
@@ -148,17 +158,23 @@ public sealed class BackdropImageSet : IDisposable
                && Math.Abs(built.Height - wanted.Height) <= Math.Max(4, built.Height / 10);
     }
 
-    public void Dispose()
+    public void ReleaseOptics(bool keepBlur)
     {
-        var sharp = Sharp;
-        var blur = Blur;
-        Sharp = null;
-        Blur = null;
         SharpPixels = null;
         BlurPixels = null;
         SharpPixelsSize = default;
+        if (keepBlur) return;
+        var blur = Blur;
+        Blur = null;
+        blur?.Dispose();
+    }
+
+    public void Dispose()
+    {
+        var sharp = Sharp;
+        Sharp = null;
         try { sharp?.Dispose(); }
-        finally { blur?.Dispose(); }
+        finally { ReleaseOptics(keepBlur: false); }
     }
 
     /// <summary>

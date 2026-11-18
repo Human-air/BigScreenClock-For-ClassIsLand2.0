@@ -38,6 +38,7 @@ public class Plugin : PluginBase
     {
         ConfigFolder = PluginConfigFolder;
         BackgroundDiagnostics.DestinationFolder = ConfigFolder;
+        BackgroundDiagnostics.Write("session-start", $"pluginVersion={PluginVersion.Current}");
 
         var settingsPath = Path.Combine(ConfigFolder, "Settings.json");
         Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(settingsPath);

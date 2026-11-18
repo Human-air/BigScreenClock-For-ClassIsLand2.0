@@ -19,6 +19,7 @@
     <Compile Include="../../Helpers/LiquidGlassBaker.cs" Link="LiquidGlassBaker.cs" />
     <Compile Include="../../Helpers/OffsetSampler.cs" Link="OffsetSampler.cs" />
     <Compile Include="../../Helpers/RoundedRectSdf.cs" Link="RoundedRectSdf.cs" />
+    <Compile Include="../../Helpers/AdaptiveGlassQuality.cs" Link="AdaptiveGlassQuality.cs" />
     <Compile Include="../../Helpers/BackgroundDiagnostics.cs" Link="BackgroundDiagnostics.cs" Condition="Exists('../../Helpers/BackgroundDiagnostics.cs')" />
   </ItemGroup>
 </Project>

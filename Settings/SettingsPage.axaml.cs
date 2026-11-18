@@ -534,7 +534,78 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         RefreshThemeFromBackground();   // 「自动」主题档要按新图重判一次
     }
 
+    private bool _exportingDiagnostics;
+
+    private async void ExportDiagnostics_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_exportingDiagnostics || sender is not Button button || TopLevel.GetTopLevel(this) is not { } top) return;
+
+        _exportingDiagnostics = true;
+        button.IsEnabled = false;
+        DiagnosticsExportStatus.Text = "";
+        try
+        {
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "导出大屏时钟诊断",
+                SuggestedFileName = $"大屏时钟诊断-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+                DefaultExtension = "zip",
+                FileTypeChoices = [new FilePickerFileType("ZIP 压缩包") { Patterns = ["*.zip"] }],
+                ShowOverwritePrompt = true,
+            });
+            if (file is null) return;
+            using (file)
+            {
+                var version = PluginVersion.Current;
+                var configured = (GlassMode)_settings.GlassMode;
+                var automatic = _settings.AutoGlassFallback;
+                var enabled = _settings.BackgroundEnabled;
+                var region = _settings.DisplayRegion;
+                var width = region == 0 ? 100 : _settings.VisibleWidthPercent;
+                var path = enabled ? BackgroundImageStore.ResolvePath(_settings.BackgroundImageFile) : null;
+                var effective = Plugin.ServiceProvider?.GetService<FullScreenClockViewModel>()?.ActiveGlassMode;
+                var bytes = await Task.Run(() =>
+                {
+                    var size = path is null ? null : ImageHeader.ReadSize(path);
+                    var summary = $"""
+                        大屏时钟诊断
+                        导出时间 = {DateTimeOffset.Now:O}
+                        插件版本 = {version}
+                        自定义背景启用 = {enabled}
+                        原图像素 = {size?.ToString() ?? "未知或未设置"}
+                        设置玻璃模式 = {configured}
+                        当前玻璃模式 = {effective?.ToString() ?? "大屏未显示"}
+                        自动降级启用 = {automatic}
+                        显示区域 = {region}（0 全屏，1 左半屏，2 右半屏）
+                        可见宽度 = {width}%
+                        """;
+                    return BackgroundDiagnostics.CreateArchive(summary);
+                });
+                await using var output = await file.OpenWriteAsync();
+                if (output.CanSeek) output.SetLength(0);
+                await output.WriteAsync(bytes);
+                await output.FlushAsync();
+                DiagnosticsExportStatus.Text = $"已保存 {file.Name}";
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsExportStatus.Text = $"导出失败（{ex.GetType().Name}），请检查目标文件夹是否可写。";
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            _exportingDiagnostics = false;
+        }
+    }
+
     // ===== 玻璃底 =====
+
+    public bool AutoGlassFallback
+    {
+        get => _settings.AutoGlassFallback;
+        set => _settings.AutoGlassFallback = value;
+    }
 
     /// <summary>玻璃档：0 关闭 / 1 半透明 / 2 磨砂 / 3 真•高光折射。</summary>
     public int GlassModeIndex

@@ -14,6 +14,10 @@ public partial class FullScreenClockWindow : Window
 {
     private readonly DispatcherTimer _hideCursorTimer;
 
+    internal Models.GlassMode EffectiveGlassMode => Surface.EffectiveGlassMode;
+
+    internal void ObserveUiStall(TimeSpan now, double milliseconds) => Surface.ObserveUiStall(now, milliseconds);
+
     public FullScreenClockWindow()
     {
         InitializeComponent();

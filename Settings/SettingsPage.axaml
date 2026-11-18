@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:models="using:EveningSelfStudyClock.Models"
              xmlns:cp="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
              xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
              xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
@@ -567,11 +568,14 @@
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding GlassModeIndex}" FontSize="13"
                                           MinWidth="150" HorizontalAlignment="Left">
                                     <ComboBoxItem Content="关闭"/>
-                                    <ComboBoxItem Content="半透明"/>
-                                    <ComboBoxItem Content="磨砂"/>
-                                    <ComboBoxItem Content="真•◯◯玻璃"/>
+                                    <ComboBoxItem Content="{x:Static models:GlassModeNames.Translucent}"/>
+                                    <ComboBoxItem Content="{x:Static models:GlassModeNames.Frosted}"/>
+                                    <ComboBoxItem Content="{x:Static models:GlassModeNames.Liquid}"/>
                                 </ComboBox>
                             </Grid>
+                            <CheckBox Content="液态玻璃自动降级（磨砂 → 半透明）"
+                                      IsChecked="{Binding AutoGlassFallback, Mode=TwoWay}"
+                                      IsVisible="{Binding IsLiquidRowVisible}"/>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
                                   IsVisible="{Binding IsOpacityRowVisible}">
                                 <TextBlock Grid.Column="0" Text="不透明度" VerticalAlignment="Center"
@@ -611,6 +615,11 @@
                             </Grid>
                         </StackPanel>
                     </Expander>
+                    <StackPanel Spacing="4">
+                        <Button Content="导出显示诊断" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
+                        <TextBlock x:Name="DiagnosticsExportStatus" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>

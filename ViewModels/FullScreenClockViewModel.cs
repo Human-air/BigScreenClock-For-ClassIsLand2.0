@@ -1948,12 +1948,33 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         EndFeishuSession();   // 退出大屏时钟：发「退出」通知（附本节汇总）
     }
 
+    internal GlassMode? ActiveGlassMode => _window is { IsVisible: true, WindowState: not WindowState.Minimized }
+        ? _window.EffectiveGlassMode : null;
+
     private void StartUpdateTimer()
     {
         if (_updateTimer != null) return;
         var clockPulse = new ClockDisplayPulse(UpdateClockText);
         _clockTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(100) };
-        _clockTimer.Tick += (_, _) => clockPulse.Tick(DateTime.Now);
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var lastPulse = TimeSpan.Zero;
+        var lastSample = TimeSpan.Zero;
+        _clockTimer.Tick += (_, _) =>
+        {
+            var now = elapsed.Elapsed;
+            var gap = now - lastPulse;
+            lastPulse = now;
+            clockPulse.Tick(DateTime.Now);
+            if (_window is not { IsVisible: true, WindowState: not WindowState.Minimized } window) return;
+            if (gap.TotalMilliseconds >= AdaptiveGlassQuality.StallMilliseconds)
+            {
+                BackgroundDiagnostics.Write("ui-stall", $"gapMs={gap.TotalMilliseconds:F0} mode={window.EffectiveGlassMode}");
+                if (gap <= TimeSpan.FromSeconds(30)) window.ObserveUiStall(now, gap.TotalMilliseconds);
+            }
+            if (now - lastSample < TimeSpan.FromSeconds(30)) return;
+            lastSample = now;
+            BackgroundDiagnostics.Write("display-sample", $"mode={window.EffectiveGlassMode} scaling={window.RenderScaling:F2}");
+        };
         clockPulse.Tick(DateTime.Now);
         _clockTimer.Start();
         var refreshWork = new CoalescedUiWork(

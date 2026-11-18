@@ -51,6 +51,7 @@ public partial class ClockSurface : UserControl
     public ClockSurface()
     {
         InitializeComponent();
+        Backdrop.GlassFallbackApplied += OnGlassFallbackApplied;
 
         RulesPopup.PlacementTarget = CounterAreaBorder; // 规则浮层锚定在计数区域上方
 
@@ -102,6 +103,7 @@ public partial class ClockSurface : UserControl
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        DismissGlassFallbackNotice();
         UnhookSignals();
         SuspendVisualWork();
     }
@@ -115,6 +117,44 @@ public partial class ClockSurface : UserControl
     }
 
     public void ResumeVisualWork() => Backdrop.Resume();
+
+    private DispatcherTimer? _glassFallbackNoticeTimer;
+
+    private void OnGlassFallbackApplied(GlassMode previous, GlassMode current, GlassFallbackReason reason)
+    {
+        if (TopLevel.GetTopLevel(this) is not FullScreenClockWindow) return;
+
+        var cause = reason switch
+        {
+            GlassFallbackReason.BufferBudget => "玻璃缓冲超出预算",
+            GlassFallbackReason.RenderingFailed => "玻璃渲染多次失败",
+            GlassFallbackReason.SlowRendering => "玻璃渲染持续缓慢",
+            _ => "界面反复卡顿",
+        };
+        GlassFallbackNoticeText.Text = $"{cause}，{GlassModeNames.Name(previous)}已自动降为{GlassModeNames.Name(current)}。";
+        GlassFallbackNotice.IsVisible = true;
+
+        if (_glassFallbackNoticeTimer is null)
+        {
+            _glassFallbackNoticeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(120) };
+            _glassFallbackNoticeTimer.Tick += (_, _) => DismissGlassFallbackNotice();
+        }
+        _glassFallbackNoticeTimer.Stop();
+        _glassFallbackNoticeTimer.Start();
+    }
+
+    private void DismissGlassFallbackNotice()
+    {
+        _glassFallbackNoticeTimer?.Stop();
+        GlassFallbackNotice.IsVisible = false;
+    }
+
+    private void DismissGlassFallbackNotice_Click(object? sender, RoutedEventArgs e)
+        => DismissGlassFallbackNotice();
+
+    internal GlassMode EffectiveGlassMode => Backdrop.EffectiveGlassMode;
+
+    internal void ObserveUiStall(TimeSpan now, double milliseconds) => Backdrop.ObserveUiStall(now, milliseconds);
 
     private void HookSignals()
     {
@@ -333,6 +373,7 @@ public partial class ClockSurface : UserControl
             or nameof(PluginSettings.BackgroundImageStretch)
             or nameof(PluginSettings.BackgroundDim)
             or nameof(PluginSettings.GlassMode)
+            or nameof(PluginSettings.AutoGlassFallback)
             or nameof(PluginSettings.GlassOpacity)
             or nameof(PluginSettings.GlassBlurRadius)
             or nameof(PluginSettings.GlassRefraction)
@@ -361,7 +402,7 @@ public partial class ClockSurface : UserControl
                        stretch, settings.BackgroundDim,
                        on ? settings.GlassMode : (int)GlassMode.Off,
                        settings.GlassOpacity, settings.GlassBlurRadius, settings.GlassRefraction,
-                       settings.GlassFrost, settings.AdjustingLayout);
+                       settings.GlassFrost, settings.AdjustingLayout, settings.AutoGlassFallback);
     }
 
     /// <summary>
@@ -403,6 +444,8 @@ public partial class ClockSurface : UserControl
     /// 按设置把画面收进可见区域：全屏铺满；左/右半屏时 Shell 只占宽度的一条。
     /// 窗口本身不动——Esc/F11、防休眠、焦点仍然是整个全屏窗口的事。
     /// </summary>
+    private (int Region, double Percent)? _loggedDisplayRegion;
+
     private void ApplyDisplayRegion()
     {
         var full = Bounds.Width;
@@ -416,6 +459,12 @@ public partial class ClockSurface : UserControl
         var percent = Math.Clamp(settings.VisibleWidthPercent, 30, 70);
 
         var narrowed = region != 0 && full > 0;
+        var display = (Region: narrowed ? region : 0, Percent: narrowed ? percent : 100);
+        if (_loggedDisplayRegion != display && TopLevel.GetTopLevel(this) is FullScreenClockWindow)
+        {
+            _loggedDisplayRegion = display;
+            BackgroundDiagnostics.Write("display-region", $"region={display.Region} visiblePercent={display.Percent:0.#}");
+        }
 
         if (!narrowed)
         {

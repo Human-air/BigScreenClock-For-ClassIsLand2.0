@@ -51,6 +51,7 @@ public class PluginSettings : INotifyPropertyChanged
     private int _backgroundImageStretch;
     private double _backgroundDim;
     private int _glassMode;
+    private bool _autoGlassFallback = true;
     private double _glassOpacity = 35;
     private double _glassBlurRadius = 24;
     private double _glassRefraction = 50;
@@ -277,6 +278,12 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _glassMode;
         set { _glassMode = Math.Clamp(value, 0, 3); OnPropertyChanged(); }
+    }
+
+    public bool AutoGlassFallback
+    {
+        get => _autoGlassFallback;
+        set { if (_autoGlassFallback != value) { _autoGlassFallback = value; OnPropertyChanged(); } }
     }
 
     /// <summary>

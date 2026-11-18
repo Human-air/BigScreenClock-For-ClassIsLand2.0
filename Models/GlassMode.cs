@@ -21,3 +21,19 @@ public enum GlassMode
     /// </summary>
     Liquid = 3,
 }
+
+
+internal static class GlassModeNames
+{
+    public const string Liquid = "真•◯◯玻璃";
+    public const string Frosted = "磨砂";
+    public const string Translucent = "半透明";
+
+    public static string Name(GlassMode mode) => mode switch
+    {
+        GlassMode.Liquid => Liquid,
+        GlassMode.Frosted => Frosted,
+        GlassMode.Translucent => Translucent,
+        _ => "关闭",
+    };
+}
