@@ -4,7 +4,6 @@
              xmlns:cp="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
              xmlns:ci="clr-namespace:ClassIsland.Core.MarkupExtensions;assembly=ClassIsland.Core"
              xmlns:cis="clr-namespace:ClassIsland.Core;assembly=ClassIsland.Core"
-             xmlns:views="clr-namespace:EveningSelfStudyClock.Views"
              x:Class="EveningSelfStudyClock.Settings.SettingsPage">
     <UserControl.Styles>
         <!-- 矢量图标：用 CI 自带的 Lucide 图标字体，{ci:LI 图标名} 取字形 -->
@@ -64,7 +63,7 @@
              圆角 ControlCornerRadius(4)；文字颜色同样绑 FluentAvalonia 主题键，随 CI 主题自动切换。
              卡片跟着窗口一起变宽，铺满整个设置区域（本页标了 [FullWidthPage]，
              CI 的页面标题也就固定靠左，左距 12 与这里的 12 对齐）。 -->
-        <ScrollViewer Grid.Column="0" Padding="0,0,12,0">
+        <ScrollViewer x:Name="SettingsScroll" Grid.Column="0" Padding="0,0,12,0">
             <StackPanel Spacing="12" Margin="0,8,0,8">
 
                 <!-- 功能开关 -->
@@ -498,6 +497,10 @@
                         <CheckBox Grid.Column="1" FontSize="13"
                                   IsChecked="{Binding BackgroundEnabled}" HorizontalAlignment="Left"/>
                     </Grid>
+                    <CheckBox Content="玻璃自动降级" IsChecked="{Binding AutoGlassFallback, Mode=TwoWay}"
+                              ToolTip.Tip="负载持续偏高时先降低液态玻璃清晰度，再依次切换磨砂、半透明。"/>
+                    <TextBlock Text="当前液态玻璃为较低清晰度" IsVisible="{Binding IsGlassResolutionReduced}"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
                     <!-- 开关关着时整组同时压暗：光靠 IsEnabled 只能让下拉、按钮变灰，
                          几行说明文字因为各自写了 Foreground，不会跟着变，看着像还能调 -->
                     <Expander HorizontalAlignment="Stretch"
@@ -565,7 +568,7 @@
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0" Text="◯◯玻璃" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                                <ComboBox Grid.Column="1" SelectedIndex="{Binding GlassModeIndex}" FontSize="13"
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding GlassModeIndex, Mode=TwoWay}" FontSize="13"
                                           MinWidth="150" HorizontalAlignment="Left">
                                     <ComboBoxItem Content="关闭"/>
                                     <ComboBoxItem Content="{x:Static models:GlassModeNames.Translucent}"/>
@@ -573,9 +576,6 @@
                                     <ComboBoxItem Content="{x:Static models:GlassModeNames.Liquid}"/>
                                 </ComboBox>
                             </Grid>
-                            <CheckBox Content="液态玻璃自动降级（磨砂 → 半透明）"
-                                      IsChecked="{Binding AutoGlassFallback, Mode=TwoWay}"
-                                      IsVisible="{Binding IsLiquidRowVisible}"/>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
                                   IsVisible="{Binding IsOpacityRowVisible}">
                                 <TextBlock Grid.Column="0" Text="不透明度" VerticalAlignment="Center"
@@ -902,11 +902,7 @@
                     <!-- Panel 只负责给出「大屏那块屏幕的尺寸」；ClockSurface 拿的是 ViewModel。
                          分开写是因为 ClockSurface 的 DataContext 一旦换成 ViewModel，
                          它自己身上的宽高绑定就会跑去 ViewModel 上找 PreviewWidth 了。 -->
-                    <Panel Width="{Binding PreviewWidth}" Height="{Binding PreviewHeight}">
-                        <views:ClockSurface x:Name="PreviewSurface" IsPreview="True" IsHitTestVisible="False"
-                                            BackdropCornerRadius="12"
-                                            DataContext="{Binding PreviewVm}"/>
-                    </Panel>
+                    <Panel x:Name="PreviewHost" Width="{Binding PreviewWidth}" Height="{Binding PreviewHeight}"/>
                 </Viewbox>
             </Border>
             <Button Grid.Row="2" FontSize="15" FontWeight="Bold"

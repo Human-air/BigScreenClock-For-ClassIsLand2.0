@@ -662,13 +662,15 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
     private bool _isRecordingVisible;
     private string _recordingText = "";
+    private bool _showingProtection;
     private IBrush _recordingForeground = CountNormalBrush;
 
     /// <summary>当前主题下的「正在记录」提示色（换主题时由 <see cref="RefreshSemanticColors"/> 重算）。</summary>
     private void RefreshRecordingColor()
     {
         if (!IsRecordingVisible) return;
-        RecordingForeground = RecordingText.Contains("吵闹") ? CountNoisy : CountNormal;
+        RecordingForeground = _showingProtection ? Chrome.TextPrimary
+            : _decibelService.CurrentSegmentLevel == NoiseLevel.Noisy ? CountNoisy : CountNormal;
     }
 
     /// <summary>是否显示「正在记录」提示（有段且已起算、上课中）。</summary>
@@ -713,32 +715,37 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public string RecordingText
     {
         get => _recordingText;
-        set { _recordingText = value; OnPropertyChanged(); }
+        set { if (_recordingText != value) { _recordingText = value; OnPropertyChanged(); } }
     }
 
     /// <summary>提示颜色：一般=黄，吵闹=红。</summary>
     public IBrush RecordingForeground
     {
         get => _recordingForeground;
-        set { _recordingForeground = value; OnPropertyChanged(); }
+        set { if (!ReferenceEquals(_recordingForeground, value)) { _recordingForeground = value; OnPropertyChanged(); } }
     }
 
-    /// <summary>
-    /// 根据检测器的实时段归属刷新「正在记录」提示。
-    /// 仅在计数可见、上课时段、且不在上课初期保护期内显示；段起算前/段结束后隐藏。
-    /// （保护期内本来就不计数，再挂个「正在记录」会误导同学）
-    /// </summary>
+    /// <summary>保护倒计时和正在记录共用同一个显示位置。</summary>
     private void UpdateRecording()
     {
-        var seg = _decibelService.CurrentSegmentLevel;
-        bool show = seg.HasValue && _settings.ShowNoisyCounter
-            && !_isInBreak && !string.IsNullOrEmpty(_currentClassName)
-            && !IsInProtection();
-        IsRecordingVisible = show;
-        if (!show) return;
-        var noisy = seg == NoiseLevel.Noisy;
-        RecordingText = noisy ? "正在记录：吵闹" : "正在记录：一般";
-        RecordingForeground = noisy ? CountNoisy : CountNormal;
+        var showCounter = _settings.ShowNoisyCounter && !_isInBreak && !string.IsNullOrEmpty(_currentClassName);
+        var remaining = showCounter && _settings.SkipFirst3Min
+            ? _settings.SkipFirstMinutes * 60 - (NowVirtual - _classStartTime).TotalSeconds
+            : 0;
+        _showingProtection = remaining > 0;
+        if (_showingProtection)
+        {
+            var seconds = (int)Math.Ceiling(Math.Min(remaining, _settings.SkipFirstMinutes * 60));
+            RecordingText = $"保护中 {seconds / 60:00}:{seconds % 60:00}";
+            RecordingForeground = Chrome.TextPrimary;
+        }
+        else if (showCounter && _decibelService.CurrentSegmentLevel is { } level)
+        {
+            var noisy = level == NoiseLevel.Noisy;
+            RecordingText = noisy ? "正在记录：吵闹" : "正在记录：一般";
+            RecordingForeground = noisy ? CountNoisy : CountNormal;
+        }
+        IsRecordingVisible = _showingProtection || showCounter && _decibelService.CurrentSegmentLevel.HasValue;
     }
 
     private bool _showDecibelMeter = true;
@@ -769,7 +776,28 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public string CourseInfoText
     {
         get => _courseInfoText;
-        set { _courseInfoText = value; OnPropertyChanged(); }
+        set { if (_courseInfoText != value) { _courseInfoText = value; OnPropertyChanged(); } }
+    }
+
+    private string _courseTimeText = "";
+    private string _courseTimeWidthSample = "";
+
+    public string CourseTimeText => _courseTimeText;
+    public string CourseTimeWidthSample => _courseTimeWidthSample;
+    public bool HasCourseTime => _courseTimeText.Length != 0;
+
+    private void SetCourseTime(string text, string widthSample)
+    {
+        if (_courseTimeWidthSample != widthSample)
+        {
+            _courseTimeWidthSample = widthSample;
+            OnPropertyChanged(nameof(CourseTimeWidthSample));
+        }
+        if (_courseTimeText == text) return;
+        var wasVisible = HasCourseTime;
+        _courseTimeText = text;
+        OnPropertyChanged(nameof(CourseTimeText));
+        if (wasVisible != HasCourseTime) OnPropertyChanged(nameof(HasCourseTime));
     }
 
     private double _courseProgress;
@@ -778,7 +806,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public double CourseProgress
     {
         get => _courseProgress;
-        set { _courseProgress = value; OnPropertyChanged(); }
+        set { if (_courseProgress != value) { _courseProgress = value; OnPropertyChanged(); } }
     }
 
     private bool _showCourseProgress;
@@ -787,7 +815,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public bool ShowCourseProgress
     {
         get => _showCourseProgress;
-        set { _showCourseProgress = value; OnPropertyChanged(); }
+        set { if (_showCourseProgress != value) { _showCourseProgress = value; OnPropertyChanged(); } }
     }
 
     public int ClockFontSize
@@ -1580,9 +1608,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// 其余类型按 CI 的写法显示一个（如「4m/1h30m」「-1h25m」「6%」「-1:24:51」）。
     /// 快下课时 CI 会把附加信息换成倒计时，这里照做。
     /// </summary>
-    private string FormatTimePointExtra(TimeSlot slot, TimeSpan now)
+    private (string Text, string WidthSample) FormatTimePointExtra(TimeSlot? slot, TimeSpan now)
     {
-        if (!_showTimePointExtra) return "";
+        if (!_showTimePointExtra || slot is null) return ("", "");
 
         var total = (long)Math.Floor(Math.Max(0, (slot.End - slot.Start).TotalSeconds));
         var elapsed = Math.Max(0, (long)(now - slot.Start).TotalSeconds);
@@ -1591,9 +1619,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         var offset = _settings.ShowBellTime ? TimeSpan.FromSeconds(_timeOffsetSeconds) : TimeSpan.Zero;
         var range = CiTimePointFormat.Range(slot.Start - offset, slot.End - offset,
             _settings.ShowBellTime && _timeOffsetSeconds % 60 != 0);
-        var text = CiTimePointFormat.Select(_timePointExtraType, range, elapsed, left, total,
+        return CiTimePointFormat.SelectDisplay(_timePointExtraType, range, elapsed, left, total,
             _countdownEnabled, _countdownSeconds, _extraInfo4ShowSeconds, _nonExactCountdown);
-        return string.IsNullOrEmpty(text) ? "" : "   " + text;
     }
 
     /// <summary>
@@ -1702,7 +1729,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     public void RefreshForPreview()
     {
-        UpdateClockText(DateTime.Now);
+        UpdateClockText(NowVirtual);
         ShowDecibelMeter = _settings.ShowDecibelMeter;
         ShowCourseInfo = _settings.ShowCourseInfo;
         ClockFontSize = _settings.ClockFontSize;
@@ -1787,7 +1814,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _isInBreak = false;
         _noisyDisplaySignature = "";
         CourseInfoText = "";
-        LoadTodaySchedule();
+        SetCourseTime("", "");
+        LoadTodaySchedule(NowVirtual.Date);
         SubscribeToClassEvents();
 
         // 重新订阅分贝事件（先退订再订阅，保证不累积）
@@ -1887,7 +1915,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _pausedForMinimize = false;
         CancelMinimizePause();
 
-        LoadTodaySchedule();          // 期间可能已经换课
+        LoadTodaySchedule(NowVirtual.Date); // 期间可能已经换课
         SubscribeToClassEvents();     // 顺带立刻按当前时间状态重算一次
         StartUpdateTimer();
         StartAntiScreensaver();
@@ -1964,7 +1992,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             var now = elapsed.Elapsed;
             var gap = now - lastPulse;
             lastPulse = now;
-            clockPulse.Tick(DateTime.Now);
+            clockPulse.Tick(NowVirtual);
             if (_window is not { IsVisible: true, WindowState: not WindowState.Minimized } window) return;
             if (gap.TotalMilliseconds >= AdaptiveGlassQuality.StallMilliseconds)
             {
@@ -1973,9 +2001,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             }
             if (now - lastSample < TimeSpan.FromSeconds(30)) return;
             lastSample = now;
-            BackgroundDiagnostics.Write("display-sample", $"mode={window.EffectiveGlassMode} scaling={window.RenderScaling:F2}");
+            var (batches, panels) = window.GlassBakeTotals;
+            BackgroundDiagnostics.Write("display-sample",
+                $"mode={window.EffectiveGlassMode} scaling={window.RenderScaling:F2} glassBatches={batches} glassPanels={panels}");
         };
-        clockPulse.Tick(DateTime.Now);
+        clockPulse.Tick(NowVirtual);
         _clockTimer.Start();
         var refreshWork = new CoalescedUiWork(
             static action => Dispatcher.UIThread.Post(action), RefreshAll);
@@ -2020,7 +2050,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         // 课程定位用 CI 虚拟时间（与实际打铃对齐）
         UpdateCourseInfo(NowVirtual);
 
-        // 刷新计数区域（脏标记：内容未变不重建；保护倒计时需要每秒刷新）
+        // 保护倒计时与实时录制状态共用提示位，主计数列表只在内容变化时更新。
+        UpdateRecording();
         UpdateNoisyDisplay();
 
         // 摄像头占用：占用快照由后台监视器事件驱动更新，这里每秒取一次并合成提醒条目
@@ -2056,12 +2087,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     public DateTime? GetNextTargetCourseStart()
     {
         var now = NowVirtual;
-        if (_scheduleDate != now.Date)
-        {
-            LoadTodaySchedule();
-            // 课表读失败（没有 profile 文件）也记下日期，免得每轮都重读一遍
-            _scheduleDate = now.Date;
-        }
+        EnsureScheduleDate(now);
 
         if (_todaySlots.Count == 0) return null;
 
@@ -2072,8 +2098,14 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         return ClassStartSchedule.NextTargetStart(slots, _settings.IsTargetCourse, now);
     }
 
-    private void LoadTodaySchedule()
+    private void EnsureScheduleDate(DateTime now)
     {
+        if (_scheduleDate != now.Date) LoadTodaySchedule(now.Date);
+    }
+
+    private void LoadTodaySchedule(DateTime date)
+    {
+        _scheduleDate = date;
         _todaySlots.Clear();
         try
         {
@@ -2088,6 +2120,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 if (doc.RootElement.TryGetProperty("TimeOffsetSeconds", out var offset))
                     _timeOffsetSeconds = offset.GetInt32();
             }
+            // 优先用 CI 选出的课表，包含调试日期、轮换与临时课表。
+            if (LoadCiSchedule(date)) return;
+
             var profilePath = Path.Combine(dataDir, "Profiles", profileFileName);
             if (!File.Exists(profilePath)) return;
 
@@ -2097,8 +2132,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             if (!root.TryGetProperty("ClassPlans", out var classPlans)) return;
             if (!root.TryGetProperty("Subjects", out var subjects)) return;
 
-            var now = DateTime.Now;
-            int todayDayOfWeek = (int)now.DayOfWeek;
+            int todayDayOfWeek = (int)date.DayOfWeek;
 
             // 找今天的课表
             JsonElement? todayPlan = null;
@@ -2146,8 +2180,38 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         }
     }
 
+    private bool LoadCiSchedule(DateTime date)
+    {
+        if (_serviceProvider.GetService<ILessonsService>() is not { } lessons
+            || _serviceProvider.GetService<IProfileService>()?.Profile is not { } profile)
+            return false;
+
+        if (!lessons.IsClassPlanEnabled) return true;
+        if (lessons.GetClassPlanByDate(date, out _) is not { TimeLayout: { } layout } plan) return true;
+        int classIndex = 0;
+        foreach (var item in layout.Layouts)
+        {
+            if (item.TimeType is not (0 or 1)) continue;
+            string? subject = null;
+            if (item.TimeType == 0 && classIndex < plan.Classes.Count)
+            {
+                var info = plan.Classes[classIndex++];
+                if (profile.Subjects.TryGetValue(info.SubjectId, out var entry)) subject = entry.Name;
+            }
+            _todaySlots.Add(new TimeSlot
+            {
+                Start = item.StartTime,
+                End = item.EndTime,
+                IsClass = item.TimeType == 0,
+                SubjectName = subject,
+            });
+        }
+        return true;
+    }
+
     private void UpdateCourseInfo(DateTime now)
     {
+        EnsureScheduleDate(now);
         var time = now.TimeOfDay;
         TimeSlot? current = null;
         TimeSlot? nextClass = null;
@@ -2167,20 +2231,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             }
         }
 
-        if (current != null && current.IsClass && !string.IsNullOrEmpty(current.SubjectName))
-        {
-            // 上课中：显示当前课程（含实际打铃时间，如有偏移）+ 与 CI 一致的时间点附加信息
-            CourseInfoText = $"当前课程为 {current.SubjectName}{FormatTimePointExtra(current, time)}";
-        }
-        else if (_isInBreak && nextClass != null)
-        {
-            // 课间：显示下节课程
-            CourseInfoText = $"下节课程为 {nextClass.SubjectName}{(current is null ? "" : FormatTimePointExtra(current, time))}";
-        }
-        else
-        {
-            CourseInfoText = "";
-        }
+        CourseInfoText = current is { IsClass: true, SubjectName.Length: > 0 }
+            ? $"当前课程为 {current.SubjectName}"
+            : current is { IsClass: false } && nextClass is not null
+                ? $"下节课程为 {nextClass.SubjectName}"
+                : "";
+        var (extra, width) = FormatTimePointExtra(CourseInfoText.Length == 0 ? null : current, time);
+        SetCourseTime(extra, width);
 
         // 进度条：上课槽或课间槽都显示「当前时间状态」的进行进度。
         // time 与课程定位是同一时刻（NowVirtual），current 是同一时段槽 → 时间显示与进度天然一致。
@@ -2248,8 +2305,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     private DateTime? LookupActualClassStart(string subjectName)
     {
-        if (string.IsNullOrEmpty(subjectName) || _todaySlots.Count == 0) return null;
+        if (string.IsNullOrEmpty(subjectName)) return null;
         var now = NowVirtual;
+        EnsureScheduleDate(now);
         foreach (var slot in _todaySlots)
         {
             if (slot.IsClass && slot.SubjectName == subjectName
@@ -2314,7 +2372,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 构建计数区域分段（课程名/一般黄/吵闹红/保护提示）。
+    /// 构建计数区域分段（课程名/一般黄/吵闹红）。
     /// 只在上课期间显示；课间/非上课时段内部仍可记录，但显示隐藏。
     /// </summary>
     private List<NoisyDisplaySegment> BuildNoisySegments()
@@ -2345,19 +2403,6 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
                 list.Add(new NoisyDisplaySegment { Text = $"  一般 {_counter.NormalCount} 次", Foreground = CountNormal });
             if (_counter.NoisyCount > 0)
                 list.Add(new NoisyDisplaySegment { Text = $"  吵闹 {_counter.NoisyCount} 次", Foreground = CountNoisy });
-        }
-        else if (_settings.SkipFirst3Min)
-        {
-            var remaining = _settings.SkipFirstMinutes * 60 - (int)(NowVirtual - _classStartTime).TotalSeconds;
-            if (remaining > 0)
-                list.Add(new NoisyDisplaySegment
-                {
-                    Text = $"上课初期保护中（{remaining / 60}:{remaining % 60:D2} 后开始记录）",
-                    Icon = IconGlyph.Of(LucideIconKind.Hourglass),
-                    Foreground = Chrome.TextPrimary,
-                });
-            else
-                AddIdleSegment(list);
         }
         else
         {

@@ -129,6 +129,35 @@ long GlassPixels(BackdropLayer layer) => ((IList)Read(layer, "_panels")!).Cast<o
 });
 Check(GlassPixels(fixture.Layer) > 0 && GlassPixels(fixture.Layer) <= BackdropImageSet.OpticalPixelLimit * 1.02,
     "all liquid tiles share a bounded optical raster budget");
+var stableTotals = fixture.Layer.GlassBakeTotals;
+[MethodImpl(MethodImplOptions.NoInlining)]
+void CheckUnchangedBackdrop()
+{
+    var settledImage = Image(fixture.Layer);
+    for (var pass = 0; pass < 6; pass++)
+    {
+        fixture.Layer.Resume();
+        fixture.Layer.InvalidateGlass();
+        Pump(fixture.Window);
+    }
+    Wait(fixture.Window, () => Idle(fixture.Layer) && GlassReady(fixture.Layer), "unchanged glass stays cached");
+    Check(ReferenceEquals(Image(fixture.Layer), settledImage), "repeated visible resume with identical inputs reuses the backdrop");
+    Check(fixture.Layer.GlassBakeTotals == stableTotals, "repeated layout signals with identical inputs perform zero glass bakes");
+}
+CheckUnchangedBackdrop();
+secondTarget.Width -= 12;
+Pump(fixture.Window);
+Wait(fixture.Window, () => Idle(fixture.Layer) && GlassReady(fixture.Layer), "one panel changes size under the raster cap");
+Check(fixture.Layer.GlassBakeTotals.Panels == stableTotals.Panels + 1,
+    "changing one large panel under the cap reuses the unchanged panel's baked image");
+var beforeGrowth = fixture.Layer.GlassBakeTotals;
+secondTarget.Width += 700;
+Pump(fixture.Window);
+Wait(fixture.Window, () => Idle(fixture.Layer) && GlassReady(fixture.Layer), "large panel grows past the shared raster quota");
+Check(fixture.Layer.GlassBakeTotals.Panels == beforeGrowth.Panels + 1,
+    "growing a panel past the budget only reduces and refreshes that panel");
+Check(GlassPixels(fixture.Layer) <= BackdropImageSet.OpticalPixelLimit,
+    "local resizing remains within total raster budget");
 [MethodImpl(MethodImplOptions.NoInlining)]
 WeakReference[] CaptureRetiredResources(BackdropLayer layer)
 {
@@ -246,26 +275,34 @@ var adaptive = Create();
 adaptive.Layer.Apply(imagePath, 0, 0, (int)GlassMode.Liquid, 35, 24, 50, 45, autoGlassFallback: true);
 Wait(adaptive.Window, () => Idle(adaptive.Layer) && GlassReady(adaptive.Layer), "adaptive liquid ready");
 var originalSharp = Image(adaptive.Layer)!.Sharp;
+var fullQualityPixels = GlassPixels(adaptive.Layer);
 var notices = new List<(GlassMode From, GlassMode To, GlassFallbackReason Reason)>();
 adaptive.Layer.GlassFallbackApplied += (from, to, reason) => notices.Add((from, to, reason));
-void Stall(int seconds) => adaptive.Layer.ObserveUiStall(TimeSpan.FromSeconds(seconds), 1000);
+void Stall(int seconds) => adaptive.Layer.ObserveUiStall(TimeSpan.FromSeconds(seconds), 1100);
 Stall(1); Stall(3);
-Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid, "two stall signals do not trigger fallback");
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid && !adaptive.Layer.ReducedGlassResolution,
+    "two stall signals do not reduce quality");
 Stall(5);
-Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "first fallback is frosted");
+Wait(adaptive.Window, () => Idle(adaptive.Layer) && GlassReady(adaptive.Layer), "low resolution liquid ready");
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid && adaptive.Layer.ReducedGlassResolution &&
+    GlassPixels(adaptive.Layer) < fullQualityPixels * .5, "first response lowers render resolution while retaining liquid");
+Check(ReferenceEquals(Image(adaptive.Layer)!.Sharp, originalSharp), "lowering refraction resolution does not decode the wallpaper again");
+Stall(8); Stall(10); Stall(12);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "new pressure after resolution reduction selects frosted");
 Check(ReferenceEquals(Image(adaptive.Layer)!.Sharp, originalSharp) && adaptive.Layer.HasBlurredBackdrop,
     "frosted preserves the sharp wallpaper and the blur bitmap");
 Check(Image(adaptive.Layer)!.SharpPixels is null && Image(adaptive.Layer)!.BlurPixels is null &&
     GlassPixels(adaptive.Layer) == 0, "frosted releases refraction snapshots and panel bitmaps");
-Stall(8); Stall(10); Stall(41);
-Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "expired or pre-downgrade stall signals cannot trigger next stage");
+Stall(14); Stall(16); Stall(41);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Frosted, "old stall signals do not contribute to a new downgrade");
 Stall(43); Stall(45);
 Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Translucent, "persistent pressure after frosted selects translucent");
 Check(notices.SequenceEqual(new[]
 {
+    (GlassMode.Liquid, GlassMode.Liquid, GlassFallbackReason.UiStall),
     (GlassMode.Liquid, GlassMode.Frosted, GlassFallbackReason.UiStall),
     (GlassMode.Frosted, GlassMode.Translucent, GlassFallbackReason.UiStall),
-}), "both downgrade notices carry the exact original mode, new mode and reason");
+}), "all notices carry the exact original mode, new mode and reason");
 Check(ReferenceEquals(Image(adaptive.Layer)!.Sharp, originalSharp) && Image(adaptive.Layer)!.OpticalBytes == 0,
     "translucent preserves the same sharp wallpaper and releases all optics");
 adaptive.Layer.Width = 1920; Pump(adaptive.Window);
@@ -278,6 +315,9 @@ Wait(adaptive.Window, () => Idle(adaptive.Layer) && GlassReady(adaptive.Layer), 
 Stall(48); Stall(50); Stall(52);
 Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Liquid && Image(adaptive.Layer)!.SharpPixels is not null,
     "disabling the option keeps the configured mode and restores samples");
+adaptive.Layer.Apply(imagePath, 0, 0, (int)GlassMode.Frosted, 35, 24, 50, 45, autoGlassFallback: true);
+Stall(54); Stall(56); Stall(58);
+Check(adaptive.Layer.EffectiveGlassMode == GlassMode.Translucent, "automatic fallback also works when frosted was selected directly");
 adaptive.Window.Close();
 
 BackgroundDiagnostics.Write("image-error", "pixels=3840x2160", new IOException("private-wallpaper-path"));

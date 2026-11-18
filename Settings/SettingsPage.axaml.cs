@@ -96,6 +96,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// 右栏预览要藏掉（大屏就在后面，看真的比看缩略图强），也不该在这里弹信、拉更新说明。
     /// </summary>
     public bool Embedded { get; }
+    private readonly ClockSurface? _previewSurface;
+
+    internal double ScrollPosition
+    {
+        get => SettingsScroll.Offset.Y;
+        set => SettingsScroll.Offset = new Vector(SettingsScroll.Offset.X, value);
+    }
 
     public SettingsPage() : this(embedded: false) { }
 
@@ -107,15 +114,27 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         _settings = Plugin.Settings!;
         _earthquakePluginAvailable = CheckEarthquakePlugin();
         try { _clockViewModel = Plugin.ServiceProvider?.GetService<FullScreenClockViewModel>(); } catch { }
+        if (!Embedded)
+        {
+            _previewSurface = new ClockSurface
+            {
+                IsPreview = true,
+                IsHitTestVisible = false,
+                BackdropCornerRadius = new CornerRadius(12),
+                DataContext = _clockViewModel,
+            };
+            PreviewHost.Children.Add(_previewSurface);
+        }
 
         // 这几项订阅的都是**页面外面**的对象（设置、ViewModel），页面一收起就必须摘掉：
         // CI 每打开一次设置页都可能新建一个页面，不摘的话旧页面永远活着，还接着干 UI 活。
         Loaded += (_, _) =>
         {
-            if (!Embedded) PreviewSurface.ResumeVisualWork();
+            _previewSurface?.ResumeVisualWork();
             HookPositionLimits();
             HookLayoutSliders();
             SubscribeSharedEvents();
+            if (ShowCameraReminder && CameraDevices.Count == 0) _ = LoadCameraDevicesAsync();
             if (!Embedded)
             {
                 ShowLetterIfNeeded();
@@ -125,7 +144,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         };
         Unloaded += (_, _) =>
         {
-            PreviewSurface.SuspendVisualWork();
+            _previewSurface?.SuspendVisualWork();
             UnhookPositionLimits();
             StopLayoutAdjust();
             UnsubscribeSharedEvents();
@@ -144,7 +163,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
         LoadAllCourseNames();
         RestoreSelectedCourses();
-        LoadCameraDevices();
         if (!Embedded) StartPreviewSync();
 
         // CI 主题在明亮/黑暗间切换（跟随档）→ 重新套色，预览跟着变
@@ -160,7 +178,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     private void ApplyEmbeddedLayout()
     {
         RootGrid.ColumnDefinitions[1].Width = new GridLength(0);
-        PreviewSurface.SuspendVisualWork();
         PreviewPanel.IsVisible = false;
         // 隐藏并不等于离开视觉树：快速设置无需另一份预览，直接摘掉右栏内容。
         PreviewPanel.Children.Clear();
@@ -193,6 +210,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         _settings.PropertyChanged -= OnSettingsPropertyChanged;
         _settings.PropertyChanged += OnSettingsPropertyChanged;
+        NotifyGlassAppearance();
     }
 
     private void UnsubscribeSharedEvents()
@@ -215,6 +233,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             OnPropertyChanged(nameof(VolumePositionPercent));
             OnPropertyChanged(nameof(VolumePositionPercentText));
         }
+        else if (e.PropertyName is nameof(PluginSettings.RuntimeGlassAppearance) or nameof(PluginSettings.GlassMode))
+        {
+            NotifyGlassAppearance();
+            if (e.PropertyName == nameof(PluginSettings.RuntimeGlassAppearance)) return;
+        }
+        else if (e.PropertyName is nameof(PluginSettings.AutoGlassFallback))
+            OnPropertyChanged(nameof(AutoGlassFallback));
 
         SchedulePreviewSync();
     }
@@ -227,7 +252,6 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     /// <summary>预览绑的大屏 ViewModel：与大屏用的是 DI 里的同一个单例，
     /// 所以预览里的数据、颜色、字号就是大屏当时真正会显示的那一套。</summary>
-    public FullScreenClockViewModel? PreviewVm => _clockViewModel;
 
     private Size _previewSize = new(1920, 1080);
 
@@ -308,8 +332,8 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     // ===== 主题 =====
 
-    /// <summary>CI 当前是不是深色主题。设置页就在 CI 的窗口里，自身生效变体即 CI 的。</summary>
-    private bool CiIsDark => ActualThemeVariant != ThemeVariant.Light;
+    // 快速设置本身固定使用深色，跟随主题应读取 ClassIsland 的应用变体。
+    private bool CiIsDark => (Embedded ? Application.Current?.ActualThemeVariant : ActualThemeVariant) != ThemeVariant.Light;
 
     /// <summary>CI 数据目录（data\），插件配置目录往上三级。</summary>
     private string CiDataDir => Path.GetFullPath(Path.Combine(Plugin.ConfigFolder!, "..", "..", ".."));
@@ -559,6 +583,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
                 var version = PluginVersion.Current;
                 var configured = (GlassMode)_settings.GlassMode;
                 var automatic = _settings.AutoGlassFallback;
+                var reduced = IsGlassResolutionReduced;
                 var enabled = _settings.BackgroundEnabled;
                 var region = _settings.DisplayRegion;
                 var width = region == 0 ? 100 : _settings.VisibleWidthPercent;
@@ -576,6 +601,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
                         设置玻璃模式 = {configured}
                         当前玻璃模式 = {effective?.ToString() ?? "大屏未显示"}
                         自动降级启用 = {automatic}
+                        液态玻璃降低清晰度 = {reduced}
                         显示区域 = {region}（0 全屏，1 左半屏，2 右半屏）
                         可见宽度 = {width}%
                         """;
@@ -610,18 +636,25 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// <summary>玻璃档：0 关闭 / 1 半透明 / 2 磨砂 / 3 真•高光折射。</summary>
     public int GlassModeIndex
     {
-        get => _settings.GlassMode;
+        get => _settings.RuntimeGlassAppearance.Mode ?? _settings.GlassMode;
         set
         {
-            if (_settings.GlassMode == value) return;
+            if (value is < 0 or > 3 || value == GlassModeIndex) return;
             _settings.GlassMode = value;
-            OnPropertyChanged(nameof(GlassModeIndex));
-            // 每档各露各的旋钮，换档时三个可见性都得重新通知一遍
-            OnPropertyChanged(nameof(IsOpacityRowVisible));
-            OnPropertyChanged(nameof(IsGrainRowVisible));
-            OnPropertyChanged(nameof(IsLiquidRowVisible));
+            NotifyGlassAppearance();
             SchedulePreviewSync();
         }
+    }
+
+    public bool IsGlassResolutionReduced => _settings.RuntimeGlassAppearance.Reduced;
+
+    private void NotifyGlassAppearance()
+    {
+        OnPropertyChanged(nameof(GlassModeIndex));
+        OnPropertyChanged(nameof(IsOpacityRowVisible));
+        OnPropertyChanged(nameof(IsGrainRowVisible));
+        OnPropertyChanged(nameof(IsLiquidRowVisible));
+        OnPropertyChanged(nameof(IsGlassResolutionReduced));
     }
 
     // 每档只露自己用得上的旋钮，省得「磨砂颗粒度」和「雾面浓度」摆在一起分不清谁是谁。
@@ -629,9 +662,9 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     // 磨砂档是压在糊底图上那层，折射档烘进折射图里 —— 哪一档都用得上，
     // 藏起来只会让人换档以后找不到它。剩下的：磨砂档另加颗粒度；折射档是折射强度 + 雾面浓度。
 
-    public bool IsOpacityRowVisible => _settings.GlassMode != (int)GlassMode.Off;
-    public bool IsGrainRowVisible => _settings.GlassMode == (int)GlassMode.Frosted;
-    public bool IsLiquidRowVisible => _settings.GlassMode == (int)GlassMode.Liquid;
+    public bool IsOpacityRowVisible => GlassModeIndex != (int)GlassMode.Off;
+    public bool IsGrainRowVisible => GlassModeIndex == (int)GlassMode.Frosted;
+    public bool IsLiquidRowVisible => GlassModeIndex == (int)GlassMode.Liquid;
 
     /// <summary>折射强度：边缘把背后画面推弯的力度。</summary>
     public double GlassRefraction
@@ -970,6 +1003,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     {
         try
         {
+            if (Plugin.ServiceProvider?.GetService<ClassIsland.Core.Abstractions.Services.IProfileService>()?.Profile is { } profile)
+            {
+                _allCourseNames.AddRange(profile.Subjects.Values.Select(subject => subject.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)));
+                return;
+            }
+
             var dataDir = CiDataDir;
             var settingsPath = Path.Combine(dataDir, "Settings.json");
             var profileFileName = "7.json";
@@ -1058,10 +1098,26 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     /// 枚举本机摄像头填进列表。首次使用（还没填过默认值）时全部勾上——开箱即用，
     /// 用户之后取消勾选就真的不再提醒。
     /// </summary>
-    private void LoadCameraDevices()
+    private bool _loadingCameraDevices;
+
+    private async Task LoadCameraDevicesAsync()
     {
-        var service = CameraService;
-        var devices = service?.EnumerateDevices() ?? new List<CameraDevice>();
+        if (_loadingCameraDevices) return;
+        _loadingCameraDevices = true;
+        try
+        {
+            var devices = await CameraActivityService.EnumerateDevicesAsync();
+            if (IsLoaded) ApplyCameraDevices(devices);
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded) CameraHint = $"设备列表加载失败（{ex.GetType().Name}）。";
+        }
+        finally { _loadingCameraDevices = false; }
+    }
+
+    private void ApplyCameraDevices(List<CameraDevice> devices)
+    {
 
         CameraDevices.Clear();
         if (devices.Count == 0)
@@ -1086,7 +1142,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             CameraDevices.Add(new CameraDeviceItem(d, displayNames[i], IsMonitored(d.Name, d.SymbolicLink), this));
         }
 
-        CameraHint = service?.LastError ?? "";
+        CameraHint = CameraService?.LastError ?? "";
     }
 
     /// <summary>设置里勾选的项里有没有这一台（按路径认，认不出才退回按名字，见 <see cref="MonitoredCamera.Matches"/>）。</summary>
@@ -1106,7 +1162,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     }
 
     public void RefreshCameras_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-        => LoadCameraDevices();
+        => _ = LoadCameraDevicesAsync();
 
     public void TestButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -1452,7 +1508,13 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     public bool ShowCameraReminder
     {
         get => _settings.ShowCameraReminder;
-        set { _settings.ShowCameraReminder = value; OnPropertyChanged(nameof(ShowCameraReminder)); }
+        set
+        {
+            if (_settings.ShowCameraReminder == value) return;
+            _settings.ShowCameraReminder = value;
+            OnPropertyChanged(nameof(ShowCameraReminder));
+            if (value && IsLoaded && CameraDevices.Count == 0) _ = LoadCameraDevicesAsync();
+        }
     }
 
     /// <summary>「摄像头使用中」那一条的字号。范围就是「默认 ~ 天气提醒字号」。</summary>

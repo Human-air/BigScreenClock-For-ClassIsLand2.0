@@ -15,7 +15,8 @@ public static class ClockThemeApplier
     /// <returns>true 表示本次换过颜色设置</returns>
     public static bool Apply(PluginSettings settings, bool ciIsDark)
     {
-        var variant = ClockTheme.ResolveVariant(EffectiveMode(settings), ciIsDark, BackgroundIsDark(settings));
+        var mode = EffectiveMode(settings);
+        var variant = ClockTheme.ResolveVariant(mode, ciIsDark, mode == ClockThemeMode.Auto ? BackgroundIsDark(settings) : null);
         if (settings.AppliedPaletteVariant == variant) return false;
 
         Capture(settings, settings.AppliedPaletteVariant);   // 旧主题那套先存回自己的槽位
@@ -47,7 +48,10 @@ public static class ClockThemeApplier
 
     /// <summary>按设置解析出生效调色板（大屏与设置页预览共用这一条路径）。</summary>
     public static ClockThemePalette ResolvePalette(PluginSettings settings, bool ciIsDark)
-        => ClockTheme.Resolve(EffectiveMode(settings), ciIsDark, BackgroundIsDark(settings));
+    {
+        var mode = EffectiveMode(settings);
+        return ClockTheme.Resolve(mode, ciIsDark, mode == ClockThemeMode.Auto ? BackgroundIsDark(settings) : null);
+    }
 
     /// <summary>
     /// 老配置（没有主题功能那版）升级上来时的迁移：它只有一套颜色，就是用户当时在用的那套

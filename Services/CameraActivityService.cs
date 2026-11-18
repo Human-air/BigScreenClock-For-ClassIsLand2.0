@@ -100,17 +100,34 @@ public sealed class CameraActivityService : IDisposable
     /// <summary>
     /// 枚举本机摄像头（设置页的设备列表用）。枚举失败返回空表，调用方按「没找到设备」提示。
     /// </summary>
-    public List<CameraDevice> EnumerateDevices()
+    private static readonly object EnumerationGate = new();
+    private static Task<List<CameraDevice>>? _enumerationTask;
+
+    public static Task<List<CameraDevice>> EnumerateDevicesAsync()
+    {
+        lock (EnumerationGate)
+        {
+            if (_enumerationTask is not { IsCompleted: false })
+                _enumerationTask = Task.Run(EnumerateDevices);
+            return _enumerationTask;
+        }
+    }
+
+    private static List<CameraDevice> EnumerateDevices()
     {
         var devices = new List<CameraDevice>();
         IMFAttributes? attributes = null;
         IntPtr array = IntPtr.Zero;
         uint count = 0;
         var enumerationSucceeded = false;
+        var mediaFoundationStarted = false;
         try
         {
-            EnsureMediaFoundation();
-            var hr = PInvoke.MFCreateAttributes(out attributes, 1);
+            // 设备列表和大屏监视器各自持有一份 MF 初始化引用，互不依赖生命周期。
+            var hr = PInvoke.MFStartup(MfVersion, MfStartupLite);
+            if (hr.Failed) return devices;
+            mediaFoundationStarted = true;
+            hr = PInvoke.MFCreateAttributes(out attributes, 1);
             if (hr.Failed || attributes is null) return devices;
 
             attributes.SetGUID(PInvoke.MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
@@ -162,7 +179,11 @@ public sealed class CameraActivityService : IDisposable
                     finally { CoTaskMemFreeRaw(array); }
                 }
             }
-            finally { ReleaseOwnedComObject(attributes); }
+            finally
+            {
+                ReleaseOwnedComObject(attributes);
+                if (mediaFoundationStarted) PInvoke.MFShutdown();
+            }
         }
         return devices;
     }

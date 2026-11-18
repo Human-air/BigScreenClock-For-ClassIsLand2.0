@@ -51,12 +51,14 @@ public sealed class BackdropLayer : Control
     private int _glassMode = (int)GlassMode.Off;
     private int _requestedGlassMode;
     private bool _autoGlassFallback;
-    private bool _budgetFallbackQueued;
+    private double _panelDensity;
+    private int _glassBatchesStarted;
+    private int _glassPanelsStarted;
     private readonly AdaptiveGlassQuality _quality = new();
-    private bool CanLowerGlass => _autoGlassFallback && _requestedGlassMode == (int)GlassMode.Liquid
-        && _quality.Mode != GlassMode.Translucent;
-    private bool IsAutomaticFallback => _autoGlassFallback && _requestedGlassMode == (int)GlassMode.Liquid
-        && _quality.Mode != GlassMode.Liquid;
+    private bool CanLowerGlass => _autoGlassFallback && _quality.Mode is GlassMode.Liquid or GlassMode.Frosted;
+    private bool IsAutomaticFallback => _autoGlassFallback && (int)_quality.Mode != _requestedGlassMode;
+    private bool ShouldCaptureSamples => _glassMode == (int)GlassMode.Liquid;
+    private readonly Stopwatch _glassClock = Stopwatch.StartNew();
     private double _glassOpacity = 35;
     private double _blurRadius = 24;
     private double _refraction = 55;
@@ -151,15 +153,12 @@ public sealed class BackdropLayer : Control
         var changed = chrome.IsLight != _chrome.IsLight || themeBackground != _themeBg;
 
         _chrome = chrome;
+        if (!changed) return;
+
         _themeBg = themeBackground;
         RebuildBrushes();
-
-        if (changed)
-        {
-            _contentVersion++;
-            MarkGlassDirty();
-        }
-
+        _contentVersion++;
+        MarkGlassDirty();
         InvalidateVisual();
         NotifyBackdropChanged();
     }
@@ -171,12 +170,14 @@ public sealed class BackdropLayer : Control
     /// </param>
     public void Apply(string? imagePath, int stretch, double dim, int glassMode, double glassOpacity,
                       double blurRadius, double refraction, double frost, bool adjusting = false,
-                      bool autoGlassFallback = false)
+                      bool autoGlassFallback = false, bool resetAdaptiveQuality = false)
     {
         imagePath ??= "";
-        if (_requestedGlassMode != glassMode || _autoGlassFallback != autoGlassFallback)
+        var wasReduced = _quality.Reduced;
+        if (_requestedGlassMode != glassMode || _autoGlassFallback != autoGlassFallback
+            || resetAdaptiveQuality || _imagePath != imagePath)
         {
-            _quality.Reset();
+            _quality.Reset((GlassMode)glassMode);
             _requestedGlassMode = glassMode;
             _autoGlassFallback = autoGlassFallback;
         }
@@ -220,12 +221,13 @@ public sealed class BackdropLayer : Control
         var rebuild =
             imagePath != _builtPath ||
             wantBlur != (_builtWantBlur ?? false) ||
+            stretch != _stretch ||
             (wantBlur && Math.Abs(blurRadius - _builtRadius) > 0.4) ||
             (glassMode == (int)GlassMode.Liquid && _image?.Sharp is not null && _image.SharpPixels is null);
 
         // 「背景明暗」也在里头：它是烘进折射图里的（采样时压的那层 veil 是算出来的），
         // 以前漏了这一项，拖明暗滑块时折射档玻璃里外会差一档亮度。
-        var restyle = glassMode != _glassMode
+        var restyle = glassMode != _glassMode || wasReduced != _quality.Reduced
                       || Math.Abs(glassOpacity - _glassOpacity) > 0.01
                       || Math.Abs(refraction - _refraction) > 0.01
                       || Math.Abs(frost - _frost) > 0.01
@@ -273,6 +275,9 @@ public sealed class BackdropLayer : Control
     public bool HasBlurredBackdrop => _image?.Blur is not null;
 
     internal event Action<GlassMode, GlassMode, GlassFallbackReason>? GlassFallbackApplied;
+
+    internal bool ReducedGlassResolution => _quality.Reduced;
+    internal (int Batches, int Panels) GlassBakeTotals => (_glassBatchesStarted, _glassPanelsStarted);
 
     internal GlassMode EffectiveGlassMode => (GlassMode)_glassMode;
 
@@ -328,9 +333,8 @@ public sealed class BackdropLayer : Control
     /// <summary>组件被拖动/内容变化后，玻璃要跟着走。窗口那边在布局变化的钩子里调。</summary>
     public void InvalidateGlass()
     {
-        // 走防抖那条路：这里以前是直接标脏，于是「标脏 → 下一帧 Render 里立刻重烘」，
-        // 拖滑块时等于每帧烘一张整屏图。攒 120ms 再算，中间态都白算。
-        MarkGlassDirty();
+        // 布局信号不取消正在计算的其他面板；发布时逐块验证坐标。
+        MarkGlassDirty(cancelInFlight: false);
         InvalidateVisual();
     }
 
@@ -397,7 +401,8 @@ public sealed class BackdropLayer : Control
     {
         _suspended = false;
         if (!CanWork) return;
-        RequestRebuild();
+        SyncPixelBudget(Bounds.Size);
+        TryStartRebuild(Bounds.Size);
         InvalidateVisual();
     }
 
@@ -405,7 +410,7 @@ public sealed class BackdropLayer : Control
     {
         if (e.Property != IsVisibleProperty && e.Property != Window.WindowStateProperty) return;
         BackgroundDiagnostics.Write("window", $"visible={_ownerWindow?.IsVisible} state={_ownerWindow?.WindowState}");
-        if (CanWork) { RequestRebuild(); InvalidateVisual(); }
+        if (CanWork) Resume();
         else ReleaseBitmaps();
     }
 
@@ -443,6 +448,7 @@ public sealed class BackdropLayer : Control
         if (!SamePixelBudget(_sheetPixel, want))
         {
             _sheetPixel = want;
+            _contentVersion++;
             MarkGlassDirty();
         }
     }
@@ -507,13 +513,54 @@ public sealed class BackdropLayer : Control
         return scale;
     }
 
-    private double GlassScale(Size size, double? panelArea = null)
+    private void UpdatePanelRasters(Size size)
     {
-        var scale = DeviceScale(size);
-        var area = panelArea ?? _panels.Sum(p => p.Rect.Width * p.Rect.Height);
-        if (area > 0) scale = Math.Min(scale, Math.Sqrt(BackdropImageSet.OpticalPixelLimit / area));
-        return scale;
+        var density = DeviceScale(size) * (_quality.Reduced ? AdaptiveGlassQuality.ReducedScale : 1);
+        // 采样坐标也使用整数像素，限制极端长宽及巨型拼屏的坐标范围。
+        density = Math.Min(density, Math.Sqrt(40_000_000 / Math.Max(1, size.Width * size.Height)));
+        if (Math.Abs(_panelDensity - density) > 1e-6)
+        {
+            _panelDensity = density;
+            foreach (var panel in _panels) panel.RasterScale = 0;
+        }
+
+        var quality = _quality.Reduced ? AdaptiveGlassQuality.ReducedScale : 1;
+        var freePixels = (int)(BackdropImageSet.OpticalPixelLimit * quality * quality);
+        double pendingArea = 0;
+        foreach (var panel in _panels)
+        {
+            if (panel.RasterScale > 0) freePixels -= panel.RasterPixels;
+            else pendingArea += panel.Rect.Width * panel.Rect.Height;
+        }
+        if (freePixels <= 4 || pendingArea <= 0) return;
+
+        // 已有面板保留自己的像素预算。新出现或尺寸改变的面板只分配剩余空间，
+        // 留一点余量给布局里随后出现的小面板，避免任何单块变化带动其他块重烘。
+        var scale = Math.Min(_panelDensity, Math.Sqrt(freePixels * 0.96 / pendingArea));
+        foreach (var panel in _panels)
+        {
+            if (panel.RasterScale > 0) continue;
+            var area = panel.Rect.Width * panel.Rect.Height;
+            int allowance = Math.Min(freePixels, (int)(freePixels * (area / pendingArea)));
+            var localScale = scale;
+            var pixels = RasterPixelBound(panel.Rect, localScale);
+            while (allowance >= 4 && pixels > allowance)
+            {
+                localScale *= 0.85;
+                pixels = RasterPixelBound(panel.Rect, localScale);
+            }
+            if (allowance >= 4)
+            {
+                panel.RasterScale = localScale;
+                panel.RasterPixels = pixels;
+                freePixels -= pixels;
+            }
+            pendingArea -= area;
+        }
     }
+
+    private static int RasterPixelBound(Rect rect, double scale)
+        => ((int)Math.Ceiling(rect.Width * scale) + 1) * ((int)Math.Ceiling(rect.Height * scale) + 1);
 
     /// <summary>每次布局跑完后比一比：玻璃所在的矩形动了就重画（Avalonia 是保留式渲染，别人动了不会叫醒这一层）。</summary>
     private void OnLayoutUpdated()
@@ -527,7 +574,7 @@ public sealed class BackdropLayer : Control
             // 按着滑块期间矩形真的动了 → 收起玻璃、改画覆盖框（只按住不拖的话走不到这儿）
             if (_adjusting) _suppressed = true;
 
-            MarkGlassDirty();       // 哪些块的矩形变了，就在那儿等着重烘（SyncPanels 记好了）
+            MarkGlassDirty(cancelInFlight: false); // 坐标变动只让对应块重烘。
             InvalidateVisual();
         }
 
@@ -620,40 +667,25 @@ public sealed class BackdropLayer : Control
         var frosted = _glassMode == (int)GlassMode.Frosted;
         var liquid = _glassMode == (int)GlassMode.Liquid;
 
-        // 「真•高光折射」：每块玻璃自己一张小图，先按序全部铺上（块的先后顺序就是原来整屏一张
-        // 依次烘进去的顺序，两块重叠时后画的盖住先画的，与整屏那张的结果一致）。
-        // 底下那张清晰图不用先擦掉——折射图在玻璃范围内是不透明的，正好把它盖住。
-        if (liquid)
-        {
-            foreach (var p in _panels)
-            {
-                // 位置刚变过、新图还没烘好的块先不画（画旧位置就是一片错位的拖影），
-                // 同时也就不给它画描边了 —— 几个空心框比什么都不画更奇怪。
-                if (p.NeedsBake || p.Bitmap is not { } bitmap) continue;
-                DrawPanel(context, p, bitmap);
-            }
-        }
-
+        // 每块单独选择已烘位图或临时的磨砂底，等待时保留底色和描边。
         foreach (var p in _panels)
         {
-            if (liquid && (p.NeedsBake || p.Bitmap is null)) continue;
-
             var rr = new RoundedRect(p.Rect, p.Radius);
+            if (liquid && !p.NeedsBake && p.RasterScale > 0 && p.Bitmap is { } bitmap)
+            {
+                DrawPanel(context, p, bitmap);
+                continue;
+            }
 
-            // 磨砂档：玻璃里透出的就是「整张模糊背景按同一套映射铺开、被这块裁掉」的那片，
-            // 与玻璃外那张清晰图走的是同一个 ComputeDestRect —— 里外必然严丝合缝。
-            if (frosted && _image?.Blur is { } blur)
+            if ((frosted || liquid) && _image?.Blur is { } blur)
                 DrawBlurredBackdrop(context, blur, p.Rect, rr, size, veil);
 
-            // 底色渐变 + 1px 亮边 + 外投影/内亮边（后者是「玻璃厚度感」的来源）。
-            // 折射档的底色已经烘进折射图里了，这里只补描边和投影，别再叠一层渐变把折射糊掉。
-            // 注意：描边必须等**所有**块的折射图都画完再画，否则相邻两块重叠时，
-            // 后画那块会把先画那块的描边盖掉。
-            if (liquid)
-                context.DrawRectangle(null, _glassPen, rr, _glassShadows);
-            else
-                context.DrawRectangle(_glassFill, _glassPen, rr, _glassShadows);
+            context.DrawRectangle(_glassFill, null, rr);
         }
+
+        // 所有玻璃底画完再画边缘，重叠时后面的底图不会盖住前面的描边。
+        foreach (var p in _panels)
+            context.DrawRectangle(null, _glassPen, new RoundedRect(p.Rect, p.Radius), _glassShadows);
     }
 
     /// <summary>
@@ -766,7 +798,6 @@ public sealed class BackdropLayer : Control
         var size = Bounds.Size;
         var entries = ComputeGlassRects(size);
         var liquid = _glassMode == (int)GlassMode.Liquid;
-        var scale = size.Width < 2 ? 0 : GlassScale(size, entries.Sum(e => e.Rect.Width * e.Rect.Height));
         var changed = false;
 
         var next = new List<GlassPanel>(entries.Length);
@@ -775,26 +806,18 @@ public sealed class BackdropLayer : Control
             var panel = FindPanel(e.Target);
             if (panel is null)
             {
-                panel = new GlassPanel { Target = e.Target };
+                panel = new GlassPanel { Target = e.Target, Rect = e.Rect, Radius = e.Radius };
                 changed = true;
             }
             else if (!SameRect(panel.Rect, e.Rect) || Math.Abs(panel.Radius - e.Radius) > 0.01)
             {
+                if (Math.Abs(panel.Rect.Width - e.Rect.Width) > 0.5 ||
+                    Math.Abs(panel.Rect.Height - e.Rect.Height) > 0.5)
+                    panel.RasterScale = 0;
+                panel.Rect = e.Rect;
+                panel.Radius = e.Radius;
                 changed = true;
             }
-
-            panel.Rect = e.Rect;
-            panel.Radius = e.Radius;
-
-            // 手上那张位图还算不算数：矩形/圆角/倍率/内容版本任一对不上就得重烘。
-            // 比的是「烘的时候那份」（BakedRect 等）而不是上一次同步的值 —— 拖了一圈又拖回原位的话，
-            // 位图其实还是对的，这里就自动认出来了，白烘一趟。
-            panel.NeedsBake = liquid
-                              && (panel.Bitmap is null
-                                  || !SameRect(panel.Rect, panel.BakedRect)
-                                  || Math.Abs(panel.Radius - panel.BakedRadius) > 0.01
-                                  || panel.BakedVersion != _contentVersion
-                                  || Math.Abs(panel.BakedScale - scale) > 1e-9);
 
             next.Add(panel);
         }
@@ -810,6 +833,19 @@ public sealed class BackdropLayer : Control
         // 顺序照 GlassTargets 来：折射图先画的被后画的盖住，这个次序得稳定
         _panels.Clear();
         _panels.AddRange(next);
+        if (liquid && size.Width >= 2 && size.Height >= 2) UpdatePanelRasters(size);
+
+        foreach (var panel in _panels)
+        {
+            var needsBake = liquid && panel.RasterScale > 0
+                && (panel.Bitmap is null
+                    || !SameRect(panel.Rect, panel.BakedRect)
+                    || Math.Abs(panel.Radius - panel.BakedRadius) > 0.01
+                    || panel.BakedVersion != _contentVersion
+                    || Math.Abs(panel.BakedScale - panel.RasterScale) > 1e-9);
+            if (panel.NeedsBake != needsBake) changed = true;
+            panel.NeedsBake = needsBake;
+        }
         return changed;
     }
 
@@ -881,10 +917,10 @@ public sealed class BackdropLayer : Control
     /// 标脏。组件挪位、换主题、换背景、拖滑块都会调到这里，所以挂了个防抖：
     /// 拖时钟位置滑块时一帧一次的概率很高，攒 120 毫秒再算，免得白算十几遍中间态。
     /// </summary>
-    private void MarkGlassDirty()
+    private void MarkGlassDirty(bool cancelInFlight = true)
     {
         _glassDirty = true;
-        _glassCancellation?.Cancel();
+        if (cancelInFlight) _glassCancellation?.Cancel();
         if (!CanWork || Bounds.Width < 2 || _glassMode != (int)GlassMode.Liquid) return;
 
         _glassTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
@@ -911,7 +947,7 @@ public sealed class BackdropLayer : Control
     /// </summary>
     private void TryStartBake()
     {
-        if (!CanWork || _glassBusy || !_glassDirty || _budgetFallbackQueued) return;
+        if (!CanWork || _busy || _needsRebuild || _glassBusy || !_glassDirty) return;
         // 防抖计时器还在跑就等它：否则每次布局/渲染都从这里直接烘一遍，上面那个 120ms 防抖等于白搭
         if (_glassTimer is { IsEnabled: true }) return;
         // 按着滑块期间一次都不烘（松手才开新一轮）
@@ -933,32 +969,24 @@ public sealed class BackdropLayer : Control
 
         if (pending.Count == 0) { _glassDirty = false; return; }
 
-        // 用实际落屏的倍率，不是屏幕缩放：设置页那块预览缩着放，折射图按它实际画到的大小烘就行
-        // （按整屏烘一张 2560×1600 的，屏幕上一共才几百像素宽，白烧 15MB + 每秒一次的重算）
-        var scale = GlassScale(size);
-        var layerW = Math.Max(2, (int)Math.Round(size.Width * scale));
-        var layerH = Math.Max(2, (int)Math.Round(size.Height * scale));
-        if ((long)layerW * layerH > 40_000_000)
-        {
-            // 大到离谱（多屏拼出的巨桌面）就不做折射了：别把它算成「一直在等新图」而整块不画
-            _glassDirty = false;
-            return;
-        }
-
-        // 这几块背后的画面是同一张，采样器建一份就够；每块再包一层偏移（见 OffsetSampler）
-        var backdrop = BuildBackdrop(scale, layerW, layerH);
-        var style = BuildStyle(scale);
         var version = _contentVersion;
 
         var jobs = new List<BakeJob>(pending.Count);
         foreach (var panel in pending)
         {
+            var scale = panel.RasterScale;
+            var layerW = Math.Max(2, (int)Math.Round(size.Width * scale));
+            var layerH = Math.Max(2, (int)Math.Round(size.Height * scale));
             // 这一块在层里的整数设备像素外接框。取整方向必须是「包住」：
             // px 往下取、右/下往上取，缓冲才装得下烘焙里那个小数偏移。
             var px = (int)Math.Floor(panel.Rect.X * scale);
             var py = (int)Math.Floor(panel.Rect.Y * scale);
             var pw = Math.Max(1, (int)Math.Ceiling(panel.Rect.Right * scale) - px);
             var ph = Math.Max(1, (int)Math.Ceiling(panel.Rect.Bottom * scale) - py);
+
+            // 旧尺寸的图已无法对齐，先释放再分配。位置变化但尺寸相同则复用缓冲。
+            if (panel.Bitmap is { } old && old.PixelSize != new PixelSize(pw, ph))
+                panel.Dispose();
 
             jobs.Add(new BakeJob
             {
@@ -967,6 +995,8 @@ public sealed class BackdropLayer : Control
                 Radius = panel.Radius,
                 Version = version,
                 Scale = scale,
+                Style = BuildStyle(scale),
+                Sampler = new OffsetSampler(BuildBackdrop(scale, layerW, layerH), px, py),
                 Px = px,
                 Py = py,
                 Width = pw,
@@ -982,33 +1012,10 @@ public sealed class BackdropLayer : Control
             });
         }
 
-        if (CanLowerGlass)
-        {
-            var bytes = (_image?.OpticalBytes ?? 0) + _panels.Sum(panel => panel.BufferBytes);
-            foreach (var job in jobs)
-            {
-                var pixels = (long)job.Width * job.Height;
-                if (job.Canvas is null) bytes += 4 * pixels;
-                if (job.Panel.Bitmap is not { } map || map.PixelSize != new PixelSize(job.Width, job.Height))
-                    bytes += 4 * pixels;
-            }
-            if (bytes > AdaptiveGlassQuality.BufferBudget)
-            {
-                _budgetFallbackQueued = true;
-                Dispatcher.UIThread.Post(() =>
-                {
-                    _budgetFallbackQueued = false;
-                    if (CanWork && _contentVersion == version && CanLowerGlass)
-                        LowerGlass(GlassFallbackReason.BufferBudget, $"projectedBufferMiB={bytes / 1048576.0:F1}");
-                    else
-                        TryStartBake();
-                });
-                return;
-            }
-        }
-
         _glassDirty = false;
         _glassBusy = true;
+        _glassBatchesStarted++;
+        _glassPanelsStarted += jobs.Count;
 
         var cancellation = _glassCancellation = new CancellationTokenSource();
         var token = cancellation.Token;
@@ -1030,7 +1037,7 @@ public sealed class BackdropLayer : Control
                         Array.Clear(canvas, 0, canvas.Length);
                         LiquidGlassBaker.RenderPanel(canvas, job.Width, job.Height,
                             job.PanelX, job.PanelY, job.PanelWidth, job.PanelHeight,
-                            job.RadiusDevice, style, new OffsetSampler(backdrop, job.Px, job.Py), token);
+                            job.RadiusDevice, job.Style, job.Sampler!, token);
                         job.Result = canvas;
                     }
                     catch (OperationCanceledException) { throw; }
@@ -1040,7 +1047,8 @@ public sealed class BackdropLayer : Control
             catch (OperationCanceledException) { }
             finally { if (entered) GlassBuildGate.Release(); }
             var bakeDuration = entered ? Stopwatch.GetElapsedTime(workStarted).TotalMilliseconds : 0;
-            backdrop = null!; // 后台采样结束后不让排队的 UI 委托继续持有旧整图数组。
+            // 后台读取结束，排队等 UI 发布时不再保留旧背景的像素数组。
+            foreach (var job in jobs) job.Sampler = null;
 
             Dispatcher.UIThread.Post(() =>
             {
@@ -1066,7 +1074,7 @@ public sealed class BackdropLayer : Control
                             || !SameRect(panel.Rect, job.Rect)
                             || Math.Abs(panel.Radius - job.Radius) > 0.01
                             || job.Version != _contentVersion
-                            || Math.Abs(job.Scale - scale) > 1e-9)
+                            || Math.Abs(job.Scale - panel.RasterScale) > 1e-9)
                         {
                             stale = true;
                             continue;
@@ -1114,9 +1122,10 @@ public sealed class BackdropLayer : Control
                 }
 
                 var elapsed = bakeDuration + Stopwatch.GetElapsedTime(publishStart).TotalMilliseconds;
-                if (!stale && CanLowerGlass && _quality.ObserveBake(elapsed, failed))
+                if (!stale && CanLowerGlass &&
+                    _quality.ObserveBake(_glassClock.Elapsed, elapsed, failed) is { } reason)
                 {
-                    LowerGlass(failed ? GlassFallbackReason.RenderingFailed : GlassFallbackReason.SlowRendering, $"bakeMs={elapsed:F0} failed={failed}");
+                    LowerGlass(reason, $"bakeMs={elapsed:F0} failed={failed}");
                     return;
                 }
                 if (stale) _glassDirty = true;
@@ -1136,7 +1145,8 @@ public sealed class BackdropLayer : Control
 
     internal void ObserveUiStall(TimeSpan now, double milliseconds)
     {
-        if (CanWork && !_adjusting && CanLowerGlass && _quality.ObserveStall(now))
+        if (milliseconds >= AdaptiveGlassQuality.StallMilliseconds &&
+            CanWork && !_adjusting && CanLowerGlass && _quality.ObserveStall(now))
             LowerGlass(GlassFallbackReason.UiStall, $"uiGapMs={milliseconds:F0}");
     }
 
@@ -1150,14 +1160,19 @@ public sealed class BackdropLayer : Control
         _contentVersion++;
         _glassDirty = false;
         foreach (var panel in _panels) panel.Dispose();
-        _image?.ReleaseOptics(keepBlur: _quality.Mode == GlassMode.Frosted);
-        if (_image is not null) _builtWantBlur = _quality.Mode == GlassMode.Frosted && _image.Blur is not null;
+        if (_quality.Reduced)
+            MarkGlassDirty();
+        else
+        {
+            _image?.ReleaseOptics(keepBlur: _quality.Mode == GlassMode.Frosted);
+            if (_image is not null) _builtWantBlur = _quality.Mode == GlassMode.Frosted && _image.Blur is not null;
+        }
         if (_busy && _request is { } active && !MatchesCurrent(active, Bounds.Size))
         {
             _imageCancellation?.Cancel();
             _needsRebuild = true;
         }
-        BackgroundDiagnostics.Write("glass-fallback", $"from={previous} to={_quality.Mode} reason={reason} {detail}");
+        BackgroundDiagnostics.Write("glass-fallback", $"from={previous} to={_quality.Mode} reason={reason} reducedResolution={_quality.Reduced} {detail}");
         InvalidateVisual();
         NotifyBackdropChanged();
         GlassFallbackApplied?.Invoke(previous, _quality.Mode, reason);
@@ -1207,6 +1222,8 @@ public sealed class BackdropLayer : Control
         /// <summary>当前矩形（每轮布局同步一次）。</summary>
         public Rect Rect;
         public double Radius;
+        public double RasterScale;
+        public int RasterPixels;
 
         /// <summary>手上这张位图是按哪份参数烘的；与当前值对不上就得重烘。</summary>
         public Rect BakedRect;
@@ -1222,9 +1239,6 @@ public sealed class BackdropLayer : Control
         public int Py;
 
         public bool NeedsBake;
-
-        public long BufferBytes => 4L * ((Canvas?.LongLength ?? 0) +
-            (Bitmap is { } map ? (long)map.PixelSize.Width * map.PixelSize.Height : 0));
 
         public void Dispose()
         {
@@ -1242,6 +1256,8 @@ public sealed class BackdropLayer : Control
         public double Radius;
         public int Version;
         public double Scale;
+        public LiquidGlassStyle Style;
+        public IBackdropSampler? Sampler;
 
         public int Px;
         public int Py;
@@ -1404,7 +1420,7 @@ public sealed class BackdropLayer : Control
 
     private bool MatchesCurrent(BuildRequest request, Size size)
         => request.Path == _imagePath && request.Stretch == _stretch
-           && request.Blur == WantBlurNow() && request.CaptureSamples == !IsAutomaticFallback
+           && request.Blur == WantBlurNow() && request.CaptureSamples == ShouldCaptureSamples
            && Math.Abs(request.Radius - _blurRadius) < 0.01
            && SamePixelBudget(request.Pixels, WantedPixelSize(size));
 
@@ -1416,12 +1432,13 @@ public sealed class BackdropLayer : Control
             if (_request is { } active && !MatchesCurrent(active, size)) _imageCancellation?.Cancel();
             return;
         }
-        var request = new BuildRequest(_imagePath, WantedPixelSize(size), _stretch, _blurRadius, WantBlurNow(), CaptureSamples: !IsAutomaticFallback);
+        var request = new BuildRequest(_imagePath, WantedPixelSize(size), _stretch, _blurRadius, WantBlurNow(), CaptureSamples: ShouldCaptureSamples);
         _needsRebuild = false;
         _request = request;
         _reqPixel = request.Pixels;
-        if (request.CaptureSamples && BackdropPreloadCache.TryTake(request.Path, request.Pixels, request.Stretch, request.Radius, request.Blur) is { } ready)
+        if (BackdropPreloadCache.TryTake(request.Path, request.Pixels, request.Stretch, request.Radius, request.Blur) is { } ready)
         {
+            if (!request.CaptureSamples) ready.ReleaseOptics(keepBlur: request.Blur);
             Adopt(ready, request.Pixels, request.Blur, request.Path, request.Radius);
             BackgroundDiagnostics.Write("build-preloaded",
                 $"viewport={request.Pixels} source={ready.SourceSize} sharp={ready.Sharp?.PixelSize} opticalMiB={ready.OpticalBytes / 1048576.0:F1}");
@@ -1466,7 +1483,11 @@ public sealed class BackdropLayer : Control
                 {
                     if (!accepted) result?.Dispose();
                     result = null; // 已完成的回调不再持有旧图，即使调度器暂留委托也可回收。
-                    if (CanWork) TryStartRebuild(Bounds.Size);
+                    if (CanWork)
+                    {
+                        TryStartRebuild(Bounds.Size);
+                        TryStartBake();
+                    }
                 }
             });
         });

@@ -15,6 +15,7 @@ public partial class FullScreenClockWindow : Window
     private readonly DispatcherTimer _hideCursorTimer;
 
     internal Models.GlassMode EffectiveGlassMode => Surface.EffectiveGlassMode;
+    internal (int Batches, int Panels) GlassBakeTotals => Surface.GlassBakeTotals;
 
     internal void ObserveUiStall(TimeSpan now, double milliseconds) => Surface.ObserveUiStall(now, milliseconds);
 
@@ -43,6 +44,7 @@ public partial class FullScreenClockWindow : Window
         };
         Closed += (_, _) =>
         {
+            Plugin.Settings?.SetRuntimeGlassAppearance(null);
             _hideCursorTimer.Stop();
             _hideCursorTimer.Tick -= OnHideCursor;
             Surface.SuspendVisualWork();

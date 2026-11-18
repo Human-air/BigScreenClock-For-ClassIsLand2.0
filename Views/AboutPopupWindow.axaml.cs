@@ -11,8 +11,7 @@ namespace EveningSelfStudyClock.Views;
 /// 关于窗口：显示制作者、版本号（正式 / 测试 / 开发版）、项目仓库与演示视频链接。
 /// 60 秒自动关闭，点击窗口外（失焦）也会关闭。
 ///
-/// 配色跟大屏主题走：暗底白字 / 亮底黑字。大屏后面是磨砂或液态玻璃时就半透明，
-/// 让身后被糊掉的大屏透出来（模糊由 ClockSurface 在弹出期间给整面墙套 Effect 做）。
+/// 配色跟大屏主题走：暗底白字 / 亮底黑字。
 /// </summary>
 public partial class AboutPopupWindow : Window
 {
@@ -28,13 +27,13 @@ public partial class AboutPopupWindow : Window
     private readonly DispatcherTimer _autoCloseTimer;
     private readonly DateTime _shownAt = DateTime.Now;
 
-    /// <param name="light">大屏当前是明亮主题还是黑暗主题（文字、底色跟着翻）。</param>
-    /// <param name="frosted">身后的大屏是不是磨砂/液态玻璃档（是就半透明，让糊掉的画面透出来）。</param>
-    public AboutPopupWindow(bool light = false, bool frosted = false)
+    public AboutPopupWindow() : this(light: false) { }
+
+    public AboutPopupWindow(bool light)
     {
         InitializeComponent();
 
-        ApplyTheme(light, frosted);
+        ApplyTheme(light);
 
         // 版本号 + 版本类型：
         //   五位（如 1.1.1.10.6）= 本机开发版，构建时自动盖号，不对外发布；
@@ -69,12 +68,9 @@ public partial class AboutPopupWindow : Window
         Closed += (_, _) => _autoCloseTimer.Stop();
     }
 
-    private void ApplyTheme(bool light, bool frosted)
+    private void ApplyTheme(bool light)
     {
-        // 有糊掉的画面在身后：留一点透明，透出来才看得出是磨砂；没有就纯实色，保证字看得清
-        PanelBorder.Background = new SolidColorBrush(light
-            ? (frosted ? Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF) : Color.FromRgb(0xFF, 0xFF, 0xFF))
-            : (frosted ? Color.FromArgb(0xC4, 0x14, 0x14, 0x1F) : Color.FromRgb(0x14, 0x14, 0x1F)));
+        PanelBorder.Background = light ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x1F));
 
         // 圆角边上压一道极淡的描边：亮底上白面板才不会糊进亮背景里
         PanelBorder.BorderBrush = new SolidColorBrush(light

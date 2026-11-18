@@ -116,7 +116,11 @@ public partial class ClockSurface : UserControl
         Backdrop.Suspend();
     }
 
-    public void ResumeVisualWork() => Backdrop.Resume();
+    public void ResumeVisualWork()
+    {
+        Backdrop.Resume();
+        PublishGlassAppearance();
+    }
 
     private DispatcherTimer? _glassFallbackNoticeTimer;
 
@@ -126,12 +130,14 @@ public partial class ClockSurface : UserControl
 
         var cause = reason switch
         {
-            GlassFallbackReason.BufferBudget => "玻璃缓冲超出预算",
             GlassFallbackReason.RenderingFailed => "玻璃渲染多次失败",
             GlassFallbackReason.SlowRendering => "玻璃渲染持续缓慢",
             _ => "界面反复卡顿",
         };
-        GlassFallbackNoticeText.Text = $"{cause}，{GlassModeNames.Name(previous)}已自动降为{GlassModeNames.Name(current)}。";
+        PublishGlassAppearance();
+        GlassFallbackNoticeText.Text = previous == current
+            ? $"{cause}，{GlassModeNames.Name(current)}已降低清晰度。"
+            : $"{cause}，{GlassModeNames.Name(previous)}已自动降为{GlassModeNames.Name(current)}。";
         GlassFallbackNotice.IsVisible = true;
 
         if (_glassFallbackNoticeTimer is null)
@@ -153,6 +159,7 @@ public partial class ClockSurface : UserControl
         => DismissGlassFallbackNotice();
 
     internal GlassMode EffectiveGlassMode => Backdrop.EffectiveGlassMode;
+    internal (int Batches, int Panels) GlassBakeTotals => Backdrop.GlassBakeTotals;
 
     internal void ObserveUiStall(TimeSpan now, double milliseconds) => Backdrop.ObserveUiStall(now, milliseconds);
 
@@ -272,8 +279,7 @@ public partial class ClockSurface : UserControl
                 new() { Visual = ReminderPanel },
             };
 
-            // 组件挪了/隐了就得重画玻璃。Avalonia 是保留式渲染，兄弟控件动了不会叫醒背景层，
-            // 所以直接在各个目标身上盯 Bounds 与 IsVisible——位置或尺寸一变必然走这两条。
+            // 位置和尺寸统一在布局完成后逐块比较；可见性变化也主动通知背景。
             foreach (var target in new Control[]
                      {
                          WeatherBlock, RainBlock, CountdownBlock, ReminderTextBlock,
@@ -298,7 +304,7 @@ public partial class ClockSurface : UserControl
 
     private void OnGlassTargetPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (e.Property == Visual.BoundsProperty || e.Property == Visual.IsVisibleProperty)
+        if (e.Property == Visual.IsVisibleProperty)
             Backdrop.InvalidateGlass();
     }
 
@@ -347,9 +353,12 @@ public partial class ClockSurface : UserControl
     /// 可读性改由这圈柔光扛：深色主题白字配黑晕、明亮主题黑字配白晕，
     /// 底片于是可以只留一点同色系的淡彩，看着是「同一家族里挑出来的一个」，而不是贴上去的黑块。
     /// </summary>
+    private bool? _buttonHaloIsLight;
+
     private void ApplyButtonHalo()
     {
-        if (DataContext is not FullScreenClockViewModel vm) return;
+        if (DataContext is not FullScreenClockViewModel vm || _buttonHaloIsLight == vm.Chrome.IsLight) return;
+        _buttonHaloIsLight = vm.Chrome.IsLight;
 
         // 两个控件不能共用一个 Effect 实例，各建一份
         foreach (var button in new[] { MinimizeButton, ExitButton })
@@ -379,11 +388,11 @@ public partial class ClockSurface : UserControl
             or nameof(PluginSettings.GlassRefraction)
             or nameof(PluginSettings.GlassFrost)
             or nameof(PluginSettings.AdjustingLayout))
-            ApplyBackdrop();
+            ApplyBackdrop(resetAdaptiveQuality: e.PropertyName == nameof(PluginSettings.GlassMode));
     }
 
     /// <summary>把当前的背景/玻璃设置推给背景层。</summary>
-    private void ApplyBackdrop()
+    private void ApplyBackdrop(bool resetAdaptiveQuality = false)
     {
         if (DataContext is not FullScreenClockViewModel vm) return;
         if (Plugin.Settings is not { } settings) return;
@@ -402,7 +411,16 @@ public partial class ClockSurface : UserControl
                        stretch, settings.BackgroundDim,
                        on ? settings.GlassMode : (int)GlassMode.Off,
                        settings.GlassOpacity, settings.GlassBlurRadius, settings.GlassRefraction,
-                       settings.GlassFrost, settings.AdjustingLayout, settings.AutoGlassFallback);
+                       settings.GlassFrost, settings.AdjustingLayout, settings.AutoGlassFallback, resetAdaptiveQuality);
+        PublishGlassAppearance();
+    }
+
+    private void PublishGlassAppearance()
+    {
+        if (TopLevel.GetTopLevel(this) is not FullScreenClockWindow || Plugin.Settings is not { } settings) return;
+
+        settings.SetRuntimeGlassAppearance(
+            settings.BackgroundEnabled ? (int)Backdrop.EffectiveGlassMode : null, Backdrop.ReducedGlassResolution);
     }
 
     /// <summary>
@@ -1071,26 +1089,9 @@ public partial class ClockSurface : UserControl
         DismissAboutPopup();
         if (TopLevel.GetTopLevel(this) is not Window owner) return;   // 预览那份不在窗口里，点了也不弹
 
-        var vm = DataContext as FullScreenClockViewModel;
-        var settings = Plugin.Settings;
-
-        // 有烘好的模糊底图（磨砂 / 真•◯◯玻璃档）→ 把整面墙实时糊掉，大屏内容还看得见轮廓，
-        // 关于窗口浮在上面。就糊这一阵子（弹出期间），关掉立刻撤掉 Effect，不留常驻开销。
-        var frosted = Backdrop.HasBlurredBackdrop;
-        if (frosted)
-        {
-            var radius = settings?.GlassBlurRadius ?? 24;
-            Effect = new BlurEffect { Radius = Math.Clamp(radius, 4, 48) };
-        }
-
-        // 窗口底色跟**背景图明暗**走：暗图黑底白字、亮图白底黑字（不是跟界面主题走——
-        // 暗色界面压在一张很亮的壁上时，深色方片会突兀得像贴上去的）。
-        // 没有背景图时才退回界面主题。
-        var light = vm?.Chrome.IsLight ?? false;
-        if (settings?.BackgroundEnabled == true && ClockThemeApplier.BackgroundIsDark(settings) is { } imageDark)
-            light = !imageDark;
-
-        var window = new AboutPopupWindow(light, frosted);
+        // 用大屏已经解析好的亮暗主题，避免弹出时再读壁纸。
+        var window = new AboutPopupWindow(light: (DataContext as FullScreenClockViewModel)?.Chrome.IsLight == true);
+        AboutShade.IsVisible = true;
         _aboutWindow = window;
         window.Closed += (_, _) => ClearAboutMask(window);
         try
@@ -1100,9 +1101,9 @@ public partial class ClockSurface : UserControl
         }
         catch (Exception ex)
         {
-            // 窗口没开出来也得把蒙版撤掉，否则整面墙会一直糊着
             System.Diagnostics.Debug.WriteLine($"[About] 显示关于窗口失败: {ex}");
             ClearAboutMask(window);
+            try { window.Close(); } catch { }
         }
     }
 
@@ -1145,27 +1146,16 @@ public partial class ClockSurface : UserControl
             try { window.Close(); } catch { }
         }
 
-        // 窗口可能早就没了、Closed 却没走到（比如跟着主窗口一起被藏起来），这里兜底清一次
-        var hadMask = Effect is not null;
-        if (hadMask)
-        {
-            Effect = null;
-            InvalidateVisual();
-        }
-
+        var hadMask = AboutShade.IsVisible;
+        AboutShade.IsVisible = false;
         return window is not null || hadMask;
     }
 
-    /// <summary>
-    /// 撤掉关于窗口弹出时给整个大屏套的那层实时模糊。
-    /// 只认当前这一个窗口：换过窗口以后，旧窗口迟到的 Closed 不能再把新窗口的蒙版撤掉。
-    /// </summary>
     private void ClearAboutMask(AboutPopupWindow window)
     {
         if (!ReferenceEquals(_aboutWindow, window)) return;
         _aboutWindow = null;
-        Effect = null;
-        InvalidateVisual();   // Effect 走合成器，明确标一次脏，别指望下一秒的时钟刷新顺手带出来
+        AboutShade.IsVisible = false;
     }
 
     // ===== 快速设置 =====
@@ -1175,6 +1165,7 @@ public partial class ClockSurface : UserControl
     // 设置项的读写、滑块拖动标记、位置限位全跟 CI 设置窗口里那页一模一样。
 
     private SettingsPage? _quickSettings;
+    private double _quickSettingsScrollPosition;
 
     public bool IsQuickSettingsOpen => _quickSettings is not null;
 
@@ -1192,10 +1183,19 @@ public partial class ClockSurface : UserControl
 
         var page = new SettingsPage(embedded: true);
         _quickSettings = page;
+        page.Loaded += RestoreQuickSettingsScroll;
         QuickSettingsHost.Children.Add(page);
         QuickSettingsOverlay.IsVisible = true;
         ApplyQuickSettingsAppearance();
         UpdateQuickSettingsBounds();
+    }
+
+    private void RestoreQuickSettingsScroll(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not SettingsPage page) return;
+        page.Loaded -= RestoreQuickSettingsScroll;
+        if (ReferenceEquals(_quickSettings, page))
+            page.ScrollPosition = _quickSettingsScrollPosition;
     }
 
     /// <summary>关掉面板；本来就没开返回 false（Esc 用它决定要不要接着退出全屏）。</summary>
@@ -1203,10 +1203,11 @@ public partial class ClockSurface : UserControl
     {
         if (_quickSettings is not { } page) return false;
 
+        page.Loaded -= RestoreQuickSettingsScroll;
+        if (page.IsLoaded) _quickSettingsScrollPosition = page.ScrollPosition;
         _quickSettings = null;
         QuickSettingsHost.Children.Remove(page);   // 真从树里摘掉才会走 Unloaded，把订阅摘干净
         QuickSettingsOverlay.IsVisible = false;
-        ClearQuickSettingsBlur();
         return true;
     }
 
@@ -1253,35 +1254,10 @@ public partial class ClockSurface : UserControl
     {
         if (_quickSettings is null) return;
 
-        // 按住设置项拖动：面板淡下去、整屏模糊也撤掉——要看的正是后面被调的那块大屏。
+        // 拖动时把遮罩和面板减淡，便于查看后面的布局。
         var adjusting = Plugin.Settings?.AdjustingLayout == true;
         QuickSettingsCard.Opacity = adjusting ? 0.35 : 1.0;
         QuickSettingsVeil.Opacity = adjusting ? 0.35 : 1.0;
-
-        if (adjusting) ClearQuickSettingsBlur();
-        else ApplyQuickSettingsBlur();
-    }
-
-    /// <summary>
-    /// 面板打开时，把面板背后的整面墙**实时**糊掉（与关于窗口同一套做法、同一个半径）。
-    /// 糊的是 <see cref="Shell"/>：面板的浮层在它外面，不会被自己糊住；后台的时钟、计数照常实时刷新。
-    /// 没有模糊底图（纯色背景 / 玻璃关着）就不套——省一次整屏重绘。
-    /// </summary>
-    private void ApplyQuickSettingsBlur()
-    {
-        if (_quickSettings is null || Shell.Effect is not null) return;
-        if (!Backdrop.HasBlurredBackdrop) return;
-
-        var radius = Plugin.Settings?.GlassBlurRadius ?? 24;
-        Shell.Effect = new BlurEffect { Radius = Math.Clamp(radius, 4, 48) };
-        Shell.InvalidateVisual();
-    }
-
-    private void ClearQuickSettingsBlur()
-    {
-        if (Shell.Effect is null) return;
-        Shell.Effect = null;
-        Shell.InvalidateVisual();
     }
 
     /// <summary>点遮罩空白处关；点在面板（或面板里的控件）上不关。</summary>

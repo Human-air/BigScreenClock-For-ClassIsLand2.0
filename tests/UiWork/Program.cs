@@ -74,6 +74,20 @@ for (var mode = 0; mode <= 5; mode++)
     Check(text.Contains("—") == (mode == 0), "time modes never mix start/end with progress or countdown");
 }
 Check(!EveningSelfStudyClock.Services.CiTimePointFormat.Select(0,rangeText,3595,5,3600,true,10,10,false).Contains("—"), "CI countdown override replaces range");
+var ten = EveningSelfStudyClock.Services.CiTimePointFormat.SelectDisplay(0, rangeText, 3590, 10, 3600, true, 10, 10, false);
+var nine = EveningSelfStudyClock.Services.CiTimePointFormat.SelectDisplay(0, rangeText, 3591, 9, 3600, true, 10, 10, false);
+Check(ten.Text == "-10s" && nine.Text == "-9s" && ten.WidthSample == nine.WidthSample,
+    "exact course countdown matches CI and reserves the same width across 10 to 9 seconds");
+var debugDate = new DateTime(2026, 11, 20, 14, 0, 0);
+var realDate = new DateTime(2026, 11, 19, 12, 0, 0);
+var displayedDates = new List<DateTime>();
+var debugPulse = new ClockDisplayPulse(displayedDates.Add);
+debugPulse.Tick(realDate);
+debugPulse.Tick(debugDate);
+debugPulse.Tick(realDate);
+Check(displayedDates.SequenceEqual(new[] { realDate, debugDate, realDate }),
+    "display pulse renders virtual date jumps forwards and backwards");
+
 var clockTimes = new List<DateTime>();
 var pulse = new ClockDisplayPulse(clockTimes.Add);
 var baseTime = new DateTime(2026,11,17,20,0,0);

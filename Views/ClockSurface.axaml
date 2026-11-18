@@ -146,7 +146,7 @@
                             <TextBlock Text="教室音量" FontSize="20" FontWeight="Bold"
                                        Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
                         </StackPanel>
-                        <TextBlock Grid.Column="1" Text="{Binding RecordingText}"
+                        <TextBlock Grid.Column="1" Text="{Binding RecordingText}" FontFeatures="tnum"
                                    Foreground="{Binding RecordingForeground}"
                                    IsVisible="{Binding RecordingInMeterTitle}"
                                    FontSize="20" FontWeight="Bold"
@@ -220,12 +220,12 @@
                     <!-- 左对齐、宽度贴合内容：它是玻璃目标，Stretch 的话玻璃会盖满整列。
                          用 DockPanel 而不是 StackPanel：横向 StackPanel 量子项时给的是**无限宽**，
                          Viewbox 永远量不出「放不下」，保护提示那种长句就只会被右边裁掉。
-                         DockPanel 先把右边「正在记录」的宽度扣掉，剩下的有限宽度交给 Viewbox，
+                         DockPanel 先把右边的状态提示宽度扣掉，剩下的有限宽度交给 Viewbox，
                          放不下时它才会照着「只缩不放大」的老规矩把字缩下来。 -->
                     <DockPanel x:Name="CounterStrip" HorizontalAlignment="Left">
                         <!-- 注意顺序：DockPanel 只有**最后一个**子项拿来填剩余空间，
                              右边那条必须写在前面。 -->
-                        <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingText}"
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingText}" FontFeatures="tnum"
                                    Foreground="{Binding RecordingForeground}"
                                    IsVisible="{Binding RecordingInCounter}"
                                    FontWeight="Bold" Margin="16,0,0,0"
@@ -276,9 +276,18 @@
                          MaxWidth="{Binding CourseInfoMaxWidth}"
                          IsVisible="{Binding ShowCourseInfo}">
                     <Panel>
-                        <TextBlock Text="{Binding CourseInfoText}"
-                                   FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
-                                   Foreground="{Binding CourseInfoColor}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="{Binding CourseInfoText}"
+                                       FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
+                                       Foreground="{Binding CourseInfoColor}"/>
+                            <Grid IsVisible="{Binding HasCourseTime}" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CourseTimeWidthSample}" Opacity="0" IsHitTestVisible="False"
+                                           AutomationProperties.AccessibilityView="Raw" FontFeatures="tnum" FontSize="{Binding CourseInfoFontSize}"/>
+                                <TextBlock Text="{Binding CourseTimeText}" FontFeatures="tnum" HorizontalAlignment="Left"
+                                           FontSize="{Binding CourseInfoFontSize}" Opacity="0.85"
+                                           Foreground="{Binding CourseInfoColor}"/>
+                            </Grid>
+                        </StackPanel>
                         <!-- 设置页预览专用：没在上课时假装有课程信息，
                              否则「课程信息字号」在预览里根本看不出效果 -->
                         <TextBlock x:Name="PreviewCoursePlaceholder" IsVisible="False"
@@ -457,13 +466,11 @@
         <!-- 快速设置：从可见区域一侧贴边滑出的一块面板，内容就是 CI 设置页左栏那一份，
              不另做一套 UI（同一个 SettingsPage，Embedded 模式藏掉右栏预览）。
              面板只占「顶栏以下、按钮行以上」那一段，不压日期也不盖按钮（位置在 code-behind 里算）。
-             背后垫一层整屏磨砂，把面板和大屏分开；拖动设置项时磨砂撤掉、整块淡到几乎透明，
-             好看清后面正在改的那块大屏。
+             用半透明遮罩分隔面板和大屏；拖动设置项时减淡，方便查看后方布局。
              放在地震提醒下面：预警弹出来时仍然压过设置面板。 -->
         <Grid x:Name="QuickSettingsOverlay" Grid.Row="0" Grid.RowSpan="2"
               IsVisible="False"
               PointerPressed="QuickSettingsOverlay_PointerPressed">
-            <!-- 淡压一层：实时模糊之外再拉开一点对比，没有模糊图时它就是唯一的分隔 -->
             <Border x:Name="QuickSettingsVeil" Background="#33000000" IsHitTestVisible="False"/>
             <!-- 整屏压暗只负责画；点击关闭的区域真正避开顶栏和按钮行。
                  根 Grid 没有背景，这两处输入可直接命中原控件，不需要转发/重放事件。 -->
@@ -483,6 +490,9 @@
                 </ThemeVariantScope>
             </Border>
         </Grid>
+
+        <Border x:Name="AboutShade" Grid.RowSpan="2" Background="#36000000"
+                IsVisible="False" IsHitTestVisible="False"/>
 
         <!-- 地震提醒：整屏正中弹出（内容读自「地震预警」插件，见 EarthquakeReader）。
              这一层压在全部内容上面、跨两行、不吃鼠标事件。

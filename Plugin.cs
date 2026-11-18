@@ -57,8 +57,9 @@ public class Plugin : PluginBase
         {
             try { SaveSettings(); } catch { }
         };
-        Settings.PropertyChanged += (_, _) =>
+        Settings.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName == nameof(PluginSettings.RuntimeGlassAppearance)) return;
             SettingsSaveDebouncer.Stop();
             SettingsSaveDebouncer.Start();
         };

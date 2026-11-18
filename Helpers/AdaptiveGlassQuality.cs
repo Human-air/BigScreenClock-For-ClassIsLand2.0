@@ -2,41 +2,57 @@ using EveningSelfStudyClock.Models;
 
 namespace EveningSelfStudyClock.Helpers;
 
-internal enum GlassFallbackReason { BufferBudget, SlowRendering, RenderingFailed, UiStall }
+internal enum GlassFallbackReason { SlowRendering, RenderingFailed, UiStall }
 
-/// <summary>会话内单向降档，避免全屏/半屏切换时重复申请大缓冲。</summary>
+/// <summary>先降低折射分辨率，再根据当前档位的新压力逐级降档。</summary>
 internal sealed class AdaptiveGlassQuality
 {
-    internal const long BufferBudget = 44L * 1024 * 1024;
-    internal const double StallMilliseconds = 750;
+    internal const double StallMilliseconds = 1000;
+    internal const double ReducedScale = 0.65;
     private const int RequiredSignals = 3;
     private int _slowBakes;
+    private int _failedBakes;
     private int _stalls;
     private TimeSpan _firstStall;
+    private TimeSpan? _lastBake;
 
-    public GlassMode Mode { get; private set; } = GlassMode.Liquid;
+    public GlassMode Mode { get; private set; }
+    public bool Reduced { get; private set; }
 
-    public void Reset()
+    public void Reset(GlassMode mode)
     {
-        Mode = GlassMode.Liquid;
+        Mode = mode;
+        Reduced = false;
         ClearSignals();
     }
 
     public void ClearSignals()
     {
         _slowBakes = 0;
+        _failedBakes = 0;
         _stalls = 0;
+        _lastBake = null;
     }
 
-    public bool ObserveBake(double milliseconds, bool failed)
+    public GlassFallbackReason? ObserveBake(TimeSpan now, double milliseconds, bool failed)
     {
-        _slowBakes = failed || milliseconds >= 500 ? _slowBakes + 1 : 0;
-        return _slowBakes >= RequiredSignals;
+        if (_lastBake is { } previous && now - previous > TimeSpan.FromSeconds(20))
+        {
+            _slowBakes = 0;
+            _failedBakes = 0;
+        }
+        _lastBake = now;
+        _failedBakes = failed ? _failedBakes + 1 : 0;
+        _slowBakes = !failed && milliseconds >= 850 ? _slowBakes + 1 : 0;
+
+        if (_failedBakes >= RequiredSignals) return GlassFallbackReason.RenderingFailed;
+        if (!Reduced && _slowBakes >= RequiredSignals) return GlassFallbackReason.SlowRendering;
+        return null;
     }
 
     public bool ObserveStall(TimeSpan now)
     {
-        if (_stalls == 0 || now - _firstStall > TimeSpan.FromSeconds(30))
+        if (_stalls == 0 || now - _firstStall > TimeSpan.FromSeconds(20))
         {
             _firstStall = now;
             _stalls = 0;
@@ -46,7 +62,13 @@ internal sealed class AdaptiveGlassQuality
 
     public void Lower()
     {
-        Mode = Mode == GlassMode.Liquid ? GlassMode.Frosted : GlassMode.Translucent;
+        if (Mode == GlassMode.Liquid && !Reduced)
+            Reduced = true;
+        else
+        {
+            Mode = Mode == GlassMode.Liquid ? GlassMode.Frosted : GlassMode.Translucent;
+            Reduced = false;
+        }
         ClearSignals();
     }
 }

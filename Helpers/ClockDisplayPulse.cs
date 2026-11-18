@@ -1,6 +1,6 @@
 namespace EveningSelfStudyClock.Helpers;
 
-/// <summary>高频采样实际墙钟，每秒只发布一次文字；不会用递增计数伪造被卡顿错过的时间。</summary>
+/// <summary>高频采样当前时间源，每秒只发布一次文字；不会用递增计数伪造被卡顿错过的时间。</summary>
 public sealed class ClockDisplayPulse(Action<DateTime> publish)
 {
     private long _lastSecond = long.MinValue;

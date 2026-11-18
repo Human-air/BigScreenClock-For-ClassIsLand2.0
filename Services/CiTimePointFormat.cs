@@ -22,11 +22,28 @@ public static class CiTimePointFormat
 
     public static string Select(int type, string range, long elapsed, long left, long total,
         bool countdownEnabled, int countdownSeconds, int secondsThreshold, bool nonExact)
+        => SelectDisplay(type, range, elapsed, left, total, countdownEnabled, countdownSeconds, secondsThreshold, nonExact).Text;
+
+    public static (string Text, string WidthSample) SelectDisplay(int type, string range, long elapsed, long left, long total,
+        bool countdownEnabled, int countdownSeconds, int secondsThreshold, bool nonExact)
     {
         if (countdownEnabled && left <= countdownSeconds)
-            return "-" + (nonExact ? Single(left, true) : Exact(left));
-        if (type == 4 && left <= secondsThreshold) type = 5;
-        return type == 0 ? range : ExtraInfo(type, elapsed, left, total);
+            return nonExact ? ("-" + Single(left, true), "") : PreciseDisplay(left, Math.Min(total, countdownSeconds));
+        if (type == 4 && left <= secondsThreshold)
+            return PreciseDisplay(left, Math.Min(total, secondsThreshold));
+        if (type == 5) return PreciseDisplay(left, total);
+        return (type == 0 ? range : ExtraInfo(type, elapsed, left, total), "");
+    }
+
+    private static (string Text, string WidthSample) PreciseDisplay(long left, long maximum)
+    {
+        var width = maximum switch
+        {
+            >= 3600 => new string('8', (maximum / 3600).ToString(CultureInfo.InvariantCulture).Length) + ":88:88",
+            >= 60 => "88:88",
+            _ => "88s",
+        };
+        return ("-" + Exact(left), "-" + width);
     }
 
     /// <summary>附加信息类型 → 显示文本。0（时间点持续时间）返回空串：课程行本身就写着起止时间。</summary>

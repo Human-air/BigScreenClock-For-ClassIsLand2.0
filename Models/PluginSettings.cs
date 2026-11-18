@@ -280,6 +280,16 @@ public class PluginSettings : INotifyPropertyChanged
         set { _glassMode = Math.Clamp(value, 0, 3); OnPropertyChanged(); }
     }
 
+    [JsonIgnore]
+    internal (int? Mode, bool Reduced) RuntimeGlassAppearance { get; private set; }
+
+    internal void SetRuntimeGlassAppearance(int? mode, bool reduced = false)
+    {
+        if (RuntimeGlassAppearance == (mode, reduced)) return;
+        RuntimeGlassAppearance = (mode, reduced);
+        OnPropertyChanged(nameof(RuntimeGlassAppearance));
+    }
+
     public bool AutoGlassFallback
     {
         get => _autoGlassFallback;
