@@ -91,8 +91,8 @@
                         </StackPanel>
                     </CheckBox>
                     <CheckBox Margin="20,2,0,0" FontSize="13"
-                              IsChecked="{Binding CourseInfoAtTop}" IsVisible="{Binding ShowCourseInfo}"
-                              Content="课程信息显示在顶部"/>
+                              IsChecked="{Binding CourseInfoBetweenClockAndMeter, Mode=TwoWay}" IsVisible="{Binding ShowCourseInfo}"
+                              Content="课程信息显示在时钟与音量条之间"/>
                     <!-- 课程信息子项：勾选「课程信息」后出现 -->
                     <CheckBox Margin="20,2,0,0" FontSize="13"
                               IsChecked="{Binding ShowBellTime}"
@@ -668,6 +668,18 @@
                                 TickFrequency="5" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding VolumePositionPercentText}" FontSize="12"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
+                          IsVisible="{Binding CanAdjustCourseInfoPosition}">
+                        <TextBlock Grid.Column="0" Text="课程信息位置" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider x:Name="CourseInfoPositionSlider" Grid.Column="1"
+                                Minimum="0" Maximum="100" Value="{Binding CourseInfoPositionPercent, Mode=TwoWay}"
+                                TickFrequency="5" VerticalAlignment="Center"
+                                ToolTip.Tip="在时钟下方和音量条上方之间上下调整"/>
+                        <TextBlock Grid.Column="2" Text="{Binding CourseInfoPositionPercentText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="40"
+                                   TextAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <!-- 颜色选择：色块在每行最右，点击弹出 HSV 面板。切主题时这几个色会被写成该主题的默认值，之后仍可自己调 -->
                     <!-- 背景色不可调：它由主题定（明亮 = 白、黑暗 = 黑），不跟着主题走的话

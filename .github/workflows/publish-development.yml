@@ -10,6 +10,10 @@ on:
         description: Optional release title
         required: false
         type: string
+      replace:
+        description: Replace the package and notes on an existing development release
+        default: false
+        type: boolean
 permissions:
   contents: write
 jobs:
@@ -29,7 +33,7 @@ jobs:
           }
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.replace && github.sha || inputs.tag }}
           path: source
       - uses: actions/setup-dotnet@v4
         with:
@@ -75,6 +79,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_TITLE: ${{ inputs.title }}
+          REPLACE_RELEASE: ${{ inputs.replace }}
         run: |
           $checksum = Get-Content source/cipx/checksums.md -Raw
           $notes = Get-Content "release-config/.github/release-notes/$env:RELEASE_TAG.md" -Raw
@@ -82,5 +87,19 @@ jobs:
           Set-Content $notesFile "$checksum`n`n$notes"
           $title = $env:RELEASE_TITLE
           if ([string]::IsNullOrWhiteSpace($title)) { $title = "$env:RELEASE_TAG 开发版（Codex）" }
-          gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title $title --notes-file $notesFile
+          if ($env:REPLACE_RELEASE -eq 'true') {
+            gh release view $env:RELEASE_TAG --json tagName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $tagRef = "refs/tags/$env:RELEASE_TAG"
+            $remoteTag = git -C release-config ls-remote --refs origin $tagRef
+            if ($LASTEXITCODE -ne 0 -or -not $remoteTag) { throw 'Existing release tag not found' }
+            $previousSha = ($remoteTag -split '\s+')[0]
+            git -C release-config push "--force-with-lease=${tagRef}:$previousSha" origin "${env:GITHUB_SHA}:$tagRef"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release upload $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release edit $env:RELEASE_TAG --title $title --notes-file $notesFile
+          } else {
+            gh release create $env:RELEASE_TAG source/cipx/EveningSelfStudyClock.cipx --verify-tag --prerelease --title $title --notes-file $notesFile
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

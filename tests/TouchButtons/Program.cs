@@ -220,19 +220,23 @@ foreach (var targetName in new[] { "ExitButton", "MinimizeButton" })
     window.Close();
     Dispatcher.UIThread.RunJobs();
 }
-var headerPlacement = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+var bodyPlacement = new Grid();
 var footerPlacement = new Grid();
 var coursePlacement = new Viewbox();
 footerPlacement.Children.Add(coursePlacement);
-foreach (var (top, compact) in new[] { (true,false), (true,true), (false,true), (false,false), (true,false) })
+foreach (var (between, compact) in new[] { (true,false), (true,true), (false,true), (false,false), (true,false) })
 {
-    CourseInfoPlacement.Apply(coursePlacement,headerPlacement,footerPlacement,top,compact);
-    Check(ReferenceEquals(coursePlacement.Parent, top ? headerPlacement : footerPlacement), "course moves to correct parent");
-    if (top) Check(coursePlacement.Margin.Top + headerPlacement.RowSpacing >= 18, "top course glass has separation from header bubbles");
-    Check(headerPlacement.RowDefinitions.Count == (top ? 3 : 2), "course restores header rows without extra spacing");
-    Check(Grid.GetRow(coursePlacement) == (top ? 2 : 0), "course row follows position");
-    Check(Grid.GetColumnSpan(coursePlacement) == (top || compact ? 3 : 1), "course restores full/half span");
+    CourseInfoPlacement.Apply(coursePlacement, bodyPlacement, footerPlacement, between, compact);
+    Check(ReferenceEquals(coursePlacement.Parent, between ? bodyPlacement : footerPlacement), "course moves to the selected area");
+    Check(Grid.GetColumn(coursePlacement) == (between || compact ? 0 : 1), "course restores its column");
+    Check(Grid.GetColumnSpan(coursePlacement) == (!between && compact ? 3 : 1), "course restores the compact footer span");
+    Check(coursePlacement.VerticalAlignment == (between ? VerticalAlignment.Top : VerticalAlignment.Center),
+        "course uses the positioning rules for the destination");
 }
+Check(CourseInfoPlacement.BetweenTop(240, 500, 40, 24, 0) == 264, "slider starts below the clock glass");
+Check(CourseInfoPlacement.BetweenTop(240, 500, 40, 24, 50) == 350, "default course position is centered in the gap");
+Check(CourseInfoPlacement.BetweenTop(240, 500, 40, 24, 100) == 436, "slider stays above the meter glass");
+Check(CourseInfoPlacement.BetweenTop(240, 480, 40, 24, 100) == 416, "hidden meter uses the bottom of the body");
 var trayProvider = new TrayTests.Provider();
 var traySettings = new EveningSelfStudyClock.Models.PluginSettings();
 var trayVm = new EveningSelfStudyClock.ViewModels.FullScreenClockViewModel();

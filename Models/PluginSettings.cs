@@ -21,7 +21,8 @@ public class PluginSettings : INotifyPropertyChanged
     private string _rainColor = "#7FD4FF";
     private bool _showDecibelMeter = true;
     private bool _showCourseInfo = true;
-    private bool _courseInfoAtTop;
+    private bool _courseInfoBetweenClockAndMeter;
+    private double _courseInfoPositionPercent = 50;
     private bool _showBellTime = true;
     private bool _showNoisyCounter = true;
     private bool _letterDismissed;
@@ -398,13 +399,30 @@ public class PluginSettings : INotifyPropertyChanged
         set { _letterDismissed = value; OnPropertyChanged(); }
     }
 
-    /// <summary>
-    /// 是否显示课程信息
-    /// </summary>
-    public bool CourseInfoAtTop
+    /// <summary>原来选置顶的用户改用主体区中间位置，兼容已有配置。</summary>
+    [JsonPropertyName("CourseInfoAtTop")]
+    public bool CourseInfoBetweenClockAndMeter
     {
-        get => _courseInfoAtTop;
-        set { _courseInfoAtTop = value; OnPropertyChanged(); }
+        get => _courseInfoBetweenClockAndMeter;
+        set
+        {
+            if (_courseInfoBetweenClockAndMeter == value) return;
+            _courseInfoBetweenClockAndMeter = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public double CourseInfoPositionPercent
+    {
+        get => _courseInfoPositionPercent;
+        set
+        {
+            if (!double.IsFinite(value)) return;
+            var percent = Math.Clamp(value, 0, 100);
+            if (_courseInfoPositionPercent == percent) return;
+            _courseInfoPositionPercent = percent;
+            OnPropertyChanged();
+        }
     }
 
     public bool ShowCourseInfo

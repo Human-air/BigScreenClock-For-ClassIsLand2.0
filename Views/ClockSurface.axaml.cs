@@ -79,6 +79,14 @@ public partial class ClockSurface : UserControl
         ButtonBar.SizeChanged += (_, _) => UpdateQuickSettingsBounds();
         ClockBox.SizeChanged += (_, _) => ApplyBodyPositions();
         VolumePanel.SizeChanged += (_, _) => ApplyBodyPositions();
+        CourseInfoBox.SizeChanged += (_, _) =>
+        {
+            if (ReferenceEquals(CourseInfoBox.Parent, BodyArea)) ApplyBodyPositions();
+        };
+        CourseInfoBox.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsVisibleProperty && ReferenceEquals(CourseInfoBox.Parent, BodyArea)) ApplyBodyPositions();
+        };
         Loaded += (_, _) => ApplyBodyPositions();
         Loaded += (_, _) => UpdatePreviewPlaceholders();
     }
@@ -203,9 +211,10 @@ public partial class ClockSurface : UserControl
         if (e.PropertyName is nameof(PluginSettings.AdjustingLayout))
             UpdateQuickSettingsOpacity();
 
-        if (e.PropertyName == nameof(PluginSettings.CourseInfoAtTop))
+        if (e.PropertyName == nameof(PluginSettings.CourseInfoBetweenClockAndMeter))
         {
             ApplyCourseInfoPosition();
+            UpdateSizeDependentLayout();
             return;
         }
 
@@ -220,6 +229,7 @@ public partial class ClockSurface : UserControl
         // 设置页拖滑块改的是同一个 PluginSettings 实例 → 立刻重排，不用等重开窗口
         if (e.PropertyName is nameof(PluginSettings.ClockPositionPercent)
             or nameof(PluginSettings.VolumePositionPercent)
+            or nameof(PluginSettings.CourseInfoPositionPercent)
             or nameof(PluginSettings.ShowDecibelMeter))
         {
             ApplyBodyPositions();
@@ -513,8 +523,8 @@ public partial class ClockSurface : UserControl
     }
 
     private void ApplyCourseInfoPosition() => CourseInfoPlacement.Apply(
-        CourseInfoBox, HeaderGrid, FooterGrid,
-        Plugin.Settings?.CourseInfoAtTop == true, _compactApplied == true);
+        CourseInfoBox, BodyArea, FooterGrid,
+        Plugin.Settings?.CourseInfoBetweenClockAndMeter == true, _compactApplied == true);
 
     /// <summary>
     /// 半屏（窄）排版。宽屏那套是「顶栏一行（左天气 / 中弹幕 / 右日期）+ 底部一行（计数 / 课程信息 / 按钮）」；
@@ -713,7 +723,8 @@ public partial class ClockSurface : UserControl
         var width = _visibleWidth > 0 ? _visibleWidth : Bounds.Width;
         vm.ReminderPanelMaxWidth = width * 2.0 / 3.0;
         vm.MergeThreshold = width / 3.0;
-        vm.CourseInfoMaxWidth = Math.Max(160, (width - 80) / 2.0);
+        vm.CourseInfoMaxWidth = Math.Max(160, (width - 80) /
+            (Plugin.Settings?.CourseInfoBetweenClockAndMeter == true ? 1.0 : 2.0));
         // 地震提醒块铺的是整窗（半屏时仍然整屏弹），这条仍按整窗宽算
         vm.EarthquakeAlertMaxWidth = Math.Max(240, Bounds.Width - 80 - 72);
         ApplyBodyPositions();
@@ -771,7 +782,7 @@ public partial class ClockSurface : UserControl
     /// 时钟、音量条各自的上下位置。设置里存的是「该块中心落在主体区高度的百分之几」（0 最上、100 最下），
     /// 这里按主体区的实测高度换算成上边距，再钳进这一轮算出来的可落范围（滑块的范围也是同一个）。
     ///
-    /// 两块从上到下依次是：时钟、音量条，谁都不许越界：
+    /// 从上到下是时钟、可选的课程信息和音量条。课程位置使用两块之间的可用距离。
     /// - 时钟不出主体区（顶不出上沿、底不出下沿）；
     /// - 音量条上不了时钟头顶，下不出主体区——再往下就压到「最小化 / 退出」那一行了。
     ///
@@ -797,25 +808,38 @@ public partial class ClockSurface : UserControl
             const double clockMinTop = 0.0;
 
             // 用外层的 Viewbox：半屏窄条里它会被缩到放得下，摆位要按缩放后的实际尺寸算
-            var clockHeight = ClockBox.Bounds.Height;
             var volumeVisible = VolumePanel.IsVisible;
-            var volumeHeight = VolumePanel.Bounds.Height;
+            var volumeHeight = volumeVisible ? VolumePanel.Bounds.Height : 0;
+            var courseVisible = ReferenceEquals(CourseInfoBox.Parent, BodyArea)
+                && CourseInfoBox.IsVisible
+                && (IsPreview || DataContext is FullScreenClockViewModel { CourseInfoText.Length: > 0 });
+            var heightForClockAndCourse = Math.Max(0, areaHeight - volumeHeight);
+            var gap = courseVisible ? Math.Min(ClockVolumeGap, heightForClockAndCourse / 8) : ClockVolumeGap;
+            CourseInfoBox.MaxHeight = courseVisible ? heightForClockAndCourse / 3 : double.PositiveInfinity;
+            var courseHeight = courseVisible ? Math.Min(CourseInfoBox.Bounds.Height, CourseInfoBox.MaxHeight) : 0;
+            var reservedSpace = courseVisible ? courseHeight + gap * 2 : ClockVolumeGap;
+            ClockBox.MaxHeight = courseVisible
+                ? Math.Max(0, heightForClockAndCourse - reservedSpace)
+                : double.PositiveInfinity;
+            var clockHeight = Math.Min(ClockBox.Bounds.Height, ClockBox.MaxHeight);
 
-            // 音量条：上不了时钟头顶，下不出主体区
-            // （再往下就压到「最小化 / 退出」那一行去了，这条优先守住）
-            var volumeMinTop = clockMinTop + clockHeight + ClockVolumeGap;
+            var volumeMinTop = clockMinTop + clockHeight + reservedSpace;
             var volumeMaxTop = Math.Max(0, areaHeight - volumeHeight);
             var volumeTop = volumeVisible
                 ? Math.Min(Math.Max(TopFor(settings.VolumePositionPercent, areaHeight, volumeHeight), volumeMinTop), volumeMaxTop)
                 : 0.0;
 
             // 时钟：上不出主体区，下压不到音量条上。装不下时宁可两块挨上也别越界
-            var clockRoomTop = volumeVisible ? volumeTop - ClockVolumeGap - clockHeight : areaHeight - clockHeight;
+            var lowerBoundary = volumeVisible ? volumeTop : areaHeight;
+            var clockRoomTop = lowerBoundary - clockHeight - (volumeVisible || courseVisible ? reservedSpace : 0);
             var clockMaxTop = Math.Max(clockMinTop, clockRoomTop);
             var clockTop = Math.Clamp(TopFor(settings.ClockPositionPercent, areaHeight, clockHeight), clockMinTop, clockMaxTop);
 
             if (volumeVisible) SetTop(VolumePanel, volumeTop);
             SetTop(ClockBox, clockTop);
+            if (courseVisible)
+                SetTop(CourseInfoBox, CourseInfoPlacement.BetweenTop(clockTop + clockHeight, lowerBoundary,
+                    courseHeight, gap, settings.CourseInfoPositionPercent));
 
             if (IsPreview) return;   // 预览到此为止：位置摆好了，剩下的都是真实大屏才该做的事
 
@@ -824,7 +848,7 @@ public partial class ClockSurface : UserControl
                 vm.SetPositionLimits(
                     PercentOf(clockMinTop, areaHeight, clockHeight),
                     PercentOf(clockMaxTop, areaHeight, clockHeight),
-                    volumeVisible ? PercentOf(Math.Min(clockHeight + ClockVolumeGap, volumeMaxTop), areaHeight, volumeHeight) : 0,
+                    volumeVisible ? PercentOf(Math.Min(clockHeight + reservedSpace, volumeMaxTop), areaHeight, volumeHeight) : 0,
                     volumeVisible ? PercentOf(volumeMaxTop, areaHeight, volumeHeight) : 100);
             }
 

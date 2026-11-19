@@ -233,6 +233,20 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             OnPropertyChanged(nameof(VolumePositionPercent));
             OnPropertyChanged(nameof(VolumePositionPercentText));
         }
+        else if (e.PropertyName is nameof(PluginSettings.CourseInfoBetweenClockAndMeter))
+        {
+            OnPropertyChanged(nameof(CourseInfoBetweenClockAndMeter));
+            OnPropertyChanged(nameof(CanAdjustCourseInfoPosition));
+        }
+        else if (e.PropertyName is nameof(PluginSettings.ShowCourseInfo))
+        {
+            OnPropertyChanged(nameof(CanAdjustCourseInfoPosition));
+        }
+        else if (e.PropertyName is nameof(PluginSettings.CourseInfoPositionPercent))
+        {
+            OnPropertyChanged(nameof(CourseInfoPositionPercent));
+            OnPropertyChanged(nameof(CourseInfoPositionPercentText));
+        }
         else if (e.PropertyName is nameof(PluginSettings.RuntimeGlassAppearance) or nameof(PluginSettings.GlassMode))
         {
             NotifyGlassAppearance();
@@ -862,7 +876,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         _layoutSliders.AddRange(new[]
         {
             ClockFontSlider, CourseInfoFontSlider, CountFontSlider,
-            ClockPositionSlider, VolumePositionSlider, CameraAlertFontSlider,
+            ClockPositionSlider, VolumePositionSlider, CourseInfoPositionSlider, CameraAlertFontSlider,
             VisibleWidthSlider,
             BackgroundDimSlider, GlassOpacitySlider, GlassBlurRadiusSlider,
             GlassRefractionSlider, GlassFrostSlider,
@@ -1712,11 +1726,26 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     // ===== 飞书推送 =====
 
-    public bool CourseInfoAtTop
+    public bool CourseInfoBetweenClockAndMeter
     {
-        get => _settings.CourseInfoAtTop;
-        set { _settings.CourseInfoAtTop = value; OnPropertyChanged(nameof(CourseInfoAtTop)); }
+        get => _settings.CourseInfoBetweenClockAndMeter;
+        set => _settings.CourseInfoBetweenClockAndMeter = value;
     }
+
+    public bool CanAdjustCourseInfoPosition => ShowCourseInfo && CourseInfoBetweenClockAndMeter;
+
+    public double CourseInfoPositionPercent
+    {
+        get => _settings.CourseInfoPositionPercent;
+        set
+        {
+            if (_settings.CourseInfoPositionPercent == value) return;
+            BeginLayoutAdjust();
+            _settings.CourseInfoPositionPercent = value;
+        }
+    }
+
+    public string CourseInfoPositionPercentText => $"{CourseInfoPositionPercent:0}%";
 
     public bool EnableFeishuNotify
     {
