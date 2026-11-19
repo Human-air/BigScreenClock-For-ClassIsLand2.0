@@ -107,6 +107,40 @@ foreach (var input in new[] { (double.NaN, .1), (double.PositiveInfinity, .1), (
 invalid.Feed(Noisy, .1);
 Check(invalid.Detector.SegmentLevel == NoiseLevel.Noisy, "valid samples continue after invalid input");
 
+var tunedContinuous = new Run(.1, smooth: false);
+tunedContinuous.Detector.NoisyContinuousSeconds = 2.5;
+tunedContinuous.Feed(Noisy, 2.4);
+Check(tunedContinuous.Detector.SegmentLevel == NoiseLevel.Normal, "configured continuous threshold waits below its boundary");
+tunedContinuous.Feed(Noisy, .1);
+Check(tunedContinuous.Detector.SegmentLevel == NoiseLevel.Noisy, "configured continuous threshold upgrades without waiting for five seconds");
+tunedContinuous.Detector.NoisyContinuousSeconds = 10;
+tunedContinuous.Feed(Normal, 2);
+tunedContinuous.Feed(Quiet, 7);
+Check(tunedContinuous.Noisy == 1 && tunedContinuous.Normal == 0, "changing settings does not undo a locked noisy segment");
+
+var tunedWindow = new Run(.1, smooth: false);
+tunedWindow.Detector.NoisyWindowRequiredSeconds = 3;
+tunedWindow.Feed(Noisy, 1.5);
+tunedWindow.Feed(Normal, 2);
+tunedWindow.Feed(Noisy, 1.5);
+tunedWindow.Feed(Quiet, 7);
+Check(tunedWindow.Noisy == 1 && tunedWindow.Normal == 0,
+    "configured cumulative threshold upgrades interrupted bursts below the continuous threshold");
+
+var normalOnly = new Run(.1, smooth: false);
+normalOnly.Detector.NoisyContinuousSeconds = .5;
+normalOnly.Detector.NoisyWindowRequiredSeconds = .5;
+normalOnly.Feed(Normal, 60);
+normalOnly.Feed(Quiet, 7);
+Check(normalOnly.Normal == 1 && normalOnly.Noisy == 0, "long normal-level audio never counts toward either noisy threshold");
+
+var settling = new Run(.1, smooth: false);
+settling.Feed(Noisy, 2);
+settling.Feed(Quiet, 1);
+settling.Detector.NoisyWindowRequiredSeconds = 1;
+settling.Feed(Quiet, 6);
+Check(settling.Normal == 1 && settling.Noisy == 0, "lowering threshold during a quiet tail does not promote past audio");
+
 var counter = new NoiseCounter();
 Check(counter.OnEvent(NoiseLevel.Noisy, true) == CountDecision.None, "class-start protection");
 counter.SetBreak(true);

@@ -367,8 +367,24 @@
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="新计数算法检测包：连续吵闹 5 秒或最近 10 秒累计吵闹 6 秒后锁定；延长一般时间不会降级，段结束时结算一次。"
+                    <TextBlock Text="吵闹升级时长：两项满足一项即可。只累计达到「吵闹」档的时间。"
                                TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6" ColumnSpacing="8">
+                        <TextBlock Grid.Row="0" Text="连续吵闹" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="0" Grid.Column="1" Value="{Binding NoisyContinuousSeconds, Mode=TwoWay}"
+                                Minimum="0.5" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                AutomationProperties.Name="连续吵闹时长（秒）"/>
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding NoisyContinuousSecondsText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="1" Text="10 秒内累计吵闹" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                        <Slider Grid.Row="1" Grid.Column="1" Value="{Binding NoisyWindowRequiredSeconds, Mode=TwoWay}"
+                                Minimum="0.5" Maximum="10" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                AutomationProperties.Name="最近 10 秒内累计吵闹时长（秒）"/>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding NoisyWindowRequiredSecondsText}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Width="56" TextAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
                     <Grid ColumnDefinitions="Auto,*,Auto" RowSpacing="6" ColumnSpacing="8"
                           RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="起算底线" VerticalAlignment="Center"
@@ -887,7 +903,7 @@
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                     <TextBlock Text="• 一段内音量短暂回落到安静/良好（不超过「回落窗口」，默认 5 秒）又重新吵起，仍并成一次"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="• 连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为「吵闹」，否则记「一般」"
+                    <TextBlock Text="{Binding NoisyPromotionRuleText}"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
                     <TextBlock Text="• 开启「上课初期保护」后，上课开始后前 N 分钟不计数"
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>

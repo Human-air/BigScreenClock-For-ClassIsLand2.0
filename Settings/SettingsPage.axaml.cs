@@ -18,6 +18,7 @@ using ClassIsland.Core.Attributes;
 using ClassIsland.Core.Enums.SettingsWindow;
 using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
+using EveningSelfStudyClock.NoiseDetection;
 using EveningSelfStudyClock.Services;
 using EveningSelfStudyClock.ViewModels;
 using EveningSelfStudyClock.Views;
@@ -251,6 +252,14 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         {
             NotifyGlassAppearance();
             if (e.PropertyName == nameof(PluginSettings.RuntimeGlassAppearance)) return;
+        }
+        else if (e.PropertyName is nameof(PluginSettings.NoisyContinuousSeconds) or nameof(PluginSettings.NoisyWindowRequiredSeconds))
+        {
+            OnPropertyChanged(e.PropertyName);
+            OnPropertyChanged(nameof(NoisyContinuousSecondsText));
+            OnPropertyChanged(nameof(NoisyWindowRequiredSecondsText));
+            OnPropertyChanged(nameof(NoisyPromotionRuleText));
+            return;
         }
         else if (e.PropertyName is nameof(PluginSettings.AutoGlassFallback))
             OnPropertyChanged(nameof(AutoGlassFallback));
@@ -1314,6 +1323,23 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         }
     }
     public string NoisySustainSecondsText => $"{_settings.NoisySustainSeconds:0.#} 秒";
+
+    public double NoisyContinuousSeconds
+    {
+        get => _settings.NoisyContinuousSeconds;
+        set => _settings.NoisyContinuousSeconds = value;
+    }
+
+    public double NoisyWindowRequiredSeconds
+    {
+        get => _settings.NoisyWindowRequiredSeconds;
+        set => _settings.NoisyWindowRequiredSeconds = value;
+    }
+
+    public string NoisyContinuousSecondsText => $"{NoisyContinuousSeconds:0.##} 秒";
+    public string NoisyWindowRequiredSecondsText => $"{NoisyWindowRequiredSeconds:0.##} 秒";
+    public string NoisyPromotionRuleText =>
+        $"• 处于「吵闹」档连续满 {NoisyContinuousSecondsText}，或最近 {NoiseEventDetector.NoisyWindowSeconds:0} 秒内累计满 {NoisyWindowRequiredSecondsText}，本段记为「吵闹」。两项均未达到时记为「一般」。";
 
     public double FallWindowSeconds
     {

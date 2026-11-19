@@ -292,6 +292,8 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             _detector.NormalThreshold = _settings.DecibelNormalThreshold;
             _detector.NoisyThreshold = _settings.DecibelNoisyThreshold;
             _detector.SustainSeconds = _settings.NoisySustainSeconds;
+            _detector.NoisyContinuousSeconds = _settings.NoisyContinuousSeconds;
+            _detector.NoisyWindowRequiredSeconds = _settings.NoisyWindowRequiredSeconds;
             _detector.FallWindowSeconds = _settings.FallWindowSeconds;
 
             // 按真实音频块时长传 dt（samples / 采样率），不假定固定 100ms，
@@ -396,7 +398,7 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
                              $"一般 {s.DecibelNormalThreshold:F4},吵闹 {s.DecibelNoisyThreshold:F4}");
         _logWriter.WriteLine($"# 起算底线 {s.NoisySustainSeconds:F1}s,回落窗口 {s.FallWindowSeconds:F1}s," +
                              $"采样间隔 {s.SamplingIntervalSeconds:F2}s,保护时长 {s.SkipFirstMinutes}分钟");
-        _logWriter.WriteLine("# 算法 V3 检测包：连续吵闹 5s 或最近 10s 累计吵闹 6s 后锁定，段结束结算一次；无冷却、无整段占比");
+        _logWriter.WriteLine($"# V3 吵闹升级：连续 {s.NoisyContinuousSeconds:0.##}s 或最近 {NoiseEventDetector.NoisyWindowSeconds:0}s 内累计 {s.NoisyWindowRequiredSeconds:0.##}s，段结束结算一次");
         _logWriter.WriteLine("Time,RawRMS,Peak,SmoothRMS,Level,EpisodeLevel,EventState,Fired");
     }
 

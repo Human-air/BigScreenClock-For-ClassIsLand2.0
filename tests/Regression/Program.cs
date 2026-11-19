@@ -1,7 +1,9 @@
 using System.Reflection;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Threading;
 using EveningSelfStudyClock.Models;
+using EveningSelfStudyClock.NoiseDetection;
 using EveningSelfStudyClock.Services;
 using NAudio.Wave;
 
@@ -34,9 +36,34 @@ BackdropPreloadCache.Clear();
 Check(cached.Disposed == 1, "cache clears resources exactly once");
 
 object? Field(object obj,string name) => obj.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(obj);
-using var meter = new DecibelMeterService(new PluginSettings());
+// Load the production settings model with the same serializer used by ConfigureFileHelper.
+var legacySettings = JsonSerializer.Deserialize<PluginSettings>("""{"NoisySustainSeconds":1.5}""")!;
+Check(legacySettings.NoisySustainSeconds == 1.5 && legacySettings.NoisyContinuousSeconds == 5 &&
+    legacySettings.NoisyWindowRequiredSeconds == 6, "older settings preserve the separate V3 defaults");
+legacySettings.NoisyContinuousSeconds = double.NaN;
+legacySettings.NoisyWindowRequiredSeconds = -1;
+Check(legacySettings.NoisyContinuousSeconds == 5 && legacySettings.NoisyWindowRequiredSeconds == .5,
+    "invalid duration cannot poison detector settings");
+legacySettings.NoisyWindowRequiredSeconds = 11;
+Check(legacySettings.NoisyWindowRequiredSeconds == 10, "cumulative duration cannot exceed the ten-second window");
+legacySettings.NoisyContinuousSeconds = 2.5;
+legacySettings.NoisyWindowRequiredSeconds = 4;
+var savedSettings = JsonSerializer.Deserialize<PluginSettings>(JsonSerializer.Serialize(legacySettings))!;
+Check(savedSettings.NoisyContinuousSeconds == 2.5 && savedSettings.NoisyWindowRequiredSeconds == 4,
+    "both promotion settings survive saving and reopening");
+using var meter = new DecibelMeterService(savedSettings);
+
 meter.StartMonitoring();
 var oldDevice = (WaveInEvent)Field(meter,"_waveIn")!;
+var detector = (NoiseEventDetector)Field(meter, "_detector")!;
+oldDevice.RaiseData();
+Check(detector.NoisyContinuousSeconds == 2.5 && detector.NoisyWindowRequiredSeconds == 4,
+    "production audio callback uses the configured promotion durations");
+savedSettings.NoisyContinuousSeconds = 3;
+savedSettings.NoisyWindowRequiredSeconds = 2;
+oldDevice.RaiseData();
+Check(detector.NoisyContinuousSeconds == 3 && detector.NoisyWindowRequiredSeconds == 2,
+    "configuration changes apply to the next audio block without reopening the clock");
 oldDevice.RaiseStopped(); // queues an old device's UI update
 meter.StopMonitoring();
 meter.StartMonitoring();

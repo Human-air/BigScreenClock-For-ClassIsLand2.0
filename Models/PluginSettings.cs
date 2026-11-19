@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using ClassIsland.Core.Helpers;
+using EveningSelfStudyClock.NoiseDetection;
 
 namespace EveningSelfStudyClock.Models;
 
@@ -29,6 +29,8 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _skipFirst3Min = true;
     private int _skipFirstMinutes = 3;
     private double _noisySustainSeconds = 1.0;
+    private double _noisyContinuousSeconds = NoiseEventDetector.DefaultNoisyContinuousSeconds;
+    private double _noisyWindowRequiredSeconds = NoiseEventDetector.DefaultNoisyWindowRequiredSeconds;
     private double _fallWindowSeconds = 5.0;
     private double _samplingIntervalSeconds = 0.2;
     private bool _enableNoiseDebugLog;
@@ -476,6 +478,27 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _noisySustainSeconds;
         set { _noisySustainSeconds = Math.Clamp(value, 0.5, 5.0); OnPropertyChanged(); }
+    }
+
+    public double NoisyContinuousSeconds
+    {
+        get => _noisyContinuousSeconds;
+        set => SetNoisyPromotionSeconds(ref _noisyContinuousSeconds, value);
+    }
+
+    public double NoisyWindowRequiredSeconds
+    {
+        get => _noisyWindowRequiredSeconds;
+        set => SetNoisyPromotionSeconds(ref _noisyWindowRequiredSeconds, value);
+    }
+
+    private void SetNoisyPromotionSeconds(ref double current, double value, [CallerMemberName] string? name = null)
+    {
+        if (!double.IsFinite(value)) return;
+        var seconds = Math.Clamp(value, NoiseEventDetector.MinNoisyPromotionSeconds, NoiseEventDetector.NoisyWindowSeconds);
+        if (current == seconds) return;
+        current = seconds;
+        OnPropertyChanged(name);
     }
 
     /// <summary>

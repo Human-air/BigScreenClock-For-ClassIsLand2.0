@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 namespace Avalonia { public readonly record struct PixelSize(int Width, int Height); }
+namespace Avalonia.Media { public readonly struct Color { } }
 namespace Avalonia.Threading {
  public class Dispatcher {
  public static Dispatcher UIThread { get; } = new();
@@ -15,11 +16,7 @@ namespace EveningSelfStudyClock.Models {
  public bool Matches(string path, Avalonia.PixelSize size, int stretch, double radius, bool blur) => Path == path;
  public void Dispose() => Disposed++;
  }
- public class PluginSettings {
- public bool EnableNoiseDebugLog, LogKeepByDuration;
- public int LogKeepMinKb, LogKeepMinutes, LogRetentionDays, SkipFirstMinutes;
- public double SamplingIntervalSeconds = .2, DecibelQuietThreshold, DecibelGoodThreshold, DecibelNormalThreshold, DecibelNoisyThreshold, NoisySustainSeconds, FallWindowSeconds;
- }
+
 }
 namespace NAudio.Wave {
  public class WaveFormat(int sampleRate, int bits, int channels) { public int SampleRate => sampleRate; public int BitsPerSample => bits; public int Channels => channels; }
@@ -35,7 +32,7 @@ namespace NAudio.Wave {
  public void StartRecording() {}
  public void StopRecording() { if(ThrowOnStop) throw new Exception("device disconnected"); }
  public void Dispose() => Disposed++;
- public void RaiseData() => DataAvailable?.Invoke(this,new());
+ public void RaiseData() => DataAvailable?.Invoke(this, new() { Buffer = new byte[2], BytesRecorded = 2 });
  public void RaiseStopped() => RecordingStopped?.Invoke(this,new());
  }
 }

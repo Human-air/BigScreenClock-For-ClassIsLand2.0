@@ -132,33 +132,31 @@
                 <StackPanel x:Name="VolumePanel" Spacing="8" Width="{Binding #ClockBox.Bounds.Width, FallbackValue=640}"
                             HorizontalAlignment="Center" VerticalAlignment="Top"
                             IsVisible="{Binding ShowDecibelMeter}">
-                    <!-- 标题行：左「教室音量」，右当前档位文字（档位色；不配强度图标——
-                         安静时只有一格反而像颗像素点），中间留给「正在记录」。
-                         放这一行而不另起一行：出现/消失都不改这块玻璃的尺寸，一次都不用重烘，
-                         也就没有以前那种「没有过渡、直接闪一下」的突兀感。 -->
-                    <Grid ColumnDefinitions="Auto,*,Auto">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="20"
-                                       Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
-                            <TextBlock Text="教室音量" FontSize="20" FontWeight="Bold"
-                                       Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <TextBlock Grid.Column="1" Text="{Binding RecordingText}" FontFeatures="tnum"
-                                   Foreground="{Binding RecordingForeground}"
-                                   IsVisible="{Binding RecordingInMeterTitle}"
-                                   FontSize="20" FontWeight="Bold"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   TextWrapping="NoWrap"/>
-                        <!-- 设置页预览专用：没在上课时假装正在记录，好让这一行在预览里也看得见 -->
-                        <TextBlock x:Name="PreviewRecordingPlaceholder" Grid.Column="1"
-                                   Text="正在记录：一般" Foreground="{Binding RecordingForeground}"
-                                   IsVisible="False"
-                                   FontSize="20" FontWeight="Bold"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   TextWrapping="NoWrap"/>
-                        <TextBlock Grid.Column="2" Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
-                                   Foreground="{Binding NoiseLevelTextBrush}"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    <!-- 为中间状态保留一半宽度。窄屏时各区分别缩字，完整保留保护时间。 -->
+                    <Grid x:Name="VolumeTitleRow" ColumnDefinitions="1*,2*,1*" Height="26">
+                        <Viewbox HorizontalAlignment="Left" VerticalAlignment="Center" StretchDirection="DownOnly">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Classes="icon" Text="{ci:LI Megaphone}" FontSize="20"
+                                           Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
+                                <TextBlock Text="教室音量" FontSize="20" FontWeight="Bold"
+                                           Foreground="{Binding NoiseTitleColor}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Viewbox>
+                        <Viewbox x:Name="MeterRecordingStatus" Grid.Column="1"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 StretchDirection="DownOnly" IsVisible="{Binding RecordingInMeterTitle}">
+                            <TextBlock Text="{Binding RecordingText}" FontFeatures="tnum"
+                                       Foreground="{Binding RecordingForeground}" FontSize="20" FontWeight="Bold"/>
+                        </Viewbox>
+                        <Viewbox x:Name="PreviewRecordingPlaceholder" Grid.Column="1" IsVisible="False"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" StretchDirection="DownOnly">
+                            <TextBlock Text="正在记录：一般" Foreground="{Binding RecordingForeground}"
+                                       FontSize="20" FontWeight="Bold"/>
+                        </Viewbox>
+                        <Viewbox Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" StretchDirection="DownOnly">
+                            <TextBlock Text="{Binding NoiseLevelText}" FontSize="18" FontWeight="Bold"
+                                       Foreground="{Binding NoiseLevelTextBrush}"/>
+                        </Viewbox>
                     </Grid>
                     <!-- 轨道 + 分段刻度块（竖向实心矩形，略高于轨道、从轨道中突出） -->
                     <Grid ColumnDefinitions="1*,3,1*,3,1*,3,1*,3,1*" Height="16">
@@ -214,33 +212,18 @@
                         x:Name="CounterAreaBorder"
                         PointerEntered="CounterArea_PointerEntered"
                         PointerExited="CounterArea_PointerExited">
-                    <!-- 左对齐、宽度贴合内容：它是玻璃目标，Stretch 的话玻璃会盖满整列。
-                         用 DockPanel 而不是 StackPanel：横向 StackPanel 量子项时给的是**无限宽**，
-                         Viewbox 永远量不出「放不下」，保护提示那种长句就只会被右边裁掉。
-                         DockPanel 先把右边的状态提示宽度扣掉，剩下的有限宽度交给 Viewbox，
-                         放不下时它才会照着「只缩不放大」的老规矩把字缩下来。 -->
-                    <DockPanel x:Name="CounterStrip" HorizontalAlignment="Left">
-                        <!-- 注意顺序：DockPanel 只有**最后一个**子项拿来填剩余空间，
-                             右边那条必须写在前面。 -->
-                        <TextBlock DockPanel.Dock="Right" Text="{Binding RecordingText}" FontFeatures="tnum"
-                                   Foreground="{Binding RecordingForeground}"
-                                   IsVisible="{Binding RecordingInCounter}"
-                                   FontWeight="Bold" Margin="16,0,0,0"
-                                   VerticalAlignment="Center"/>
-                        <!-- 设置页预览专用：没在上课时假装有计数，好让计数字号在预览里也调得动。
-                             放在 DockPanel 里面而不是外面：它撑起来的宽度就是 CounterStrip 的宽度，
-                             玻璃照着 CounterStrip 烘，预览里这块自然也有液态玻璃。
-                             分段着色跟真实计数一致（一般=黄、吵闹=红），字号在预览里才看得出效果。 -->
-                        <StackPanel x:Name="PreviewCounterPlaceholder" DockPanel.Dock="Left"
-                                    Orientation="Horizontal" IsVisible="False" VerticalAlignment="Center">
-                            <TextBlock Text="一般 3 次" FontWeight="Bold"
-                                       Foreground="{Binding CountNormalForeground}"/>
-                            <TextBlock Text="吵闹 1 次" FontWeight="Bold" Margin="16,0,0,0"
-                                       Foreground="{Binding CountNoisyForeground}"/>
-                        </StackPanel>
-                        <Viewbox x:Name="CounterContent" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                 Stretch="Uniform" StretchDirection="DownOnly">
-                            <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}">
+                    <!-- 整条按同一比例缩小，计数和状态都能在左下角完整显示。 -->
+                    <Viewbox x:Name="CounterStrip" HorizontalAlignment="Left" VerticalAlignment="Center"
+                             StretchDirection="DownOnly">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <!-- 设置页预览专用：没有课程时用示例计数展示字号。 -->
+                            <StackPanel x:Name="PreviewCounterPlaceholder" Orientation="Horizontal"
+                                        IsVisible="False" VerticalAlignment="Center">
+                                <TextBlock Text="一般 3 次" FontWeight="Bold" Foreground="{Binding CountNormalForeground}"/>
+                                <TextBlock Text="吵闹 1 次" FontWeight="Bold" Margin="16,0,0,0"
+                                           Foreground="{Binding CountNoisyForeground}"/>
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding NoisyDisplaySegments}" VerticalAlignment="Center">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <StackPanel Orientation="Horizontal"/>
@@ -249,7 +232,6 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
-                                            <!-- 图标（如 ⏳/✅ 位置）：无图标的片段自动不占位 -->
                                             <TextBlock Classes="icon" Text="{Binding Icon}"
                                                        IsVisible="{Binding HasIcon}"
                                                        Foreground="{Binding Foreground}"
@@ -261,8 +243,11 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </Viewbox>
-                    </DockPanel>
+                            <TextBlock Text="{Binding RecordingText}" FontFeatures="tnum"
+                                       Foreground="{Binding RecordingForeground}" FontWeight="Bold"
+                                       IsVisible="{Binding RecordingInCounter}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Viewbox>
                 </Border>
                 <!-- 课程信息：与计数、按钮同处一行，居中对齐到屏幕正中。
                      最多占整行一半宽（CourseInfoMaxWidth，窗口按尺寸算），比这还长就由 Viewbox 等比缩字
@@ -279,9 +264,10 @@
                                        Foreground="{Binding CourseInfoColor}"/>
                             <Grid IsVisible="{Binding HasCourseTime}" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding CourseTimeWidthSample}" Opacity="0" IsHitTestVisible="False"
-                                           AutomationProperties.AccessibilityView="Raw" FontFeatures="tnum" FontSize="{Binding CourseInfoFontSize}"/>
+                                           AutomationProperties.AccessibilityView="Raw" FontFeatures="tnum"
+                                           FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"/>
                                 <TextBlock Text="{Binding CourseTimeText}" FontFeatures="tnum" HorizontalAlignment="Left"
-                                           FontSize="{Binding CourseInfoFontSize}" Opacity="0.85"
+                                           FontSize="{Binding CourseInfoFontSize}" FontWeight="Bold"
                                            Foreground="{Binding CourseInfoColor}"/>
                             </Grid>
                         </StackPanel>

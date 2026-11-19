@@ -220,6 +220,77 @@ foreach (var targetName in new[] { "ExitButton", "MinimizeButton" })
     window.Close();
     Dispatcher.UIThread.RunJobs();
 }
+// Exercise the production space reservation/scaling for the shared recording status on a narrow screen.
+XElement Named(string name) => document.Descendants().Single(e => (string?)e.Attribute(x + "Name") == name);
+var meterMarkup = Named("VolumeTitleRow");
+var statusMarkup = Named("MeterRecordingStatus");
+var counterMarkup = Named("CounterStrip");
+var courseMarkup = Named("CourseInfoBox");
+var courseName = courseMarkup.Descendants().Single(e => (string?)e.Attribute("Text") == "{Binding CourseInfoText}");
+var courseExtras = courseMarkup.Descendants().Where(e =>
+    (string?)e.Attribute("Text") is "{Binding CourseTimeText}" or "{Binding CourseTimeWidthSample}");
+Check(courseExtras.Count() == 2 && courseExtras.All(e =>
+    (string?)e.Attribute("FontWeight") == (string?)courseName.Attribute("FontWeight") &&
+    (string?)e.Attribute("FontSize") == (string?)courseName.Attribute("FontSize")),
+    "course time and its width sample use the same weight and size as the course name");
+Check((string?)courseExtras.Single(e => (string?)e.Attribute("Text") == "{Binding CourseTimeText}").Attribute("Opacity") is null,
+    "course time has the same opacity as the title");
+
+static Viewbox ReadStatusViewbox(XElement markup, Control child) => new()
+{
+    Child = child,
+    StretchDirection = Enum.Parse<StretchDirection>((string)markup.Attribute("StretchDirection")!),
+    HorizontalAlignment = Enum.Parse<HorizontalAlignment>((string)markup.Attribute("HorizontalAlignment")!),
+    VerticalAlignment = Enum.Parse<VerticalAlignment>((string)markup.Attribute("VerticalAlignment")!),
+};
+
+foreach (var width in new[] { 100.0, 280.0 })
+{
+    var meterText = new TextBlock { Text = "保护中 03:09", FontFamily = new FontFamily("sans-serif"), FontSize = 20, FontWeight = FontWeight.Bold };
+    var meter = new Grid
+    {
+        Width = width,
+        Height = double.Parse((string)meterMarkup.Attribute("Height")!, CultureInfo.InvariantCulture),
+        ColumnDefinitions = new ColumnDefinitions((string)meterMarkup.Attribute("ColumnDefinitions")!),
+    };
+    var status = ReadStatusViewbox(statusMarkup, meterText);
+    Grid.SetColumn(status, 1);
+    meter.Children.Add(status);
+    foreach (var (column, label) in new[] { (0, "教室音量"), (2, "吵闹") })
+    {
+        var side = ReadStatusViewbox(meterMarkup.Elements().First(e =>
+            ((string?)e.Attribute("Grid.Column") ?? "0") == column.ToString(CultureInfo.InvariantCulture)),
+            new TextBlock { Text = label, FontSize = 20 });
+        Grid.SetColumn(side, column);
+        meter.Children.Add(side);
+    }
+
+    var footerText = new TextBlock { Text = "保护中 03:09", FontFamily = new FontFamily("sans-serif"), FontSize = 32, FontWeight = FontWeight.Bold };
+    var wholeRow = new StackPanel
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 12,
+        Children = { new TextBlock { Text = "较长的课程名称", FontSize = 32 }, footerText },
+    };
+    var footer = new Border { Width = width, Child = ReadStatusViewbox(counterMarkup, wholeRow), ClipToBounds = true };
+    var panel = new StackPanel { Children = { meter, footer } };
+    var window = new Window { Width = 400, Height = 180, Content = panel };
+    window.Show();
+    window.UpdateLayout();
+
+    foreach (var (label, text, container) in new (string, TextBlock, Control)[]
+        { ("meter", meterText, meter), ("footer", footerText, footer) })
+    {
+        var left = text.TranslatePoint(default, container)!.Value.X;
+        var right = text.TranslatePoint(new Point(text.Bounds.Width, 0), container)!.Value.X;
+        Check(text.Bounds.Width >= text.DesiredSize.Width - 0.5 && right > left &&
+              left >= -0.5 && right <= container.Bounds.Width + 0.5,
+            $"{label} at {width} DIP: the full protection countdown fits inside its visible container");
+    }
+    window.Close();
+    Dispatcher.UIThread.RunJobs();
+}
+
 var bodyPlacement = new Grid();
 var footerPlacement = new Grid();
 var coursePlacement = new Viewbox();

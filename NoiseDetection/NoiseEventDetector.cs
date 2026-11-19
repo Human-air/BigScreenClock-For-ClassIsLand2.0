@@ -33,7 +33,7 @@ public sealed class SampleResult
 
 /// <summary>
 /// V3 检测包：EMA 平滑 + 迟滞分级 + 最近时间窗锁定 + 段结束结算。
-/// 连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为吵闹。
+/// 连续吵闹或最近 10 秒内累计吵闹达到可配置时长后，本段锁定为吵闹（默认分别为 5 秒、6 秒）。
 /// 一般时间不稀释已取得的锁定；先一般后吵闹也可升级，不在起算时提前定格。
 /// 起算底线、短回落合并、每段结束只结算一次保持不变；计数层没有冷却。
 /// 瞬时 Level 独立反映当前音量，SegmentLevel 是本段最终归属的实时状态。
@@ -59,10 +59,16 @@ public sealed class NoiseEventDetector
     /// </summary>
     public double FallWindowSeconds { get; set; } = 5.0;
 
-    // 本检测包先固定参数，便于收集同一规则下的真机反馈。
     public const double NoisyWindowSeconds = 10.0;
-    public const double NoisyWindowRequiredSeconds = 6.0;
-    public const double NoisyContinuousSeconds = 5.0;
+    public const double MinNoisyPromotionSeconds = 0.5;
+    public const double DefaultNoisyContinuousSeconds = 5.0;
+    public const double DefaultNoisyWindowRequiredSeconds = 6.0;
+
+    /// <summary>连续处于吵闹档达到该秒数即可升级。</summary>
+    public double NoisyContinuousSeconds { get; set; } = DefaultNoisyContinuousSeconds;
+
+    /// <summary>最近 10 秒内处于吵闹档的累计秒数达到该值即可升级。</summary>
+    public double NoisyWindowRequiredSeconds { get; set; } = DefaultNoisyWindowRequiredSeconds;
 
     private double _smooth;
     private bool _initialized;
@@ -203,8 +209,8 @@ public sealed class NoiseEventDetector
         foreach (var block in _recentNoisy)
             recentSeconds += block.End - Math.Max(block.Start, cutoff);
 
-        if (_continuousNoisySeconds + 1e-9 >= NoisyContinuousSeconds ||
-            recentSeconds + 1e-9 >= NoisyWindowRequiredSeconds)
+        if (IsCountable(_level) && (_continuousNoisySeconds + 1e-9 >= NoisyContinuousSeconds ||
+            recentSeconds + 1e-9 >= NoisyWindowRequiredSeconds))
         {
             _noisyLocked = true;
             _recentNoisy.Clear();

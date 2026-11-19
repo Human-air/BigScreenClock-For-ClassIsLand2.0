@@ -213,7 +213,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         else if (args.PropertyName is nameof(PluginSettings.SkipFirst3Min)
             or nameof(PluginSettings.SkipFirstMinutes)
             or nameof(PluginSettings.NoisySustainSeconds)
-            or nameof(PluginSettings.FallWindowSeconds))
+            or nameof(PluginSettings.FallWindowSeconds)
+            or nameof(PluginSettings.NoisyContinuousSeconds)
+            or nameof(PluginSettings.NoisyWindowRequiredSeconds))
         {
             OnPropertyChanged(nameof(CountRulesText));
         }
@@ -673,7 +675,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             : _decibelService.CurrentSegmentLevel == NoiseLevel.Noisy ? CountNoisy : CountNormal;
     }
 
-    /// <summary>是否显示「正在记录」提示（有段且已起算、上课中）。</summary>
+    /// <summary>上课期间是否显示保护倒计时或正在记录。</summary>
     public bool IsRecordingVisible
     {
         get => _isRecordingVisible;
@@ -711,7 +713,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(RecordingInCounter));
     }
 
-    /// <summary>「正在记录：一般」/「正在记录：吵闹」。</summary>
+    /// <summary>上课保护倒计时或当前记录状态。</summary>
     public string RecordingText
     {
         get => _recordingText;
@@ -1710,7 +1712,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             {
                 $"一段噪音累计满 {_settings.NoisySustainSeconds:0.#} 秒，段结束时记一次",
                 $"一段内回落不超过 {_settings.FallWindowSeconds:0.#} 秒并成一次",
-                "连续吵闹 5 秒，或最近 10 秒内累计吵闹 6 秒后，本段锁定为「吵闹」，否则记「一般」",
+                $"连续吵闹 {_settings.NoisyContinuousSeconds:0.#} 秒，或最近 {NoiseEventDetector.NoisyWindowSeconds:0.#} 秒内累计吵闹 {_settings.NoisyWindowRequiredSeconds:0.#} 秒后，本段锁定为「吵闹」，否则记「一般」",
             };
             if (_settings.SkipFirst3Min) parts.Add($"上课开始后 {_settings.SkipFirstMinutes} 分钟内不记录");
             return string.Join("，", parts);
