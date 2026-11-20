@@ -1,4 +1,4 @@
-🕐 大屏时钟 BigScreenClock
+###大屏时钟 BigScreenClock
 
 面向教室大屏的 ClassIsland 插件。全屏显示时间、教室音量、课程信息和提醒，并按课程统计吵闹次数。
 
