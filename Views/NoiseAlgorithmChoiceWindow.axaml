@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="EveningSelfStudyClock.Views.NoiseAlgorithmChoiceWindow"
+        Title="计数算法选择"
+        Width="580" Height="520"
+        SystemDecorations="None"
+        ShowInTaskbar="False"
+        Topmost="True"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        FontFamily="Microsoft YaHei,SimHei,sans-serif">
+
+    <Border CornerRadius="16" Background="#F21A1A22" BorderBrush="#33FFFFFF" BorderThickness="1">
+        <ThemeVariantScope RequestedThemeVariant="Dark">
+            <StackPanel Margin="28,24" Spacing="14">
+                <TextBlock Text="计数算法选择" FontSize="22" FontWeight="Bold" Foreground="#FFFFFFFF"/>
+                <TextBlock Text="更新后可以选择吵闹计数的归属方式，之后可在设置页修改。"
+                           FontSize="13" Foreground="#B3FFFFFF" TextWrapping="Wrap"/>
+
+                <RadioButton x:Name="V3Option" GroupName="Algorithm" FontSize="15" Foreground="#FFFFFFFF">
+                    <StackPanel Spacing="4" Margin="0,2,0,0">
+                        <TextBlock Text="新算法（V3）" FontSize="15" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
+                        <TextBlock Text="连续吵闹满设定时长，或最近 10 秒内累计吵闹满设定时长，即把本段记为吵闹；锁定后不会因为后面变安静或一般而降级。"
+                                   FontSize="12" Foreground="#B3FFFFFF" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </RadioButton>
+
+                <RadioButton x:Name="V2Option" GroupName="Algorithm" FontSize="15" Foreground="#FFFFFFFF">
+                    <StackPanel Spacing="4" Margin="0,2,0,0">
+                        <TextBlock Text="原算法（V2）" FontSize="15" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
+                        <TextBlock Text="按整段吵闹时间占比判断：吵闹占一半及以上记为吵闹；长时间的一般会稀释前面的吵闹。"
+                                   FontSize="12" Foreground="#B3FFFFFF" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </RadioButton>
+
+                <CheckBox x:Name="ShareCheck" FontSize="13" Foreground="#FFFFFFFF"
+                          Content="上传我的选择，帮助开发者了解新算法是否被认可"/>
+                <TextBlock Text="仅上传所选项和插件版本，不上传课程、音量和设备信息。数据收集至 2027 年 3 月 22 日，此后发布的第一个版本将移除本弹窗与相关上报代码。"
+                           FontSize="11" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="24,0,0,0"/>
+
+                <Button x:Name="ConfirmButton" Content="确定" HorizontalAlignment="Right"
+                        Padding="28,8" CornerRadius="6" Click="Confirm_Click"/>
+            </StackPanel>
+        </ThemeVariantScope>
+    </Border>
+</Window>

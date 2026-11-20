@@ -296,6 +296,14 @@ public class DecibelMeterService : INotifyPropertyChanged, IDisposable
             _detector.NoisyWindowRequiredSeconds = _settings.NoisyWindowRequiredSeconds;
             _detector.FallWindowSeconds = _settings.FallWindowSeconds;
 
+            // 段中切换算法：清掉上一套的段状态，避免两套字段混用
+            var useV3 = _settings.NoiseAlgorithmVersion != 2;
+            if (_detector.UseV3 != useV3)
+            {
+                _detector.UseV3 = useV3;
+                _detector.Reset();
+            }
+
             // 按真实音频块时长传 dt（samples / 采样率），不假定固定 100ms，
             // 这样「持续判定时长」在现实时间上是准的
             double dtSeconds = _waveIn?.WaveFormat is { SampleRate: > 0 } wf

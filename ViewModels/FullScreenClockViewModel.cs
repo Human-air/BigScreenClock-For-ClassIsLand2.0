@@ -1805,6 +1805,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             SetMainWindowVisible(false);
             ResumeFromMinimizePause();   // 最小化超过设定时间被暂停的话，这里恢复运行
             RefreshAll();
+            ShowAlgorithmChoiceIfNeeded();   // 之前没选过的话，从任何入口进大屏都补弹一次
             return;
         }
 
@@ -1836,6 +1837,57 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         IsWindowVisible = true;
         SetMainWindowVisible(false);
         BeginFeishuSession();   // 进入大屏时钟：发「进入」通知
+        ShowAlgorithmChoiceIfNeeded();
+    }
+
+    private bool _algorithmChoiceShown;
+
+    /// <summary>更新后第一次进入大屏时弹一次计数算法选择；之后可在设置页修改。</summary>
+    private void ShowAlgorithmChoiceIfNeeded()
+    {
+        if (_algorithmChoiceShown || _settings.AlgorithmChoicePrompted)
+        {
+            BackgroundDiagnostics.Write("algorithm-choice",
+                $"skip shown={_algorithmChoiceShown} prompted={_settings.AlgorithmChoicePrompted}");
+            return;
+        }
+        if (!AlgorithmChoiceReporter.IsCollectionOpen)
+        {
+            BackgroundDiagnostics.Write("algorithm-choice", "skip collection closed");
+            return;
+        }
+        if (_window is not { IsVisible: true } owner)
+        {
+            BackgroundDiagnostics.Write("algorithm-choice", $"skip window visible={_window?.IsVisible}");
+            return;
+        }
+
+        _algorithmChoiceShown = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                // 设置页的「致用户的一封信」也是 Topmost，先收掉，免得盖住选择窗口
+                CloseLetterWindows();
+                var dialog = new NoiseAlgorithmChoiceWindow(_settings) { Topmost = true };
+                _ = dialog.ShowDialog(owner);
+                BackgroundDiagnostics.Write("algorithm-choice", "dialog shown");
+            }
+            catch (Exception ex)
+            {
+                BackgroundDiagnostics.Write("algorithm-choice", "dialog failed", ex);
+                _algorithmChoiceShown = false;   // 下次进入大屏再试
+            }
+        }, DispatcherPriority.Normal);
+    }
+
+    private static void CloseLetterWindows()
+    {
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop) return;
+        foreach (var window in desktop.Windows.OfType<LetterWindow>().ToList())
+        {
+            try { window.Close(); } catch { }
+        }
     }
 
     /// <summary>
@@ -1968,6 +2020,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         CancelMinimizePause();
         _pausedForMinimize = false;
         _window?.Hide();
+        _algorithmChoiceShown = false;   // 还没选过算法的话，下次进入大屏再弹
         StopUpdateTimer();
         StopAntiScreensaver();
         _decibelService.StopMonitoring();

@@ -70,6 +70,12 @@ public sealed class NoiseEventDetector
     /// <summary>最近 10 秒内处于吵闹档的累计秒数达到该值即可升级。</summary>
     public double NoisyWindowRequiredSeconds { get; set; } = DefaultNoisyWindowRequiredSeconds;
 
+    /// <summary>false（默认）= V2 整段占比归属；true = V3 连续/窗口锁定。</summary>
+    public bool UseV3 { get; set; } = false;
+
+    /// <summary>V2 的整段占比阈值：吵闹有效时长占比达到该值记吵闹。默认 0.5。</summary>
+    public double NoisyRatioThreshold { get; set; } = 0.5;
+
     private double _smooth;
     private bool _initialized;
     private NoiseLevel _level = NoiseLevel.Quiet;
@@ -78,6 +84,8 @@ public sealed class NoiseEventDetector
     // 段状态
     private bool _segmentActive;           // 当前是否有段
     private double _effectiveSeconds;
+    private double _segmentNormalSeconds;
+    private double _segmentNoisySeconds;
     private double _continuousNoisySeconds;
     private bool _noisyLocked;
     // 仅保存最近 10 秒的吵闹音频块（生产采样间隔至少 100ms），不保存音频数据。
@@ -102,11 +110,7 @@ public sealed class NoiseEventDetector
         _level = NoiseLevel.Quiet;
         _time = 0;
         _segmentActive = false;
-        _effectiveSeconds = 0;
-        _continuousNoisySeconds = 0;
-        _noisyLocked = false;
-        _recentNoisy.Clear();
-        _fallSeconds = 0;
+        ResetSegment();
         _segmentLevel = null;
     }
 
@@ -143,40 +147,12 @@ public sealed class NoiseEventDetector
         if (!_segmentActive && countable)
         {
             _segmentActive = true;
-            _effectiveSeconds = 0;
-            _continuousNoisySeconds = 0;
-            _noisyLocked = false;
-            _recentNoisy.Clear();
+            ResetSegment();
             _segmentLevel = null;
         }
 
         if (_segmentActive)
-        {
-            UpdateNoisyEvidence(dtSeconds);
-            if (countable)
-            {
-                _fallSeconds = 0;
-                _effectiveSeconds += dtSeconds;
-                if (_effectiveSeconds + 1e-9 >= SustainSeconds)
-                    _segmentLevel = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
-            }
-            else
-            {
-                _fallSeconds += dtSeconds;
-                if (_fallSeconds > FallWindowSeconds)
-                {
-                    if (_effectiveSeconds + 1e-9 >= SustainSeconds)
-                        fired = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
-                    _segmentActive = false;
-                    _effectiveSeconds = 0;
-                    _continuousNoisySeconds = 0;
-                    _noisyLocked = false;
-                    _recentNoisy.Clear();
-                    _fallSeconds = 0;
-                    _segmentLevel = null;
-                }
-            }
-        }
+            fired = UseV3 ? StepV3(dtSeconds, countable) : StepV2(dtSeconds, countable);
 
         return new SampleResult
         {
@@ -187,6 +163,77 @@ public sealed class NoiseEventDetector
             EventLevel = fired,
             SegmentLevel = _segmentActive ? _segmentLevel : null
         };
+    }
+
+    /// <summary>V3：连续/最近时间窗锁定吵闹，段结束结算一次。</summary>
+    private NoiseLevel? StepV3(double dtSeconds, bool countable)
+    {
+        UpdateNoisyEvidence(dtSeconds);
+        if (countable)
+        {
+            _fallSeconds = 0;
+            _effectiveSeconds += dtSeconds;
+            if (_effectiveSeconds + 1e-9 >= SustainSeconds)
+                _segmentLevel = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
+            return null;
+        }
+
+        _fallSeconds += dtSeconds;
+        if (_fallSeconds <= FallWindowSeconds) return null;
+
+        NoiseLevel? fired = null;
+        if (_effectiveSeconds + 1e-9 >= SustainSeconds)
+            fired = _noisyLocked ? NoiseLevel.Noisy : NoiseLevel.Normal;
+        EndSegment();
+        return fired;
+    }
+
+    /// <summary>V2：整段吵闹有效时长占比达到阈值即归属吵闹。</summary>
+    private NoiseLevel? StepV2(double dtSeconds, bool countable)
+    {
+        if (countable)
+        {
+            _fallSeconds = 0;
+            if (_level == NoiseLevel.Noisy) _segmentNoisySeconds += dtSeconds;
+            else _segmentNormalSeconds += dtSeconds;
+
+            var total = _segmentNormalSeconds + _segmentNoisySeconds;
+            if (total >= SustainSeconds)
+                _segmentLevel = (total > 0 ? _segmentNoisySeconds / total : 0) >= NoisyRatioThreshold
+                    ? NoiseLevel.Noisy
+                    : NoiseLevel.Normal;
+            return null;
+        }
+
+        _fallSeconds += dtSeconds;
+        if (_fallSeconds <= FallWindowSeconds) return null;
+
+        NoiseLevel? fired = null;
+        var totalV2 = _segmentNormalSeconds + _segmentNoisySeconds;
+        if (totalV2 >= SustainSeconds)
+            fired = (totalV2 > 0 ? _segmentNoisySeconds / totalV2 : 0) >= NoisyRatioThreshold
+                ? NoiseLevel.Noisy
+                : NoiseLevel.Normal;
+        EndSegment();
+        return fired;
+    }
+
+    private void ResetSegment()
+    {
+        _effectiveSeconds = 0;
+        _segmentNormalSeconds = 0;
+        _segmentNoisySeconds = 0;
+        _continuousNoisySeconds = 0;
+        _noisyLocked = false;
+        _recentNoisy.Clear();
+        _fallSeconds = 0;
+    }
+
+    private void EndSegment()
+    {
+        _segmentActive = false;
+        ResetSegment();
+        _segmentLevel = null;
     }
 
     private void UpdateNoisyEvidence(double dtSeconds)

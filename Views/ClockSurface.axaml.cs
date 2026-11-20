@@ -698,11 +698,15 @@ public partial class ClockSurface : UserControl
     }
 
     /// <summary>点在按钮、滑块、输入框、滚动区这类控件上时，不算「点屏幕」的手势。</summary>
-    private static bool IsInteractiveControl(object? source)
+    private bool IsInteractiveControl(object? source)
     {
         for (var visual = source as Visual; visual is not null; visual = visual.GetVisualParent())
+        {
             if (visual is Button or Slider or TextBox or ComboBox or CheckBox or ScrollViewer)
                 return true;
+            // 右上角日期本身点了会打开「关于」，三击日期不应再触发右侧半屏
+            if (ReferenceEquals(visual, DateBlock)) return true;
+        }
         return false;
     }
 

@@ -152,11 +152,27 @@ Check(counter.OnEvent(NoiseLevel.Noisy, false) == CountDecision.CountNoisy && co
     "distinct close segments are both counted");
 counter.StartNewClass();
 Check(counter.NormalCount == 0 && counter.NoisyCount == 0, "new class resets counts");
+// V2（1.2.0.0 的整段占比）：吵闹会被后面的一般稀释，占比过半才记吵闹
+{
+    var v2 = new Run(0.1, smooth: false, useV3: false);
+    v2.Feed(Noisy, 8);
+    v2.Feed(Normal, 40);
+    v2.Feed(Quiet, 7);
+    Check(v2.Normal == 1 && v2.Noisy == 0, "V2: short noisy diluted by long normal");
+}
+{
+    var v2 = new Run(0.1, smooth: false, useV3: false);
+    v2.Feed(Noisy, 30);
+    v2.Feed(Normal, 10);
+    v2.Feed(Quiet, 7);
+    Check(v2.Normal == 0 && v2.Noisy == 1, "V2: majority noisy stays noisy");
+}
+
 Console.WriteLine($"PASS: {checks} noise algorithm checks (synthetic inputs, not classroom accuracy)");
 
-sealed class Run(double step, bool smooth = true)
+sealed class Run(double step, bool smooth = true, bool useV3 = true)
 {
-    public NoiseEventDetector Detector { get; } = new() { SmoothAlpha = smooth ? .2 : 1 };
+    public NoiseEventDetector Detector { get; } = new() { SmoothAlpha = smooth ? .2 : 1, UseV3 = useV3 };
     public int Normal, Noisy;
     public int Total => Normal + Noisy;
     public void Feed(double rms, double seconds)

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Threading;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using EveningSelfStudyClock.NoiseDetection;
 using EveningSelfStudyClock.Services;
@@ -9,6 +10,38 @@ using NAudio.Wave;
 
 int checks = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); checks++; }
+var migrationFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+var testManifest = Path.Combine(AppContext.BaseDirectory, "manifest.yml");
+File.WriteAllText(testManifest, "version: 1.2.2.0.6");
+try
+{
+    Check(SettingsMigration.SupportsVersion("1.2.2.0.6") &&
+        !SettingsMigration.SupportsVersion("1.2.2.0.5") &&
+        SettingsMigration.SupportsVersion("1.2.3.0.1"), "migration version gate");
+    using var exported = new MemoryStream();
+    await SettingsMigration.ExportAsync(exported, new PluginSettings
+    {
+        ClockFontSize = 123, BackgroundImageFile = "source-wallpaper", FeishuSecret = "source-secret"
+    });
+    var payload = System.Text.Encoding.UTF8.GetString(exported.ToArray());
+    Check(!payload.Contains("source-secret") && !payload.Contains("source-wallpaper"),
+        "migration export excludes machine-local settings");
+    var target = new PluginSettings { ClockFontSize = 200, FeishuSecret = "target-secret" };
+    exported.Position = 0;
+    await SettingsMigration.QueueAsync(exported, migrationFolder, target);
+    var targetPath = Path.Combine(migrationFolder, "Settings.json");
+    File.WriteAllText(targetPath, JsonSerializer.Serialize(target));
+    var imported = SettingsMigration.ApplyPending(targetPath, target);
+    Check(imported.ClockFontSize == 123 && imported.FeishuSecret == "target-secret",
+        "migration applies portable settings while preserving target credentials");
+    Check(Directory.GetFiles(migrationFolder, "*.bak").Length == 1 &&
+        ReferenceEquals(SettingsMigration.ApplyPending(targetPath, imported), imported),
+        "migration backs up original settings and consumes the pending import");
+}
+finally
+{
+    File.Delete(testManifest);
+}
 var size = new PixelSize(1920,1080);
 BackdropPreloadCache.Clear();
 Check(BackdropPreloadCache.TryBeginBuild(out var generation), "initial build");

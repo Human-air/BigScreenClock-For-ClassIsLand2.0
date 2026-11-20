@@ -31,6 +31,9 @@ public class PluginSettings : INotifyPropertyChanged
     private double _noisySustainSeconds = 1.0;
     private double _noisyContinuousSeconds = NoiseEventDetector.DefaultNoisyContinuousSeconds;
     private double _noisyWindowRequiredSeconds = NoiseEventDetector.DefaultNoisyWindowRequiredSeconds;
+    private int _noiseAlgorithmVersion = 2;
+    private bool _algorithmChoicePrompted;
+    private bool _shareAlgorithmChoice;
     private double _fallWindowSeconds = 5.0;
     private double _samplingIntervalSeconds = 0.2;
     private bool _enableNoiseDebugLog;
@@ -492,10 +495,49 @@ public class PluginSettings : INotifyPropertyChanged
         set => SetNoisyPromotionSeconds(ref _noisyWindowRequiredSeconds, value);
     }
 
+    /// <summary>计数算法版本：3 = V3 连续/窗口锁定（推荐），2 = V2 整段占比。</summary>
+    public int NoiseAlgorithmVersion
+    {
+        get => _noiseAlgorithmVersion;
+        set
+        {
+            var v = value == 2 ? 2 : 3;
+            if (v == _noiseAlgorithmVersion) return;
+            _noiseAlgorithmVersion = v;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>是否已经弹过计数算法选择窗口（更新后只弹一次）。</summary>
+    public bool AlgorithmChoicePrompted
+    {
+        get => _algorithmChoicePrompted;
+        set
+        {
+            if (_algorithmChoicePrompted == value) return;
+            _algorithmChoicePrompted = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>是否允许上传计数算法的选择（仅算法与插件版本，不含课堂数据）。</summary>
+    public bool ShareAlgorithmChoice
+    {
+        get => _shareAlgorithmChoice;
+        set
+        {
+            if (_shareAlgorithmChoice == value) return;
+            _shareAlgorithmChoice = value;
+            OnPropertyChanged();
+        }
+    }
+
     private void SetNoisyPromotionSeconds(ref double current, double value, [CallerMemberName] string? name = null)
     {
         if (!double.IsFinite(value)) return;
-        var seconds = Math.Clamp(value, NoiseEventDetector.MinNoisyPromotionSeconds, NoiseEventDetector.NoisyWindowSeconds);
+        // 滑块无级拖动，值保留到 0.1 秒
+        var seconds = Math.Round(
+            Math.Clamp(value, NoiseEventDetector.MinNoisyPromotionSeconds, NoiseEventDetector.NoisyWindowSeconds), 1);
         if (current == seconds) return;
         current = seconds;
         OnPropertyChanged(name);

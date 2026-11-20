@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
 <ItemGroup>
+<Compile Include="../../Helpers/SettingsMigration.cs" Link="SettingsMigration.cs" />
+<Compile Include="../../Helpers/PluginVersion.cs" Link="PluginVersion.cs" />
 <Compile Include="../../Models/BackdropPreloadCache.cs" Link="BackdropPreloadCache.cs" />
 <Compile Include="../../Models/PluginSettings.cs" Link="PluginSettings.cs" />
 <Compile Include="../../Models/ClockTheme.cs" Link="ClockTheme.cs" />

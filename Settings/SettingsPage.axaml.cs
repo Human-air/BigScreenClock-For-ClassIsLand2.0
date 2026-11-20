@@ -138,7 +138,8 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             if (ShowCameraReminder && CameraDevices.Count == 0) _ = LoadCameraDevicesAsync();
             if (!Embedded)
             {
-                ShowLetterIfNeeded();
+                // 先弹「致用户的一封信」，关掉后再弹算法选择；信已「不再显示」就直接弹算法
+                ShowLetterAndAlgorithm();
                 PastReleasesExpander.IsExpanded = false;   // 每次打开都从一个默认折叠的状态开始
                 _ = RefreshReleaseNotesAsync();
             }
@@ -182,6 +183,59 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         PreviewPanel.IsVisible = false;
         // 隐藏并不等于离开视觉树：快速设置无需另一份预览，直接摘掉右栏内容。
         PreviewPanel.Children.Clear();
+    }
+
+    /// <summary>打开设置页时，如果用户还没选过计数算法，也在设置页里弹一次。</summary>
+    private bool TryShowAlgorithmChoice()
+    {
+        if (Plugin.Settings is not { } settings) return false;
+        if (settings.AlgorithmChoicePrompted) return false;
+        if (!AlgorithmChoiceReporter.IsCollectionOpen) return false;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return false;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                _ = new NoiseAlgorithmChoiceWindow(settings) { Topmost = true }.ShowDialog(owner);
+            }
+            catch
+            {
+                // 设置页还没准备好就下次再弹
+            }
+        }, DispatcherPriority.Background);
+        return true;
+    }
+
+    /// <summary>先弹信，关掉后再弹算法选择；信已勾「不再显示」就直接弹算法。</summary>
+    private void ShowLetterAndAlgorithm()
+    {
+        if (!LetterWindow.ShouldShow())
+        {
+            TryShowAlgorithmChoice();
+            return;
+        }
+        if (TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            TryShowAlgorithmChoice();
+            return;
+        }
+
+        LetterWindow.MarkShown();
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                var letter = new LetterWindow();
+                letter.Closed += (_, _) =>
+                    Dispatcher.UIThread.Post(() => TryShowAlgorithmChoice(), DispatcherPriority.Background);
+                letter.Show(owner);
+            }
+            catch
+            {
+                TryShowAlgorithmChoice();
+            }
+        });
     }
 
     private void ShowLetterIfNeeded()
@@ -261,8 +315,24 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             OnPropertyChanged(nameof(NoisyPromotionRuleText));
             return;
         }
+        else if (e.PropertyName is nameof(PluginSettings.NoiseAlgorithmVersion))
+        {
+            OnPropertyChanged(nameof(NoiseAlgorithmVersionIndex));
+            OnPropertyChanged(nameof(NoiseAlgorithmDescription));
+            OnPropertyChanged(nameof(IsNoiseAlgorithmV3));
+            return;
+        }
         else if (e.PropertyName is nameof(PluginSettings.AutoGlassFallback))
             OnPropertyChanged(nameof(AutoGlassFallback));
+        else if (e.PropertyName is nameof(PluginSettings.DisplayRegion) or nameof(PluginSettings.VisibleWidthPercent))
+        {
+            // 大屏三击切换半屏/全屏时直接改设置，设置页这边要跟着刷新下拉框和宽度
+            OnPropertyChanged(nameof(DisplayRegionIndex));
+            OnPropertyChanged(nameof(VisibleWidthPercent));
+            OnPropertyChanged(nameof(VisibleWidthPercentText));
+            OnPropertyChanged(nameof(IsHalfScreen));
+            OnPropertyChanged(nameof(IsFullScreen));
+        }
 
         SchedulePreviewSync();
     }
@@ -582,6 +652,68 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
     }
 
     private bool _exportingDiagnostics;
+
+    private async void ExportSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || TopLevel.GetTopLevel(this) is not { } top) return;
+        button.IsEnabled = false;
+        try
+        {
+            if (!SettingsMigration.SupportsVersion(PluginVersion.Current))
+                throw new InvalidDataException("请升级到支持设置迁移的插件版本。");
+
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "导出大屏时钟设置",
+                SuggestedFileName = "BigScreenClock.Settings.json",
+                DefaultExtension = "json"
+            });
+            if (file is null) return;
+            await using var stream = await file.OpenWriteAsync();
+            stream.SetLength(0);
+            await SettingsMigration.ExportAsync(stream, _settings);
+            SettingsMigrationStatus.Text = "设置已导出。";
+        }
+        catch (Exception ex)
+        {
+            SettingsMigrationStatus.Text = ex is InvalidDataException ? ex.Message : "导出失败，请检查目标文件是否可写。";
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    private async void ImportSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || TopLevel.GetTopLevel(this) is not { } top ||
+            Plugin.ConfigFolder is not { } folder) return;
+        button.IsEnabled = false;
+        try
+        {
+            if (!SettingsMigration.SupportsVersion(PluginVersion.Current))
+                throw new InvalidDataException("请升级到支持设置迁移的插件版本。");
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "导入大屏时钟设置",
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("JSON 设置") { Patterns = ["*.json"] }]
+            });
+            if (files.Count == 0) return;
+            await using var stream = await files[0].OpenReadAsync();
+            await SettingsMigration.QueueAsync(stream, folder, _settings);
+            SettingsMigrationStatus.Text = "重启 ClassIsland 后应用导入的设置，原设置会自动备份。";
+        }
+        catch (Exception ex)
+        {
+            SettingsMigrationStatus.Text = ex is InvalidDataException ? ex.Message : "导入失败，请检查文件格式和设置目录权限。";
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
 
     private async void ExportDiagnostics_Click(object? sender, RoutedEventArgs e)
     {
@@ -1323,6 +1455,38 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         }
     }
     public string NoisySustainSecondsText => $"{_settings.NoisySustainSeconds:0.#} 秒";
+
+    public int NoiseAlgorithmVersionIndex
+    {
+        get => _settings.NoiseAlgorithmVersion == 2 ? 0 : 1;
+        set
+        {
+            var version = value == 0 ? 2 : 3;
+            if (_settings.NoiseAlgorithmVersion == version) return;
+            _settings.NoiseAlgorithmVersion = version;
+            OnPropertyChanged(nameof(NoiseAlgorithmVersionIndex));
+            OnPropertyChanged(nameof(NoiseAlgorithmDescription));
+            OnPropertyChanged(nameof(IsNoiseAlgorithmV3));
+        }
+    }
+
+    public bool IsNoiseAlgorithmV3 => _settings.NoiseAlgorithmVersion != 2;
+
+    public bool ShareAlgorithmChoice
+    {
+        get => _settings.ShareAlgorithmChoice;
+        set
+        {
+            if (_settings.ShareAlgorithmChoice == value) return;
+            _settings.ShareAlgorithmChoice = value;
+            OnPropertyChanged(nameof(ShareAlgorithmChoice));
+            if (value) AlgorithmChoiceReporter.TrySend(_settings);   // 勾选后先上传一次
+        }
+    }
+
+    public string NoiseAlgorithmDescription => _settings.NoiseAlgorithmVersion == 2
+        ? "V2：按整段吵闹时间占比，吵闹占一半及以上记为吵闹，长时间的一般会稀释前面的吵闹。"
+        : "V3：连续吵闹或最近 10 秒内累计吵闹达到设定时长即记为吵闹，锁定后延长一般时间不降级。";
 
     public double NoisyContinuousSeconds
     {
