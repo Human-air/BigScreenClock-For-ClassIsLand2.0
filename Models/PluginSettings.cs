@@ -33,7 +33,7 @@ public class PluginSettings : INotifyPropertyChanged
     private double _noisyWindowRequiredSeconds = NoiseEventDetector.DefaultNoisyWindowRequiredSeconds;
     private int _noiseAlgorithmVersion = 2;
     private bool _algorithmChoicePrompted;
-    private bool _shareAlgorithmChoice;
+    private bool _shareAlgorithmChoice = true;
     private double _fallWindowSeconds = 5.0;
     private double _samplingIntervalSeconds = 0.2;
     private bool _enableNoiseDebugLog;
@@ -70,7 +70,7 @@ public class PluginSettings : INotifyPropertyChanged
     private bool _showTextReminder = true;
     private bool _showRainReminder = true;
     private bool _showEmojiSubtitles = true;
-    private bool _showTrayMenuEntry = true;
+    private bool _showTrayMenuEntry = false;
     private bool _pauseWhenMinimized = true;
     private int _minimizePauseMinutes = 5;
     private bool _showCameraReminder = true;

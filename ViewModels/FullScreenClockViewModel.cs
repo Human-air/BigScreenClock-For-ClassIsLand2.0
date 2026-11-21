@@ -215,7 +215,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             or nameof(PluginSettings.NoisySustainSeconds)
             or nameof(PluginSettings.FallWindowSeconds)
             or nameof(PluginSettings.NoisyContinuousSeconds)
-            or nameof(PluginSettings.NoisyWindowRequiredSeconds))
+            or nameof(PluginSettings.NoisyWindowRequiredSeconds)
+            or nameof(PluginSettings.NoiseAlgorithmVersion))
         {
             OnPropertyChanged(nameof(CountRulesText));
         }
@@ -225,6 +226,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             or nameof(PluginSettings.ShowTextReminder)
             or nameof(PluginSettings.ShowRainReminder))
         {
+            // 总开关关掉时，顶部已展开的预警详情弹幕也一并收起
+            if (args.PropertyName == nameof(PluginSettings.ShowReminderPanel) && !_settings.ShowReminderPanel)
+                ExpandedAlertDetail = null;
             NotifyReminderChanged();
         }
         else if (args.PropertyName is nameof(PluginSettings.ShowEarthquakeReminder))
@@ -863,7 +867,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
 
     /// <summary>降雨提醒可见性：跟随独立「多久下雨」开关，且有降雨数据。</summary>
-    public bool ShowRainReminder => _settings.ShowRainReminder && !string.IsNullOrEmpty(_rainReminderTitle);
+    public bool ShowRainReminder => _settings.ShowReminderPanel && _settings.ShowRainReminder && !string.IsNullOrEmpty(_rainReminderTitle);
     public string WeatherText => _reminderData.WeatherText ?? "";
     public string ReminderText => _reminderData.TextContent ?? "";
 
@@ -904,12 +908,12 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     }
     public bool HasExpandedAlert => !string.IsNullOrEmpty(_expandedAlertDetail);
 
-    // 组合可见性：子开关 && 有数据
-    public bool ShowWeatherRow => _settings.ShowWeatherReminder && _reminderData.HasWeather;
+    // 组合可见性：提醒总开关 && 子开关 && 有数据
+    public bool ShowWeatherRow => _settings.ShowReminderPanel && _settings.ShowWeatherReminder && _reminderData.HasWeather;
     // 预警开关的过滤在 UpdateAlertItems() 里做（摄像头占用那条不受天气「预警」开关影响）
-    public bool ShowAlertsRow => _reminderData.HasAlerts;
-    public bool ShowCountdownRow => _settings.ShowCountdownReminder && _reminderData.HasCountdown;
-    public bool ShowTextRow => _settings.ShowTextReminder && _reminderData.HasText;
+    public bool ShowAlertsRow => _settings.ShowReminderPanel && _reminderData.HasAlerts;
+    public bool ShowCountdownRow => _settings.ShowReminderPanel && _settings.ShowCountdownReminder && _reminderData.HasCountdown;
+    public bool ShowTextRow => _settings.ShowReminderPanel && _settings.ShowTextReminder && _reminderData.HasText;
 
     // 提醒面板项：未并入第一行的 降雨/倒计时/文本 才在面板显示（天气永不在面板，预警始终在面板）
     public bool ShowRainReminderPanel => ShowRainReminder && !ShowRainMergedInFirstRow;
@@ -1712,8 +1716,11 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             {
                 $"一段噪音累计满 {_settings.NoisySustainSeconds:0.#} 秒，段结束时记一次",
                 $"一段内回落不超过 {_settings.FallWindowSeconds:0.#} 秒并成一次",
-                $"连续吵闹 {_settings.NoisyContinuousSeconds:0.#} 秒，或最近 {NoiseEventDetector.NoisyWindowSeconds:0.#} 秒内累计吵闹 {_settings.NoisyWindowRequiredSeconds:0.#} 秒后，本段锁定为「吵闹」，否则记「一般」",
             };
+            if (_settings.NoiseAlgorithmVersion == 2)
+                parts.Add("一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」");
+            else
+                parts.Add($"连续吵闹 {_settings.NoisyContinuousSeconds:0.#} 秒，或最近 {NoiseEventDetector.NoisyWindowSeconds:0.#} 秒内累计吵闹 {_settings.NoisyWindowRequiredSeconds:0.#} 秒后，本段锁定为「吵闹」，否则记「一般」");
             if (_settings.SkipFirst3Min) parts.Add($"上课开始后 {_settings.SkipFirstMinutes} 分钟内不记录");
             return string.Join("，", parts);
         }

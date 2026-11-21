@@ -320,6 +320,7 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
             OnPropertyChanged(nameof(NoiseAlgorithmVersionIndex));
             OnPropertyChanged(nameof(NoiseAlgorithmDescription));
             OnPropertyChanged(nameof(IsNoiseAlgorithmV3));
+            OnPropertyChanged(nameof(NoisyPromotionRuleText));
             return;
         }
         else if (e.PropertyName is nameof(PluginSettings.AutoGlassFallback))
@@ -1502,8 +1503,9 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
 
     public string NoisyContinuousSecondsText => $"{NoisyContinuousSeconds:0.##} 秒";
     public string NoisyWindowRequiredSecondsText => $"{NoisyWindowRequiredSeconds:0.##} 秒";
-    public string NoisyPromotionRuleText =>
-        $"• 处于「吵闹」档连续满 {NoisyContinuousSecondsText}，或最近 {NoiseEventDetector.NoisyWindowSeconds:0} 秒内累计满 {NoisyWindowRequiredSecondsText}，本段记为「吵闹」。两项均未达到时记为「一般」。";
+    public string NoisyPromotionRuleText => _settings.NoiseAlgorithmVersion == 2
+        ? "• 一段噪音按一般/吵闹的时长占比归属：吵闹占一半及以上记「吵闹」，否则记「一般」"
+        : $"• 处于「吵闹」档连续满 {NoisyContinuousSecondsText}，或最近 {NoiseEventDetector.NoisyWindowSeconds:0} 秒内累计满 {NoisyWindowRequiredSecondsText}，本段记为「吵闹」。两项均未达到时记为「一般」。";
 
     public double FallWindowSeconds
     {

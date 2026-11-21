@@ -199,7 +199,7 @@
                             <Button Content="刷新设备列表" Click="RefreshCameras_Click"
                                     FontSize="13" HorizontalAlignment="Left"/>
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                                <TextBlock Grid.Column="0" Text="提醒字号" VerticalAlignment="Center"
+                                <TextBlock Grid.Column="0" Text="摄像头提醒字号" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
                                 <Slider x:Name="CameraAlertFontSlider" Grid.Column="1"
                                         Value="{Binding CameraAlertFontSize}" Minimum="15" Maximum="19"
@@ -479,6 +479,24 @@
                 </StackPanel>
                 </Border>
 
+                <!-- 设置迁移（独立于外观） -->
+                <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="14,12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="设置迁移" FontSize="17" FontWeight="Bold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="导出设置" Click="ExportSettings_Click"/>
+                        <Button Content="导入设置" Click="ImportSettings_Click"/>
+                    </StackPanel>
+                    <TextBlock Text="导入与导出端均需 1.2.3.0 或更高版本。"
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock x:Name="SettingsMigrationStatus" TextWrapping="Wrap"/>
+                </StackPanel>
+                </Border>
+
                 <!-- 外观 -->
                 <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
@@ -657,17 +675,6 @@
                         <Button Content="导出显示诊断" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
                         <TextBlock x:Name="DiagnosticsExportStatus" FontSize="12" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="设置迁移" FontWeight="SemiBold"/>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="导出设置" Click="ExportSettings_Click"/>
-                            <Button Content="导入设置" Click="ImportSettings_Click"/>
-                        </StackPanel>
-                        <TextBlock Text="导入与导出端均需 1.2.3.0 或更高版本。"
-                                   FontSize="11" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
-                        <TextBlock x:Name="SettingsMigrationStatus" TextWrapping="Wrap"/>
                     </StackPanel>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
@@ -943,7 +950,7 @@
                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="5" Margin="0,6,0,0">
                         <TextBlock Classes="icon" Text="{ci:LI TriangleAlert}" FontSize="13"
                                    Foreground="#d97706"/>
-                        <TextBlock Grid.Column="1" Text="免责声明：分贝记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。"
+                        <TextBlock Grid.Column="1" Text="免责声明：音量记录仅供参考，可能受教室风扇、空调、开关门、桌椅移动、脚步声等环境杂音影响，不代表真实纪律状况。"
                                    FontSize="12" Foreground="#d97706" TextWrapping="Wrap"/>
                     </Grid>
                 </StackPanel>

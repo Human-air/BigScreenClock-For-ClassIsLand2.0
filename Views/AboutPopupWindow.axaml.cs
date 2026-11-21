@@ -37,7 +37,7 @@ public partial class AboutPopupWindow : Window
 
         // 版本号 + 版本类型：
         //   五位（如 1.1.1.10.6）= 本机开发版，构建时自动盖号，不对外发布；
-        //   四位最后一位非 0 = 测试版，为 0 = 正式版。
+        //   四位一律是正式版（第 4 位非 0 也是正式版）。
         VersionNumberText.Text = $"版本号：{PluginVersionText}";
         var (type, color) = VersionKind(PluginVersionText);
         VersionTypeText.Text = type;
@@ -93,15 +93,12 @@ public partial class AboutPopupWindow : Window
         DividerLine.Fill = new SolidColorBrush(divider);
     }
 
-    /// <summary>版本类型徽标：五位 = 开发版；四位最后一位非 0 = 测试版，为 0 = 正式版。</summary>
+    /// <summary>版本类型徽标：五位 = 开发版；四位一律正式版（第 4 位非 0 也是正式版）。</summary>
     private static (string Text, string Color) VersionKind(string version)
     {
         var parts = version.Split('.');
-
         if (parts.Length >= 5) return ("开发版", "#ff9800");
-
-        var last = parts.Length >= 4 && int.TryParse(parts[^1], out var n) ? n : 0;
-        return last != 0 ? ("测试版", "#ff5555") : ("正式版", "#4caf50");
+        return ("正式版", "#4caf50");
     }
 
     private static void OpenUrl(string url)
