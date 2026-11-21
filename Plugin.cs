@@ -42,6 +42,14 @@ public class Plugin : PluginBase
 
         var settingsPath = Path.Combine(ConfigFolder, "Settings.json");
         Settings = ConfigureFileHelper.LoadConfig<PluginSettings>(settingsPath);
+        try
+        {
+            Settings = SettingsMigration.ApplyPending(settingsPath, Settings);
+        }
+        catch (Exception ex)
+        {
+            BackgroundDiagnostics.Write("settings-import-failed", ex.GetType().Name);
+        }
 
         // 「正在拖位置/字号」纯界面状态，绝不该跨会话留着：万一哪次拖到一半崩了把它存了下来，
         // 下次启动玻璃就一直是收起的。这里强制归零。
@@ -51,6 +59,9 @@ public class Plugin : PluginBase
         // 别让「跟随 ClassIsland」在首次启动时就把外观换成另一套（新装用户没有这个问题，默认跟随）
         if (File.Exists(settingsPath))
             ClockThemeApplier.MigrateLegacySettings(Settings);
+
+        // 勾选了上传算法选择时，每次启动 ClassIsland 最多发送一次
+        AlgorithmChoiceReporter.TrySend(Settings);
 
         // 设置保存防抖：拖滑条/连续修改不会狂写盘，停顿 400ms 后统一保存
         SettingsSaveDebouncer.Elapsed += (_, _) =>
@@ -80,6 +91,15 @@ public class Plugin : PluginBase
         // 用同一个实例当 HostedService：AddHostedService<T> 会另建一个对象，
         // 变成两个实例各自注册一遍全局热键（第二个必然注册失败）
         services.AddHostedService(sp => sp.GetRequiredService<SnitchHotkeyService>());
+
+        // CI 按 DefaultGroupToMenu 自动建组时图标为空；先放一个带时钟图标的分组，
+        // AddAction 会复用同名组，左侧「大屏时钟」前面就有图标了。
+        if (!ClassIsland.Core.Abstractions.Services.IActionService.ActionMenuTree
+                .TryGetValue("大屏时钟", out _))
+        {
+            ClassIsland.Core.Abstractions.Services.IActionService.ActionMenuTree.Add(
+                new ClassIsland.Core.Models.Automation.ActionMenuTreeGroup("大屏时钟", "\ue4c4"));
+        }
 
         services.AddAction<EveningSelfStudyClock.Automation.ShowClockAction>();
         services.AddAction<EveningSelfStudyClock.Automation.HideClockAction>();
