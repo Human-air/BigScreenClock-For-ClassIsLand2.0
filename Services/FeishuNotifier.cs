@@ -41,7 +41,7 @@ public class FeishuNotifier
 
         var fields = new List<(string Label, string Value)>
         {
-            ("课程", string.IsNullOrWhiteSpace(course) ? "（未知课程）" : course),
+            ("课程", string.IsNullOrWhiteSpace(course) ? "当前无课" : course),
             ("等级", isNoisy ? "吵闹" : "一般"),
             ("实时音量", smoothedRms.ToString("F4", CultureInfo.InvariantCulture)),
             ("时间", DateTime.Now.ToString("HH:mm:ss")),
@@ -61,7 +61,7 @@ public class FeishuNotifier
 
         var fields = new List<(string Label, string Value)>
         {
-            ("课程", string.IsNullOrWhiteSpace(course) ? "（未知课程）" : course),
+            ("课程", string.IsNullOrWhiteSpace(course) ? "当前无课" : course),
             ("触发方式", $"快捷键 {hotkeyText}（手动上报）"),
             ("时间", DateTime.Now.ToString("HH:mm:ss")),
         };
@@ -79,7 +79,7 @@ public class FeishuNotifier
 
         var fields = new List<(string Label, string Value)>
         {
-            ("课程", string.IsNullOrWhiteSpace(course) ? "（未知课程）" : course),
+            ("课程", string.IsNullOrWhiteSpace(course) ? "当前无课" : course),
             ("时间", DateTime.Now.ToString("HH:mm:ss")),
         };
         if (!string.IsNullOrWhiteSpace(_settings.DeviceName))
@@ -101,7 +101,7 @@ public class FeishuNotifier
 
         var fields = new List<(string Label, string Value)>
         {
-            ("课程", string.IsNullOrWhiteSpace(course) ? "（未知课程）" : course),
+            ("课程", string.IsNullOrWhiteSpace(course) ? "当前无课" : course),
             ("时间", DateTime.Now.ToString("HH:mm:ss")),
             ("持续时长", durText),
             ("本节累计", $"一般 {normalCount} 次 · 吵闹 {noisyCount} 次"),

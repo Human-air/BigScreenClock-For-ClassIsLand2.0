@@ -13,7 +13,7 @@ namespace EveningSelfStudyClock.Services;
 public static class AlgorithmChoiceReporter
 {
     /// <summary>统计接口地址。留空表示不上传；填入后需能接收 JSON POST。</summary>
-    private const string Endpoint = "";
+    private const string Endpoint = "http://8.163.3.201:8080/algorithm-choice";
 
     /// <summary>
     /// 数据收集截止日期（含当天）。之后不再上传，弹窗也不再出现。

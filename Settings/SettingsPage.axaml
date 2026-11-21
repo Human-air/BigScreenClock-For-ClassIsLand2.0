@@ -664,7 +664,7 @@
                             <Button Content="导出设置" Click="ExportSettings_Click"/>
                             <Button Content="导入设置" Click="ImportSettings_Click"/>
                         </StackPanel>
-                        <TextBlock Text="导入与导出端均需 1.2.3.0 或更高版本。1.2.2.0.6 开发版可用于本地测试。"
+                        <TextBlock Text="导入与导出端均需 1.2.3.0 或更高版本。"
                                    FontSize="11" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
                         <TextBlock x:Name="SettingsMigrationStatus" TextWrapping="Wrap"/>
