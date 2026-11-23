@@ -113,6 +113,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     private readonly ObservableCollection<NoiseLevelSlotItem> _noiseLevelSlots = new();
 
     private string _currentTime = "00:00:00";
+    private string _flipH1 = "0", _flipH2 = "0", _flipM1 = "0", _flipM2 = "0", _flipS1 = "0", _flipS2 = "0";
+    private bool _useFlipClock = true;
     private string _currentDate = "";
     private string _currentCourseName = "";
     private string _currentClassName = "";
@@ -174,6 +176,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _decibelService.PropertyChanged += OnDecibelPropertyChanged;
         _decibelService.NoiseEventRaised += OnNoiseEventRaised;
         _settings.PropertyChanged += OnSettingsPropertyChanged;
+        _useFlipClock = _settings.FlipClockEnabled;
 
         for (var i = 0; i < SlotNames.Length; i++)
             _noiseLevelSlots.Add(new NoiseLevelSlotItem(SlotNames[i], SlotTextBrushesDark[i], SlotReachedBrushesDark[i]));
@@ -209,6 +212,10 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             ClockFontSize = _settings.ClockFontSize;
             CourseInfoFontSize = _settings.CourseInfoFontSize;
             CountFontSize = _settings.CountFontSize;
+        }
+        else if (args.PropertyName == nameof(PluginSettings.FlipClockEnabled))
+        {
+            UseFlipClock = _settings.FlipClockEnabled;
         }
         else if (args.PropertyName is nameof(PluginSettings.SkipFirst3Min)
             or nameof(PluginSettings.SkipFirstMinutes)
@@ -419,6 +426,44 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         set { _currentTime = value; OnPropertyChanged(); }
     }
 
+    // ===== 翻页时钟：把 HH:mm:ss 拆成六位数字，每位一张卡片 =====
+
+    /// <summary>是否使用翻页时钟（设置项）。false 时回到单行纯文字时钟。</summary>
+    public bool UseFlipClock
+    {
+        get => _useFlipClock;
+        private set
+        {
+            if (_useFlipClock == value) return;
+            _useFlipClock = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(UseClassicClock));
+        }
+    }
+
+    /// <summary>是否使用经典单行文字时钟（翻页时钟的反面，供 XAML 切换两套布局）。</summary>
+    public bool UseClassicClock => !_useFlipClock;
+
+    public string FlipH1 { get => _flipH1; private set => SetFlipDigit(ref _flipH1, value); }
+    public string FlipH2 { get => _flipH2; private set => SetFlipDigit(ref _flipH2, value); }
+    public string FlipM1 { get => _flipM1; private set => SetFlipDigit(ref _flipM1, value); }
+    public string FlipM2 { get => _flipM2; private set => SetFlipDigit(ref _flipM2, value); }
+    public string FlipS1 { get => _flipS1; private set => SetFlipDigit(ref _flipS1, value); }
+    public string FlipS2 { get => _flipS2; private set => SetFlipDigit(ref _flipS2, value); }
+
+    private void SetFlipDigit(ref string field, string value)
+    {
+        if (field == value) return;
+        field = value;
+        OnPropertyChanged();
+    }
+
+    /// <summary>翻页卡片底色：跟随主题面板底色。</summary>
+    public IBrush FlipCardBackground => Chrome.PanelBackground;
+
+    /// <summary>翻页卡片描边与中缝：跟随主题分隔线色。</summary>
+    public IBrush FlipCardBorder => Chrome.Divider;
+
     public string CurrentDate
     {
         get => _currentDate;
@@ -513,6 +558,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(ProgressTrackBrush));
         OnPropertyChanged(nameof(WeatherBrush));   // 非降水天气的天气块用主题正文色，换主题要跟着变
         OnPropertyChanged(nameof(ReminderTextBrush));   // 文本组件没自定义颜色时也跟着主题正文色
+        OnPropertyChanged(nameof(FlipCardBackground));
+        OnPropertyChanged(nameof(FlipCardBorder));
         RefreshSemanticColors();
     }
 
@@ -1744,6 +1791,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         ClockFontSize = _settings.ClockFontSize;
         CourseInfoFontSize = _settings.CourseInfoFontSize;
         CountFontSize = _settings.CountFontSize;
+        UseFlipClock = _settings.FlipClockEnabled;
 
         // 主题色不在这里 Apply 回设置（那是设置页自己的事），只按当前生效的颜色重算画刷
         RefreshChrome();
@@ -1765,6 +1813,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         ClockFontSize = _settings.ClockFontSize;
         CourseInfoFontSize = _settings.CourseInfoFontSize;
         CountFontSize = _settings.CountFontSize;
+        UseFlipClock = _settings.FlipClockEnabled;
         // 主题：跟随档下 CI 主题可能在别处被改过 → 先按当前生效主题写好颜色，再刷新外观绑定
         ApplyThemePalette();
         RefreshClockFont();
@@ -2097,6 +2146,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         var date = now.ToString("yyyy年M月d日 dddd");
         if (CurrentTime != time) CurrentTime = time;
         if (CurrentDate != date) CurrentDate = date;
+        // HH:mm:ss 定长 8 位：0,1 时；3,4 分；6,7 秒
+        FlipH1 = time[0].ToString();
+        FlipH2 = time[1].ToString();
+        FlipM1 = time[3].ToString();
+        FlipM2 = time[4].ToString();
+        FlipS1 = time[6].ToString();
+        FlipS2 = time[7].ToString();
         UpdateDateSubtitle();
     }
 

@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EveningSelfStudyClock.Views.FlipDigit"
+             FontFamily="{Binding ClockFontFamily, RelativeSource={RelativeSource Self}}">
+
+    <Border x:Name="Card"
+            Background="{Binding CardBackground, RelativeSource={RelativeSource Self}}"
+            BorderBrush="{Binding CardBorder, RelativeSource={RelativeSource Self}}"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="12,6"
+            ClipToBounds="True">
+        <Grid>
+            <!-- 旧数字：变化时向下翻出淡出 -->
+            <TextBlock x:Name="OldText"
+                       Opacity="0"
+                       IsHitTestVisible="False"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontWeight="Bold"/>
+            <!-- 新数字：变化时从上方翻入淡入 -->
+            <TextBlock x:Name="NewText"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontWeight="Bold"/>
+            <!-- 翻页中缝：把卡片视觉上分成上下两半 -->
+            <Border Height="1"
+                    VerticalAlignment="Center"
+                    Background="{Binding DividerBrush, RelativeSource={RelativeSource Self}}"
+                    IsHitTestVisible="False"/>
+        </Grid>
+    </Border>
+</UserControl>
