@@ -68,6 +68,28 @@ BackdropPreloadCache.EndBuild();
 BackdropPreloadCache.Clear();
 Check(cached.Disposed == 1, "cache clears resources exactly once");
 
+var defaultCameraSettings = new PluginSettings();
+var camerasInUse = new[]
+{
+    new CameraActivity("内置摄像头", "device-a", "未知程序"),
+    new CameraActivity("内置摄像头", "device-b", "教室集控"),
+};
+List<AlertInfo> CameraAlerts(PluginSettings settings) => CameraAlertBuilder.Build(
+    settings.MonitoredCameras, camerasInUse, settings.CameraAlertFontSize, settings.CameraListFilled);
+Check(CameraAlerts(defaultCameraSettings).Count == 1,
+    "fresh settings show occupied cameras before the settings page has populated selection");
+defaultCameraSettings.CameraListFilled = true;
+Check(CameraAlerts(defaultCameraSettings).Count == 0, "deselecting every device suppresses camera reminders");
+defaultCameraSettings.MonitoredCameras.Add(new MonitoredCamera("内置摄像头", "DEVICE-B").ToSettingValue());
+Check(CameraAlerts(defaultCameraSettings).Single().Detail?.Contains("教室集控") == true,
+    "camera selection uses the interface path and ignores its casing, even if another camera has the same name");
+defaultCameraSettings.CameraListFilled = false;
+Check(CameraAlerts(defaultCameraSettings).Single().Detail?.Contains("教室集控") == true,
+    "a stored selection still limits alerts before selection initialization");
+defaultCameraSettings.MonitoredCameras.Clear();
+Check(CameraAlertBuilder.Build(defaultCameraSettings.MonitoredCameras, [], selectionInitialized: false).Count == 0,
+    "first-run defaults do not create an alert without an operating-system activity report");
+
 object? Field(object obj,string name) => obj.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(obj);
 // Load the production settings model with the same serializer used by ConfigureFileHelper.
 var legacySettings = JsonSerializer.Deserialize<PluginSettings>("""{"NoisySustainSeconds":1.5}""")!;

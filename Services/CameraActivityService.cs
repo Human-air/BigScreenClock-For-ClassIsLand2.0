@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using EveningSelfStudyClock.Helpers;
 using EveningSelfStudyClock.Models;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -10,9 +11,8 @@ namespace EveningSelfStudyClock.Services;
 /// <summary>
 /// 摄像头占用检测（Media Foundation 传感器活动接口，Windows 10 1703+）。
 ///
-/// 原理：<c>IMFSensorActivityMonitor</c> 把「哪个进程正在用哪个摄像头」的变化实时回调过来
-/// （系统相机、微信/QQ 通话、浏览器网页调用摄像头都算），不用轮询。相机有关的进程与服务
-/// 都集中在 mfsensorgroup.dll，不需要额外驱动或管理员权限。
+/// 使用 <c>IMFSensorActivityMonitor</c> 接收 Media Foundation 的活动回调。
+/// 仅对系统确认正在推流的设备生成占用状态。
 ///
 /// 用法：大屏时钟显示时 <see cref="StartMonitoring"/>，收起时 <see cref="StopMonitoring"/>；
 /// 期间随时读 <see cref="Occupancy"/> 取当前快照。系统不支持（老系统/接口失败）时
@@ -33,6 +33,9 @@ public sealed class CameraActivityService : IDisposable
     private IMFSensorActivityMonitor? _monitor;
     private bool _mfStarted;
     private bool _started;
+    private readonly object _reportGate = new();
+    private object? _reportSession;
+    private (int Devices, long ActivityEntries, int StreamingDevices, int Occupied, int Failures)? _lastReportCounts;
 
     /// <summary>当前占用快照。MF 回调在后台线程整体替换这个引用，读方（UI 线程）拿到的一直是完整快照。</summary>
     private volatile IReadOnlyList<CameraActivity> _occupancy = Empty;
@@ -53,48 +56,81 @@ public sealed class CameraActivityService : IDisposable
     public void StartMonitoring()
     {
         if (_started) return;
+        var windowsBuild = Environment.OSVersion.Version.Build;
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
+        {
+            LastError = "摄像头占用监视需要 Windows 10 1703 或更高版本。";
+            BackgroundDiagnostics.Write("camera-start-error", $"stage=platform build={windowsBuild}");
+            return;
+        }
+
+        var stage = "initialize";
         try
         {
             EnsureMediaFoundation();
-
-            if (_monitor == null)
+            var session = new object();
+            lock (_reportGate)
             {
-                _callback = new ReportCallback(OnActivitiesReport);
-                var hr = PInvoke.MFCreateSensorActivityMonitor(_callback, out var monitor);
-                if (hr.Failed)
-                {
-                    LastError = $"创建摄像头监视器失败（0x{(uint)hr:X8}）";
-                    _callback = null;
-                    return;
-                }
-
-                _monitor = monitor;
+                _reportSession = session;
+                _lastReportCounts = null;
             }
 
+            stage = "create";
+            _callback = new ReportCallback(report => OnActivitiesReport(session, report));
+            var hr = PInvoke.MFCreateSensorActivityMonitor(_callback, out _monitor);
+            if (hr.Failed || _monitor is null)
+            {
+                IsSupported = false;
+                LastError = $"创建摄像头监视器失败（0x{(uint)hr:X8}）";
+                BackgroundDiagnostics.Write("camera-start-error", $"stage={stage} build={windowsBuild} hresult=0x{(uint)hr:X8}");
+                StopMonitoring();
+                return;
+            }
+
+            stage = "start";
             _monitor.Start();
             _started = true;
             IsSupported = true;
             LastError = null;
-            System.Diagnostics.Debug.WriteLine("[摄像头] 开始监控占用状态");
+            BackgroundDiagnostics.Write("camera-start", $"source=MediaFoundation build={windowsBuild}");
         }
         catch (Exception ex)
         {
             IsSupported = false;
-            LastError = $"此系统不支持摄像头占用检测（{ex.GetType().Name}: {ex.Message}）";
-            System.Diagnostics.Debug.WriteLine($"[摄像头] 启动失败：{ex}");
+            LastError = $"摄像头占用监视启动失败（0x{(uint)ex.HResult:X8}）";
+            BackgroundDiagnostics.Write("camera-start-error", $"stage={stage} build={windowsBuild} hresult=0x{(uint)ex.HResult:X8}", ex);
+            StopMonitoring();
         }
     }
 
-    /// <summary>停止监控（收起大屏时钟时调用）。停止后占用快照会清空，避免留下上次的状态。</summary>
+    /// <summary>停止后丢弃本次监视的迟到回调。</summary>
     public void StopMonitoring()
     {
-        if (!_started) return;
-        try { _monitor?.Stop(); }
-        catch { /* 监视器已失效，忽略 */ }
-
+        lock (_reportGate)
+        {
+            _reportSession = null;
+            _occupancy = Empty;
+        }
+        var monitor = _monitor;
+        _monitor = null;
         _started = false;
-        _occupancy = Empty;
-        System.Diagnostics.Debug.WriteLine("[摄像头] 停止监控");
+        try
+        {
+            if (monitor is not null && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
+            {
+                monitor.Stop();
+                BackgroundDiagnostics.Write("camera-stop", "source=MediaFoundation");
+            }
+        }
+        catch (Exception ex)
+        {
+            BackgroundDiagnostics.Write("camera-stop-error", $"hresult=0x{(uint)ex.HResult:X8}", ex);
+        }
+        finally
+        {
+            ReleaseOwnedComObject(monitor);
+            _callback = null;
+        }
     }
 
     /// <summary>
@@ -197,49 +233,58 @@ public sealed class CameraActivityService : IDisposable
     }
 
     /// <summary>MF 活动上报回调（MF 的后台线程调用）：把上报整理解成占用快照。</summary>
-    private void OnActivitiesReport(IMFSensorActivitiesReport report)
+    private void OnActivitiesReport(object session, IMFSensorActivitiesReport report)
     {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063)) return;
+        lock (_reportGate)
+            if (!ReferenceEquals(_reportSession, session)) return;
+
         var list = new List<CameraActivity>();
-        try
-        {
-            report.GetCount(out var deviceCount);
-            for (uint i = 0; i < deviceCount; i++)
-            {
-                report.GetActivityReport(i, out var device);
-                if (device == null) continue;
-
-                var name = ReadString(device.GetFriendlyName).Trim();
-                var link = ReadString(device.GetSymbolicLink).Trim();
-                if (name.Length == 0 && link.Length == 0) continue;
-
-                // 一个设备可能被多个进程用（如相机 App + 后台预览）；优先记「正在推流」的那个
-                string? process = null;
-                device.GetProcessCount(out var processCount);
-                for (uint j = 0; j < processCount; j++)
-                {
-                    device.GetProcessActivity(j, out var activity);
-                    if (activity == null) continue;
-
-                    activity.GetProcessId(out var pid);
-                    var processName = ProcessName(pid);
-                    activity.GetStreamingState(out var streaming);
-                    if (streaming)
-                    {
-                        process = processName;
-                        break;
-                    }
-                    process ??= processName;   // 只打开没推流（暂停预览等）也算占用
-                }
-
-                if (process != null) list.Add(new CameraActivity(name, link, process));
-            }
-        }
+        int failures = 0;
+        uint deviceCount;
+        try { report.GetCount(out deviceCount); }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[摄像头] 处理活动上报失败：{ex.Message}");
+            lock (_reportGate)
+            {
+                if (!ReferenceEquals(_reportSession, session) || _lastReportCounts is { Devices: -1 }) return;
+                _lastReportCounts = (-1, 0, 0, _occupancy.Count, 1);
+                BackgroundDiagnostics.Write("camera-report-error", $"stage=count hresult=0x{(uint)ex.HResult:X8}", ex);
+            }
+            return; // 数据源读取失败不等同于所有摄像头都空闲。
         }
 
-        _occupancy = list;
+        long activityEntries = 0;
+        int streamingDevices = 0;
+        for (uint i = 0; i < deviceCount; i++)
+        {
+            try
+            {
+                report.GetActivityReport(i, out var device);
+                if (device is null) continue;
+                device.GetProcessCount(out var processCount);
+                activityEntries += processCount;
+                var process = FindStreamingProcess(device, processCount, ref failures);
+                if (process is null) continue;
+                streamingDevices++;
+
+                var name = TryReadString(device.GetFriendlyName, ref failures);
+                var link = TryReadString(device.GetSymbolicLink, ref failures);
+                if (name.Length > 0 || link.Length > 0)
+                    list.Add(new CameraActivity(name, link, process));
+            }
+            catch { failures++; } // 单个设备的信息异常不能截断后续设备。
+        }
+
+        lock (_reportGate)
+        {
+            if (!ReferenceEquals(_reportSession, session)) return;
+            _occupancy = list;
+            var counts = ((int)deviceCount, activityEntries, streamingDevices, list.Count, failures);
+            if (_lastReportCounts == counts) return;
+            _lastReportCounts = counts;
+            BackgroundDiagnostics.Write("camera-report", $"devices={deviceCount} activityEntries={activityEntries} streamingDevices={streamingDevices} occupied={list.Count} readFailures={failures}");
+        }
     }
 
     /// <summary>起 MF 平台。传感器接口属于 Media Foundation，没初始化直接返回 0xC00D3E85。</summary>
@@ -248,15 +293,35 @@ public sealed class CameraActivityService : IDisposable
         if (_mfStarted) return;
 
         var hr = PInvoke.MFStartup(MfVersion, MfStartupLite);
-        if (hr.Failed) throw new InvalidOperationException($"MFStartup 失败（0x{(uint)hr:X8}）");
+        if (hr.Failed) Marshal.ThrowExceptionForHR((int)hr);
 
         _mfStarted = true;
     }
 
-    private static string ProcessName(uint pid)
+    [System.Runtime.Versioning.SupportedOSPlatform("windows10.0.15063")]
+    private static string? FindStreamingProcess(IMFSensorActivityReport device, uint processCount, ref int failures)
+    {
+        for (uint i = 0; i < processCount; i++)
+        {
+            try
+            {
+                device.GetProcessActivity(i, out var activity);
+                if (activity is null) continue;
+                activity.GetStreamingState(out var streaming);
+                if (streaming) return ProcessName(activity);
+            }
+            catch { failures++; }
+        }
+
+        return null;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows10.0.15063")]
+    private static string ProcessName(IMFSensorProcessActivity activity)
     {
         try
         {
+            activity.GetProcessId(out var pid);
             using var process = Process.GetProcessById((int)pid);
             return process.ProcessName;
         }
@@ -281,22 +346,33 @@ public sealed class CameraActivityService : IDisposable
 
     private unsafe delegate void StringGetter(PWSTR buffer, uint cch, out uint written);
 
-    /// <summary>MF 的字符串 getter 都是「传缓冲区 + 传出写入长度」，写入长度含结尾 0。</summary>
-    private static unsafe string ReadString(StringGetter getter)
+    // 友好名与设备路径分别读取，长路径或缺一项时仍可使用另一项匹配。
+    private static unsafe string TryReadString(StringGetter getter, ref int failures)
     {
-        const int Size = 256;
+        const int Size = 1024;
         var buffer = stackalloc char[Size];
-        getter(buffer, Size, out var written);
-
-        var length = Math.Min((int)written, Size);
-        if (length <= 0) return "";
-        for (var i = 0; i < length; i++)
+        try
         {
-            if (buffer[i] != '\0') continue;
-            length = i;
-            break;
+            getter(buffer, Size, out var written);
+            if (written > Size)
+            {
+                failures++;
+                return "";
+            }
+            int length = (int)written;
+            for (var i = 0; i < length; i++)
+            {
+                if (buffer[i] != '\0') continue;
+                length = i;
+                break;
+            }
+            return new string(buffer, 0, length).Trim();
         }
-        return new string(buffer, 0, length);
+        catch
+        {
+            failures++;
+            return "";
+        }
     }
 
     [DllImport("mf.dll", ExactSpelling = true, EntryPoint = "MFEnumDeviceSources")]
@@ -309,9 +385,6 @@ public sealed class CameraActivityService : IDisposable
     public void Dispose()
     {
         StopMonitoring();
-
-        _monitor = null;
-        _callback = null;
 
         if (!_mfStarted) return;
         try { PInvoke.MFShutdown(); } catch { }

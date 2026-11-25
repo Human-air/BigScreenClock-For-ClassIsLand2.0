@@ -239,7 +239,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         else if (args.PropertyName is nameof(PluginSettings.ShowAlertsReminder)
             or nameof(PluginSettings.ShowCameraReminder)
             or nameof(PluginSettings.CameraAlertFontSize)
-            or nameof(PluginSettings.MonitoredCameras))
+            or nameof(PluginSettings.MonitoredCameras)
+            or nameof(PluginSettings.CameraListFilled))
         {
             // 预警/摄像头开关或勾选的设备变了 → 立刻重算条目（集合内容变化不会走上面那支）
             if (args.PropertyName is nameof(PluginSettings.ShowCameraReminder))
@@ -1629,6 +1630,8 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
             _countdownEnabled, _countdownSeconds, _extraInfo4ShowSeconds, _nonExactCountdown);
     }
 
+    private (bool Camera, bool Panel, bool Configured, int Selected, int Occupied, int Matched)? _lastCameraAlertState;
+
     /// <summary>
     /// 合成预警列表并显示：天气预警（按「预警」开关过滤）+ 摄像头占用提醒（按「摄像头占用」开关过滤）。
     /// 内容与上次一致就不重建——重建会把正在悬停的条目整链移除、触发 PointerExited/Entered，
@@ -1636,11 +1639,22 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// </summary>
     private void UpdateAlertItems()
     {
-        // 摄像头占用快照由 CameraActivityService 在后台更新，这里取当前快照重算条目
+        // 一次读取同一个占用快照，使筛选结果和诊断记录一致。
+        var occupancy = _cameraService.Occupancy;
         var cameraAlerts = _settings.ShowCameraReminder
-            ? CameraAlertBuilder.Build(_settings.MonitoredCameras, _cameraService.Occupancy,
-                                       _settings.CameraAlertFontSize)
+            ? CameraAlertBuilder.Build(_settings.MonitoredCameras, occupancy,
+                                       _settings.CameraAlertFontSize, _settings.CameraListFilled)
             : new List<AlertInfo>();
+
+        var state = (Camera: _settings.ShowCameraReminder, Panel: _settings.ShowReminderPanel,
+            Configured: _settings.CameraListFilled, Selected: _settings.MonitoredCameras.Count,
+            Occupied: occupancy.Count, Matched: cameraAlerts.Count);
+        if (_lastCameraAlertState != state)
+        {
+            _lastCameraAlertState = state;
+            BackgroundDiagnostics.Write("camera-alert-filter",
+                $"cameraEnabled={state.Camera} panelEnabled={state.Panel} selectionInitialized={state.Configured} selected={state.Selected} occupied={state.Occupied} matched={state.Matched}");
+        }
 
         var merged = new List<AlertInfo>();
         if (_settings.ShowAlertsReminder) merged.AddRange(_weatherAlerts);

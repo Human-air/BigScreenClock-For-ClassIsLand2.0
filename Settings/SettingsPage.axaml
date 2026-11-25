@@ -185,7 +185,7 @@
 
                         <!-- 摄像头占用子项：勾选「摄像头占用」后出现 -->
                         <StackPanel Spacing="6" Margin="0,4,0,0" IsVisible="{Binding ShowCameraReminder}">
-                            <TextBlock Text="勾选要提醒的摄像头，不勾选的不提醒。" FontSize="12"
+                            <TextBlock Text="首次使用默认提醒所有摄像头。在这里取消设备勾选可关闭对应的提醒。" FontSize="12"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
                             <ItemsControl ItemsSource="{Binding CameraDevices}">
                                 <ItemsControl.ItemTemplate>

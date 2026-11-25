@@ -1278,15 +1278,15 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         CameraDevices.Clear();
         if (devices.Count == 0)
         {
-            CameraHint = "没有找到摄像头设备（外接摄像头插上后点「刷新设备列表」）。";
+            CameraHint = CameraService?.LastError ?? "没有找到摄像头设备（外接摄像头插上后点「刷新设备列表」）。";
             return;
         }
 
         if (!_settings.CameraListFilled)
         {
-            _settings.MonitoredCameras.Clear();
-            foreach (var d in devices)
-                _settings.MonitoredCameras.Add(new MonitoredCamera(d.Name, d.SymbolicLink).ToSettingValue());
+            if (_settings.MonitoredCameras.Count == 0)
+                foreach (var d in devices)
+                    _settings.MonitoredCameras.Add(new MonitoredCamera(d.Name, d.SymbolicLink).ToSettingValue());
             _settings.CameraListFilled = true;
             Plugin.SaveSettings();
         }

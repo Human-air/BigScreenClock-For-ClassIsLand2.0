@@ -793,7 +793,7 @@ public class PluginSettings : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 要提醒的摄像头设备名（设置页里勾的，见 <see cref="CameraAlertBuilder"/>）。空 = 不提醒。
+    /// 要提醒的摄像头（见 <see cref="CameraAlertBuilder"/>）。设置已初始化后，空列表表示全部取消。
     /// </summary>
     public ObservableCollection<string> MonitoredCameras
     {

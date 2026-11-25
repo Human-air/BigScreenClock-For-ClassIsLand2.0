@@ -18,7 +18,8 @@ public static class CameraAlertBuilder
     /// <summary>
     /// 按「设置里勾选的设备」+「当前占用状态」拼提醒，一个被占用的设备一条。
     /// </summary>
-    /// <param name="monitoredDevices">设置里勾选的设备（<see cref="MonitoredCamera.ToSettingValue"/> 存的那种行）。空 = 不提醒。</param>
+    /// <param name="monitoredDevices">设置里勾选的设备（<see cref="MonitoredCamera.ToSettingValue"/> 存的那种行）。初始化后空名单表示已取消全部勾选。</param>
+    /// <param name="selectionInitialized">尚未配置且名单为空时，首次运行默认提醒所有已上报的摄像头。</param>
     /// <param name="occupancy">当前占用快照。</param>
     /// <param name="titleFontSize">面板上这一条的字号（设置里可调）。</param>
     /// <remarks>
@@ -27,7 +28,7 @@ public static class CameraAlertBuilder
     /// 把正在看的详情弹幕打断）；同名设备只出一条，免得同一个名字在面板上叠两行。
     /// </remarks>
     public static List<AlertInfo> Build(IEnumerable<string> monitoredDevices, IReadOnlyList<CameraActivity> occupancy,
-                                        double titleFontSize = AlertInfo.DefaultFontSize)
+                                        double titleFontSize = AlertInfo.DefaultFontSize, bool selectionInitialized = true)
     {
         var result = new List<AlertInfo>();
         var wanted = monitoredDevices
@@ -35,12 +36,13 @@ public static class CameraAlertBuilder
             .Where(m => m.Name.Length > 0 || m.SymbolicLink.Length > 0)
             .ToList();
 
-        if (wanted.Count == 0 || occupancy.Count == 0) return result;
+        var useDefaultSelection = !selectionInitialized && wanted.Count == 0;
+        if ((!useDefaultSelection && wanted.Count == 0) || occupancy.Count == 0) return result;
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var activity in occupancy.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase))
         {
-            if (!wanted.Any(m => m.Matches(activity.Name, activity.SymbolicLink))) continue;
+            if (!useDefaultSelection && !wanted.Any(m => m.Matches(activity.Name, activity.SymbolicLink))) continue;
 
             var device = activity.Name.Length > 0 ? activity.Name : activity.SymbolicLink;
             if (device.Length == 0 || !seen.Add(device)) continue;
