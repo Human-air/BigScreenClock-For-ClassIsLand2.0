@@ -21,6 +21,11 @@
         <AvaloniaXaml Remove="tests/**/*.axaml" />
     </ItemGroup>
 
+    <!-- 翻页时钟用的七段数码管字体（DSEG7 Classic，SIL OFL 1.1，许可证见 Assets/Fonts/DSEG-LICENSE.txt） -->
+    <ItemGroup>
+        <AvaloniaResource Include="Assets/Fonts/DSEG7Classic-Bold.ttf" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="ClassIsland.PluginSdk" Version="$(ClassIslandPluginSdkVersion)">
             <ExcludeAssets>runtime; native</ExcludeAssets>

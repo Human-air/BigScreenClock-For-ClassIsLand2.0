@@ -444,25 +444,41 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>是否使用经典单行文字时钟（翻页时钟的反面，供 XAML 切换两套布局）。</summary>
     public bool UseClassicClock => !_useFlipClock;
 
-    public string FlipH1 { get => _flipH1; private set => SetFlipDigit(ref _flipH1, value); }
-    public string FlipH2 { get => _flipH2; private set => SetFlipDigit(ref _flipH2, value); }
-    public string FlipM1 { get => _flipM1; private set => SetFlipDigit(ref _flipM1, value); }
-    public string FlipM2 { get => _flipM2; private set => SetFlipDigit(ref _flipM2, value); }
-    public string FlipS1 { get => _flipS1; private set => SetFlipDigit(ref _flipS1, value); }
-    public string FlipS2 { get => _flipS2; private set => SetFlipDigit(ref _flipS2, value); }
+    public string FlipH1 { get => _flipH1; private set => SetFlipDigit(ref _flipH1, value, nameof(FlipH1)); }
+    public string FlipH2 { get => _flipH2; private set => SetFlipDigit(ref _flipH2, value, nameof(FlipH2)); }
+    public string FlipM1 { get => _flipM1; private set => SetFlipDigit(ref _flipM1, value, nameof(FlipM1)); }
+    public string FlipM2 { get => _flipM2; private set => SetFlipDigit(ref _flipM2, value, nameof(FlipM2)); }
+    public string FlipS1 { get => _flipS1; private set => SetFlipDigit(ref _flipS1, value, nameof(FlipS1)); }
+    public string FlipS2 { get => _flipS2; private set => SetFlipDigit(ref _flipS2, value, nameof(FlipS2)); }
 
-    private void SetFlipDigit(ref string field, string value)
+    private void SetFlipDigit(ref string field, string value, string propertyName)
     {
         if (field == value) return;
         field = value;
-        OnPropertyChanged();
+        OnPropertyChanged(propertyName);
     }
 
-    /// <summary>翻页卡片底色：跟随主题面板底色。</summary>
-    public IBrush FlipCardBackground => Chrome.PanelBackground;
+    /// <summary>翻页卡片底色：深色主题在黑底上叠一层微亮白、浅色主题叠一层微亮黑，保证卡片轮廓能从背景里分出来。</summary>
+    public IBrush FlipCardBackground => OverlayBrush(Chrome.IsLight ? (byte)0x14 : (byte)0x17);
 
-    /// <summary>翻页卡片描边与中缝：跟随主题分隔线色。</summary>
-    public IBrush FlipCardBorder => Chrome.Divider;
+    /// <summary>翻页卡片描边：比底色更实一档的同色系叠加色，1.5px 边在深/浅背景上都看得清。</summary>
+    public IBrush FlipCardBorder => OverlayBrush(Chrome.IsLight ? (byte)0x47 : (byte)0x61);
+
+    /// <summary>翻页卡片中缝：比描边更淡，只作上下两半的分界。</summary>
+    public IBrush FlipDividerBrush => OverlayBrush(Chrome.IsLight ? (byte)0x26 : (byte)0x38);
+
+    /// <summary>后层牌板底色：常驻当前数字，比外层卡片再抬一档，翻牌移开后露出这一块。</summary>
+    public IBrush FlipPlateBackground => OverlayBrush(Chrome.IsLight ? (byte)0x1C : (byte)0x24);
+
+    /// <summary>上层翻动牌底色：静止时与后牌同色，翻页过程中靠压扁和投影表现翻动层次。</summary>
+    public IBrush FlipFlapBackground => FlipPlateBackground;
+
+    /// <summary>按当前主题明暗取叠加色：深底叠白、浅底叠黑，再套一层透明度。</summary>
+    private IBrush OverlayBrush(byte alpha)
+    {
+        var baseColor = Chrome.IsLight ? Color.Parse("#000000") : Color.Parse("#FFFFFF");
+        return new SolidColorBrush(Color.FromArgb(alpha, baseColor.R, baseColor.G, baseColor.B));
+    }
 
     public string CurrentDate
     {
@@ -505,6 +521,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
     /// <summary>数字用表格宽度（tnum）：秒数跳动时整行不左右抖。</summary>
     public FontFeatureCollection ClockFontFeatures { get; } =
         new FontFeatureCollection { FontFeature.Parse("tnum") };
+
+    /// <summary>
+    /// 翻页数字专用：内嵌的七段数码管字体（DSEG7 Classic，OFL 1.1）。
+    /// 经典单行时钟仍跟随 CI 主界面字体，不受这里影响。
+    /// </summary>
+    public FontFamily FlipFontFamily { get; } = FontFamily.Parse(
+        "avares://EveningSelfStudyClock/Assets/Fonts/DSEG7Classic-Bold.ttf#DSEG7 Classic");
 
     /// <summary>读不到 CI 字体设置时的回退（原来的窗口字体）。</summary>
     private const string DefaultClockFont = "Microsoft YaHei UI, SimHei, sans-serif";
@@ -560,6 +583,9 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(ReminderTextBrush));   // 文本组件没自定义颜色时也跟着主题正文色
         OnPropertyChanged(nameof(FlipCardBackground));
         OnPropertyChanged(nameof(FlipCardBorder));
+        OnPropertyChanged(nameof(FlipDividerBrush));
+        OnPropertyChanged(nameof(FlipPlateBackground));
+        OnPropertyChanged(nameof(FlipFlapBackground));
         RefreshSemanticColors();
     }
 

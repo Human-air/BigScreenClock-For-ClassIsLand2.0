@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
@@ -9,8 +10,8 @@ using Avalonia.Styling;
 namespace EveningSelfStudyClock.Views;
 
 /// <summary>
-/// 翻页时钟里的一位数字卡片：圆角卡片 + 中缝，数字变化时旧数字向下翻出、新数字从上方翻入。
-/// 样式（字号 / 颜色 / 字体 / 卡片底色描边）全部从外层时钟绑定过来，本身不持有配色。
+/// 翻页时钟里的一位数字卡片：后层常驻旧数字，上层新牌绕顶边从上往下展开盖入。
+/// 字号 / 颜色 / 字体 / 牌面底色全部从外层时钟绑定过来，本身不持有配色。
 /// </summary>
 public partial class FlipDigit : UserControl
 {
@@ -26,21 +27,34 @@ public partial class FlipDigit : UserControl
     public static readonly StyledProperty<IBrush?> DividerBrushProperty =
         AvaloniaProperty.Register<FlipDigit, IBrush?>(nameof(DividerBrush));
 
+    public static readonly StyledProperty<IBrush?> PlateBackgroundProperty =
+        AvaloniaProperty.Register<FlipDigit, IBrush?>(nameof(PlateBackground));
+
+    public static readonly StyledProperty<IBrush?> FlapBackgroundProperty =
+        AvaloniaProperty.Register<FlipDigit, IBrush?>(nameof(FlapBackground));
+
     public static readonly StyledProperty<FontFamily?> ClockFontFamilyProperty =
         AvaloniaProperty.Register<FlipDigit, FontFamily?>(nameof(ClockFontFamily));
 
     /// <summary>翻牌动画时长（毫秒）。大屏每秒跳一次，动画不能拖到下一秒。</summary>
-    private static readonly TimeSpan FlipDuration = TimeSpan.FromMilliseconds(280);
+    private static readonly TimeSpan FlipDuration = TimeSpan.FromMilliseconds(300);
 
     private bool _contentLoaded;
+
+    /// <summary>
+    /// 翻牌动画代际序号。数字连续跳变时上一轮异步动画的延迟回调可能晚于新一轮执行，
+    /// 这里每次新值自增；旧代际的回调一律不回写可见状态，避免把数字覆盖成旧值。
+    /// </summary>
+    private int _flipGeneration;
 
     public FlipDigit()
     {
         InitializeComponent();
 
-        OldText.RenderTransform = new TranslateTransform();
-        NewText.RenderTransform = new TranslateTransform();
+        FlapPlate.RenderTransform = new ScaleTransform(1, 1);
         _contentLoaded = true;
+        BackText.Text = Digit;
+        FlapText.Text = Digit;
         SyncTextStyle();
     }
 
@@ -69,6 +83,18 @@ public partial class FlipDigit : UserControl
         set => SetValue(DividerBrushProperty, value);
     }
 
+    public IBrush? PlateBackground
+    {
+        get => GetValue(PlateBackgroundProperty);
+        set => SetValue(PlateBackgroundProperty, value);
+    }
+
+    public IBrush? FlapBackground
+    {
+        get => GetValue(FlapBackgroundProperty);
+        set => SetValue(FlapBackgroundProperty, value);
+    }
+
     public FontFamily? ClockFontFamily
     {
         get => GetValue(ClockFontFamilyProperty);
@@ -79,8 +105,7 @@ public partial class FlipDigit : UserControl
     {
         base.OnPropertyChanged(change);
 
-        // 外层绑定过来的字号 / 颜色 / 字体 / 等宽特性变了，显式同步到两个数字文本框；
-        // 不走 XAML 继承，避免 UserControl 边界上继承链路不稳定把字号塌成默认值。
+        // 外层绑定过来的字号 / 颜色 / 字体 / 等宽特性变了，显式同步到两块数字文本框。
         if (change.Property == FontSizeProperty ||
             change.Property == ForegroundProperty ||
             change.Property == ClockFontFamilyProperty ||
@@ -89,81 +114,72 @@ public partial class FlipDigit : UserControl
             SyncTextStyle();
         }
 
-        if (change.Property != DigitProperty || !_contentLoaded) return;
+        if (change.Property == DigitProperty)
+        {
+            var oldDigit = change.OldValue as string ?? "";
+            var newDigit = change.NewValue as string ?? "";
 
-        var oldDigit = change.OldValue as string ?? "";
-        var newDigit = change.NewValue as string ?? "";
-        PlayFlip(oldDigit, newDigit);
+            if (!_contentLoaded || !IsLoaded || oldDigit == newDigit)
+            {
+                BackText.Text = newDigit;
+                FlapText.Text = newDigit;
+                ResetFlap();
+                return;
+            }
+
+            var generation = ++_flipGeneration;
+            _ = PlayFlipAsync(generation, oldDigit, newDigit);
+        }
     }
 
-    /// <summary>把外层传入的字号 / 颜色 / 字体 / 等宽特性同步到旧、新两个数字文本框。</summary>
+    /// <summary>把上层翻入牌复位到展开、盖在后牌上的静止状态。</summary>
+    private void ResetFlap()
+    {
+        if (FlapPlate.RenderTransform is ScaleTransform scale)
+        {
+            scale.ScaleY = 1;
+        }
+        FlapPlate.Opacity = 1;
+    }
+
+    /// <summary>把外层传入的字号 / 颜色 / 字体 / 等宽特性同步到两块数字文本框。</summary>
     private void SyncTextStyle()
     {
         if (!_contentLoaded) return;
 
         var family = ClockFontFamily ?? FontFamily;
-        foreach (var tb in new[] { OldText, NewText })
+        foreach (var tb in new[] { BackText, FlapText })
         {
             tb.FontSize = FontSize;
             tb.Foreground = Foreground;
             tb.FontFamily = family;
             tb.FontFeatures = FontFeatures;
         }
+
+        // 卡片高度按字号显式给定：Viewbox 做无限高度测量时期望尺寸必须有限，
+        // 否则内部星号行会把高度喂到饱和值，整牌被等比缩成一条看不见的线。
+        double cardH = FontSize > 0 ? FontSize * 1.25 : double.NaN;
+        Height = cardH;
     }
 
     /// <summary>
-    /// 播一次翻牌：旧数字向下翻出并淡出，新数字从上方翻入并淡入。
-    /// 还没挂上可视树（设置页预览初次绑定）时不播动画，直接落新值。
+    /// 播一次翻入：后层留旧数字，上层新牌绕顶边从上往下展开盖满，结束后后层换成新值、藏起上层。
+    /// 代际过期或控件卸载就不再回写界面。
     /// </summary>
-    private void PlayFlip(string oldDigit, string newDigit)
+    private async Task PlayFlipAsync(int generation, string oldDigit, string newDigit)
     {
-        if (oldDigit == newDigit)
+        BackText.Text = oldDigit;
+        FlapText.Text = newDigit;
+
+        if (FlapPlate.RenderTransform is not ScaleTransform scale)
         {
-            NewText.Text = newDigit;
-            return;
+            scale = new ScaleTransform(1, 1);
+            FlapPlate.RenderTransform = scale;
         }
+        scale.ScaleY = 0;
+        FlapPlate.Opacity = 1;
 
-        if (!IsLoaded)
-        {
-            OldText.Text = "";
-            NewText.Text = newDigit;
-            return;
-        }
-
-        OldText.Text = oldDigit;
-        NewText.Text = newDigit;
-
-        var travel = FontSize * 0.18;
-
-        var oldOut = new Animation
-        {
-            Duration = FlipDuration,
-            Easing = new CubicEaseIn(),
-            FillMode = FillMode.Forward,
-            Children =
-            {
-                new KeyFrame
-                {
-                    Cue = new Cue(0d),
-                    Setters =
-                    {
-                        new Setter(OpacityProperty, 1.0),
-                        new Setter(TranslateTransform.YProperty, 0.0)
-                    }
-                },
-                new KeyFrame
-                {
-                    Cue = new Cue(1d),
-                    Setters =
-                    {
-                        new Setter(OpacityProperty, 0.0),
-                        new Setter(TranslateTransform.YProperty, travel)
-                    }
-                }
-            }
-        };
-
-        var newIn = new Animation
+        var flap = new Animation
         {
             Duration = FlipDuration,
             Easing = new CubicEaseOut(),
@@ -175,8 +191,8 @@ public partial class FlipDigit : UserControl
                     Cue = new Cue(0d),
                     Setters =
                     {
-                        new Setter(OpacityProperty, 0.0),
-                        new Setter(TranslateTransform.YProperty, -travel)
+                        new Setter(ScaleTransform.ScaleYProperty, 0.0),
+                        new Setter(OpacityProperty, 1.0)
                     }
                 },
                 new KeyFrame
@@ -184,14 +200,24 @@ public partial class FlipDigit : UserControl
                     Cue = new Cue(1d),
                     Setters =
                     {
-                        new Setter(OpacityProperty, 1.0),
-                        new Setter(TranslateTransform.YProperty, 0.0)
+                        new Setter(ScaleTransform.ScaleYProperty, 1.0),
+                        new Setter(OpacityProperty, 1.0)
                     }
                 }
             }
         };
 
-        _ = oldOut.RunAsync(OldText);
-        _ = newIn.RunAsync(NewText);
+        var run = flap.RunAsync(FlapPlate);
+        await run;
+        if (!IsLoaded || generation != _flipGeneration) return;
+
+        // 展开盖满后：后层落新值，上层藏起归位，不留残片盖在后牌上。
+        BackText.Text = newDigit;
+        FlapPlate.Opacity = 0;
+        FlapText.Text = newDigit;
+        if (FlapPlate.RenderTransform is ScaleTransform doneScale)
+        {
+            doneScale.ScaleY = 1;
+        }
     }
 }
