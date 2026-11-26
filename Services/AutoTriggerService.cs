@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Services;
 using ClassIsland.Shared.Enums;
 using EveningSelfStudyClock.Models;
@@ -12,7 +13,7 @@ namespace EveningSelfStudyClock.Services;
 ///
 /// 触发逻辑：
 /// - OnClass 事件 + 当前课程匹配目标 → 显示时钟（幂等）
-/// - OnClass 事件 + 当前不匹配 + 时钟正在显示 → 隐藏时钟
+/// - OnClass 事件 + 当前不匹配 → 只隐藏由触发课程打开的时钟
 /// - AfterSchool → 隐藏时钟
 /// - Breaking 课间不做操作（连堂自然保持显示）
 /// - 窗口被手动关闭后，下一节目标课程 OnClass 会自动重新打开（天然幂等）
@@ -71,7 +72,7 @@ public class AutoTriggerService : BackgroundService
         try
         {
             // 初始检查也在 finally 保护范围内，失败时仍会摘掉课程服务订阅。
-            DoCheck();
+            await Dispatcher.UIThread.InvokeAsync(DoCheck, DispatcherPriority.Normal, stoppingToken);
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (OperationCanceledException)
@@ -89,7 +90,8 @@ public class AutoTriggerService : BackgroundService
 
     private void OnClassOrStateChanged(object? sender, EventArgs e)
     {
-        DoCheck();
+        if (Dispatcher.UIThread.CheckAccess()) DoCheck();
+        else Dispatcher.UIThread.Post(DoCheck);
     }
 
     private void OnAfterSchool(object? sender, EventArgs e)
@@ -109,7 +111,7 @@ public class AutoTriggerService : BackgroundService
         var currentState = _lessonsService.CurrentState;
         string? subjectName = _lessonsService.CurrentSubject?.Name;
 
-        // 状态和课程都没变就什么都不做：窗口是用户手动打开的，不能每秒都被这里重新判一遍关掉。
+        // 同一课程内的心跳不重复执行开关窗口操作。
         if (_hasSnapshot && currentState == _lastState && subjectName == _lastSubject) return;
         _hasSnapshot = true;
         _lastState = currentState;
@@ -118,15 +120,9 @@ public class AutoTriggerService : BackgroundService
         if (currentState != TimeState.OnClass) return;
 
         if (_settings.IsTargetCourse(subjectName))
-        {
-            // 进入目标课程 → 显示时钟（Show 幂等，已显示时无操作）
-            _viewModel.Show();
-        }
-        else if (_viewModel.IsWindowVisible)
-        {
-            // 进入非目标课程且时钟开着 → 关闭
-            _viewModel.Hide();
-        }
+            _viewModel.ShowForTargetCourse();
+        else
+            _viewModel.HideForNonTargetCourse();
     }
 
     /// <summary>

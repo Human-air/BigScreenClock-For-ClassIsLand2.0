@@ -432,10 +432,17 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         set { _currentCourseName = value; OnPropertyChanged(); }
     }
 
+    private bool _openedForTargetCourse;
+
     public bool IsWindowVisible
     {
         get => _isWindowVisible;
-        private set { _isWindowVisible = value; OnPropertyChanged(); }
+        private set
+        {
+            _isWindowVisible = value;
+            if (!value) _openedForTargetCourse = false;
+            OnPropertyChanged();
+        }
     }
 
     // 这 6 个颜色就是设置里那套值：主题档只决定「切主题时把哪一套默认色写进来」，不在这里改算。
@@ -1766,13 +1773,20 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         RefreshRemindersNow();
     }
 
-    public void Show()
+    public void Show() => ShowCore(forTargetCourse: false);
+
+    internal void ShowForTargetCourse() => ShowCore(forTargetCourse: true);
+
+    private void ShowCore(bool forTargetCourse)
     {
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            Dispatcher.UIThread.Post(Show);
+            Dispatcher.UIThread.Post(() => ShowCore(forTargetCourse));
             return;
         }
+        // 用户主动打开时接管显示。之后进入触发课程也保留这个选择。
+        if (!forTargetCourse) _openedForTargetCourse = false;
+
         // 必须在创建窗口前同步，否则绑定读到的是旧值
         ShowDecibelMeter = _settings.ShowDecibelMeter;
         ShowCourseInfo = _settings.ShowCourseInfo;
@@ -1855,6 +1869,7 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
 
         _window.WindowState = WindowState.FullScreen;
         _window.Show();
+        _openedForTargetCourse = forTargetCourse;
         IsWindowVisible = true;
         SetMainWindowVisible(false);
         BeginFeishuSession();   // 进入大屏时钟：发「进入」通知
@@ -2024,6 +2039,13 @@ public class FullScreenClockViewModel : INotifyPropertyChanged
         _window.WindowState = WindowState.FullScreen;
         // 从任务栏点回也算「回到大屏」：最小化时拉出来的 CI 主界面同样要收回去
         SetMainWindowVisible(false);
+    }
+
+    internal void HideForNonTargetCourse()
+    {
+        if (!IsWindowVisible || !_openedForTargetCourse) return;
+        BackgroundDiagnostics.Write("auto-trigger", "action=hide reason=non-target-course");
+        Hide();
     }
 
     public void Hide()
