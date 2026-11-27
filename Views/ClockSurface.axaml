@@ -119,13 +119,91 @@
                      全屏时就是自然大小，一个像素都不缩。 -->
                 <Viewbox x:Name="ClockBox" HorizontalAlignment="Center" VerticalAlignment="Top"
                          Stretch="Uniform" StretchDirection="DownOnly">
-                    <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
-                               FontSize="{Binding ClockFontSize}"
-                               FontWeight="Bold"
-                               Foreground="{Binding FontColor}"
-                               FontFamily="{Binding ClockFontFamily}"
-                               FontFeatures="{Binding ClockFontFeatures}"
-                               HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Top" Spacing="12">
+                        <!-- 经典单行文字时钟（关闭翻页时钟时显示） -->
+                        <TextBlock x:Name="ClockText" Text="{Binding CurrentTime}"
+                                   FontSize="{Binding ClockFontSize}"
+                                   FontWeight="Bold"
+                                   Foreground="{Binding FontColor}"
+                                   FontFamily="{Binding ClockFontFamily}"
+                                   FontFeatures="{Binding ClockFontFeatures}"
+                                   IsVisible="{Binding UseClassicClock}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                        <!-- 翻页时钟：六位数字卡片 + 冒号 -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"
+                                    IsVisible="{Binding UseFlipClock}">
+                            <views:FlipDigit Digit="{Binding FlipH1}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                            <views:FlipDigit Digit="{Binding FlipH2}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                            <TextBlock Text=":" FontSize="{Binding ClockFontSize}" FontWeight="Bold"
+                                       Foreground="{Binding FontColor}"
+                                       FontFamily="{Binding FlipFontFamily}"
+                                       FontFeatures="{Binding ClockFontFeatures}"
+                                       Margin="6,0" VerticalAlignment="Center"/>
+                            <views:FlipDigit Digit="{Binding FlipM1}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                            <views:FlipDigit Digit="{Binding FlipM2}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                            <TextBlock Text=":" FontSize="{Binding ClockFontSize}" FontWeight="Bold"
+                                       Foreground="{Binding FontColor}"
+                                       FontFamily="{Binding FlipFontFamily}"
+                                       FontFeatures="{Binding ClockFontFeatures}"
+                                       Margin="6,0" VerticalAlignment="Center"/>
+                            <views:FlipDigit Digit="{Binding FlipS1}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                            <views:FlipDigit Digit="{Binding FlipS2}"
+                                              FontSize="{Binding ClockFontSize}"
+                                              Foreground="{Binding FontColor}"
+                                              CardBackground="{Binding FlipCardBackground}"
+                                              CardBorder="{Binding FlipCardBorder}"
+                                              DividerBrush="{Binding FlipDividerBrush}"
+                                              PlateBackground="{Binding FlipPlateBackground}"
+                                              FlapBackground="{Binding FlipFlapBackground}"
+                                              ClockFontFamily="{Binding FlipFontFamily}"
+                                              FontFeatures="{Binding ClockFontFeatures}"/>
+                        </StackPanel>
+                    </StackPanel>
                 </Viewbox>
 
                 <!-- 教室音量：无背景「横向轨道 + 分段刻度」仪表盘式条（宽度跟随时间字体） -->

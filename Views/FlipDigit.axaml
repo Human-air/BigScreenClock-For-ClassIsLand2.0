@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="EveningSelfStudyClock.Views.FlipDigit"
+             x:Name="Root"
+             FontFamily="{Binding ClockFontFamily, ElementName=Root}">
+
+    <Border x:Name="Card"
+            Background="{Binding CardBackground, ElementName=Root}"
+            BorderBrush="{Binding CardBorder, ElementName=Root}"
+            BorderThickness="1.5"
+            CornerRadius="14"
+            Padding="12,6"
+            ClipToBounds="True">
+        <Grid>
+            <!-- 后层常驻牌：翻页时先留旧数字，上层新牌展开盖满后再换成新值。 -->
+            <Border x:Name="BackPlate"
+                    Background="{Binding PlateBackground, ElementName=Root}"
+                    CornerRadius="10"
+                    ClipToBounds="True">
+                <TextBlock x:Name="BackText"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           FontWeight="Bold"/>
+            </Border>
+            <!-- 上层翻入牌：新数字绕顶边从上往下展开，盖在后层旧牌上。 -->
+            <Border x:Name="FlapPlate"
+                    Background="{Binding FlapBackground, ElementName=Root}"
+                    CornerRadius="10"
+                    ClipToBounds="True"
+                    BoxShadow="0 4 12 0 #33000000"
+                    RenderTransformOrigin="0.5,0">
+                <TextBlock x:Name="FlapText"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           FontWeight="Bold"/>
+            </Border>
+            <!-- 装饰中缝：保留实体翻页钟的上下半分界观感。 -->
+            <Border VerticalAlignment="Center"
+                    Height="1"
+                    Background="{Binding DividerBrush, ElementName=Root}"
+                    IsHitTestVisible="False"/>
+        </Grid>
+    </Border>
+</UserControl>

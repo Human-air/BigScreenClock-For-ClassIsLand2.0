@@ -676,6 +676,13 @@
                         <TextBlock x:Name="DiagnosticsExportStatus" FontSize="12" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
+                    <CheckBox IsChecked="{Binding FlipClockEnabled}" FontSize="14"
+                              ToolTip.Tip="每位数字一张带中缝的卡片，变化时翻牌过渡；关闭后回到单行纯文字时钟">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <TextBlock Classes="icon" Text="{ci:LI Clock}" FontSize="13"/>
+                            <TextBlock Text="翻页时钟" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="时钟字号" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>

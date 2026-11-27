@@ -1650,6 +1650,12 @@ public partial class SettingsPage : SettingsPageBase, INotifyPropertyChanged
         catch { }
     }
 
+    public bool FlipClockEnabled
+    {
+        get => _settings.FlipClockEnabled;
+        set { _settings.FlipClockEnabled = value; OnPropertyChanged(nameof(FlipClockEnabled)); }
+    }
+
     public bool ShowDecibelMeter
     {
         get => _settings.ShowDecibelMeter;

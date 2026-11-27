@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless" Version="11.3.17" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.17" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\EveningSelfStudyClock.csproj" />
+  </ItemGroup>
+</Project>

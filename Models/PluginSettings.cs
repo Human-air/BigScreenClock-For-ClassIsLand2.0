@@ -42,6 +42,7 @@ public class PluginSettings : INotifyPropertyChanged
     private int _logKeepMinutes = 10;
     private int _logKeepMinKb = 100;
     private int _clockFontSize = 180;
+    private bool _flipClockEnabled = true;          // 翻页时钟：每位数字一张卡片，变化时翻牌
     private double _clockPositionPercent = 30;      // 时钟中心在主体区高度的 30% 处
     private double _volumePositionPercent = 80;     // 音量条中心在主体区高度的 80% 处
     private int _displayRegion;
@@ -613,6 +614,16 @@ public class PluginSettings : INotifyPropertyChanged
     {
         get => _clockFontSize;
         set { _clockFontSize = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// 翻页时钟：每位数字一张带中缝的圆角卡片，数字变化时翻牌过渡；
+    /// 关闭后回到原来的单行纯文字时钟。
+    /// </summary>
+    public bool FlipClockEnabled
+    {
+        get => _flipClockEnabled;
+        set { _flipClockEnabled = value; OnPropertyChanged(); }
     }
 
     /// <summary>
